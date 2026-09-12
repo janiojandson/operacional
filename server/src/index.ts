@@ -1,5 +1,7 @@
 import express from 'express';
 import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -15,10 +17,18 @@ import { ClientAccountConfig } from '../../shared/clientTypes';
 
 dotenv.config();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const rootDir = path.resolve(__dirname, '../../');
+
 const PORT = process.env.PORT || 4000;
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Servir frontend compilado estaticamente em produção
+const distPath = path.join(rootDir, 'web/dist');
+app.use(express.static(distPath));
 
 const server = http.createServer(app);
 const io = new SocketIOServer(server, {
@@ -43,7 +53,6 @@ const paperTrading = new PaperTradingEngine((account, tradeEvent) => {
   io.emit('paper_account_update', account);
   if (tradeEvent) {
     io.emit('simulated_trade_event', tradeEvent);
-    // Replicar para clientes com proteções de risco
     const pairConfig = AutoPairSelectorEngine.getPairConfig(tradeEvent.symbol);
     const power = pairConfig?.powerMultiplier || 1.0;
     clientCopyTrader.replicateTrade(tradeEvent, power);
@@ -54,7 +63,6 @@ const paperTrading = new PaperTradingEngine((account, tradeEvent) => {
 // Flow Engine
 const flowEngine = new FlowEngine((signal: FlowSignal) => {
   io.emit('flow_signal', signal);
-  // Trigger simulated entry on qualified flow signal
   const asset = marketManager.getSymbolState(signal.symbol);
   if (asset) {
     paperTrading.handleSignal(signal, asset.lastPrice);
@@ -139,7 +147,6 @@ app.post('/api/ai-advisor/audit', async (req, res) => {
   const pairStats = PairPerformanceTracker.calculate(account.history, summaries);
   const recentSignals = flowEngine.getRecentSignals();
 
-  // Se for Nexus Cérebro e configurado, suporta timeout estendido de até 45s
   const auditReport = AIAdvisorEngine.generateAudit(
     account,
     pairStats,
@@ -181,6 +188,14 @@ app.get('/api/assets/:symbol/state', (req, res) => {
 
 app.get('/api/signals', (req, res) => {
   res.json(flowEngine.getRecentSignals());
+});
+
+// Fallback SPA route para servir o React
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
+    return res.status(404).json({ error: 'Endpoint não encontrado' });
+  }
+  res.sendFile(path.join(distPath, 'index.html'));
 });
 
 // WebSocket Connection Handling
