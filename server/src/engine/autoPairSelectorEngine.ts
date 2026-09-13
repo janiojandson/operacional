@@ -3,12 +3,22 @@ import { PairPerformance } from './pairPerformanceTracker';
 
 export type RegimeType = 'HIGH_TREND' | 'CHOPPY_RANGING' | 'LOW_LIQUIDITY' | 'EXPANSION_FLOW';
 
+export type TemperatureLevel = 
+  | 'COLD_DEFENSE'       // 0.0x / 0.5x (Defesa)
+  | 'NORMAL'             // 1.0x (Padrão)
+  | 'HOT_MAX_EXTRACT'    // 2.0x (Extração Máxima)
+  | 'SUPERNOVA_POWER'    // 3.0x (Extração Power)
+  | 'GALACTIC_SURGE'     // 4.0x (Extração Galáctica)
+  | 'DIVINE_CONFLUENCE'; // 5.0x (Extração Suprema / Deus)
+
 export interface DynamicPairStatus {
   symbol: string;
   isActiveForTrading: boolean; // Autonomia da IA para ligar/desligar o par
   regime: RegimeType;
   efficiencyScore: number; // 0 a 100
-  powerMultiplier: number; // 0.5x, 1.0x, 1.5x, 2.0x (Aumento de potência dinâmico)
+  temperature: TemperatureLevel;
+  temperatureLabel: string;
+  powerMultiplier: number; // 0.5x, 1.0x, 2.0x, 3.0x, 4.0x, 5.0x
   recommendedAllocationUsd: number; // Tamanho de mão dinâmico ($)
   actionReason: string;
   spreadScore: 'TIGHT' | 'ACCEPTABLE' | 'WIDE';
@@ -49,45 +59,82 @@ export class AutoPairSelectorEngine {
         regime = 'CHOPPY_RANGING';
       }
 
-      // Pontuação de Eficácia (0 a 100)
+      // Pontuação de Eficácia (0 a 100) baseada em Microestrutura e Edge
       let efficiencyScore = 60;
-      if (winRate >= 70 && pnl > 0) efficiencyScore += 25;
-      else if (winRate >= 55 && pnl >= 0) efficiencyScore += 10;
+      if (winRate >= 80 && pnl > 100) efficiencyScore += 35;
+      else if (winRate >= 65 && pnl > 0) efficiencyScore += 20;
+      else if (winRate >= 50 && pnl >= 0) efficiencyScore += 10;
       else if (winRate < 45 || pnl < -50) efficiencyScore -= 30;
 
       if (spreadScore === 'TIGHT') efficiencyScore += 10;
-      if (liquidityScore === 'DEEP') efficiencyScore += 5;
+      if (liquidityScore === 'DEEP') efficiencyScore += 10;
 
       efficiencyScore = Math.max(10, Math.min(100, efficiencyScore));
 
-      // Decisão de Autonomia: Ligar/Desligar e Alavancar Potência
+      // Escala Termodinâmica de Confluência & Potência da Mão
       let isActiveForTrading = true;
       let powerMultiplier = 1.0;
       let baseAllocation = 2000;
-      let actionReason = 'Operando normalmente em regime estável.';
+      let temperature: TemperatureLevel = 'NORMAL';
+      let temperatureLabel = 'Normal (1.0x)';
+      let actionReason = 'Operando normalmente em regime equilibrado.';
 
-      if (efficiencyScore >= 80) {
-        // 🔥 MOMENTO DE EXTRAÇÃO MÁXIMA (Aumenta a potência)
+      if (efficiencyScore >= 95 && spreadScore === 'TIGHT' && liquidityScore === 'DEEP') {
+        // ⚡🏛️ NÍVEL DIVINO (DEUS): Confluência Absoluta (Absorption + Imbalance + Win Rate > 80% + Spread Mínimo)
+        isActiveForTrading = true;
+        powerMultiplier = 5.0;
+        baseAllocation = 10000;
+        temperature = 'DIVINE_CONFLUENCE';
+        temperatureLabel = '⚡🏛️ EXTRAÇÃO SUPREMA / DEUS (5.0x)';
+        actionReason = '👑 Confluência Perfeita no Book L2 & Tape! Mão elevada a 5.0x para captura máxima.';
+      } else if (efficiencyScore >= 88 && liquidityScore === 'DEEP') {
+        // 🌌 NÍVEL GALÁCTICO: Confluência Severa
+        isActiveForTrading = true;
+        powerMultiplier = 4.0;
+        baseAllocation = 8000;
+        temperature = 'GALACTIC_SURGE';
+        temperatureLabel = '🌌 EXTRAÇÃO GALÁCTICA (4.0x)';
+        actionReason = '🚀 Fluxo institucional maciço e assimetria positiva brutal. Potência 4.0x ativa.';
+      } else if (efficiencyScore >= 80) {
+        // 💥 NÍVEL SUPERNOVA / POWER
+        isActiveForTrading = true;
+        powerMultiplier = 3.0;
+        baseAllocation = 6000;
+        temperature = 'SUPERNOVA_POWER';
+        temperatureLabel = '💥 EXTRAÇÃO POWER (3.0x)';
+        actionReason = '⚡ Momento de alta densidade compradora/vendedora. Potência triplicada (3.0x).';
+      } else if (efficiencyScore >= 70) {
+        // 🔥 NÍVEL EXTRAÇÃO MÁXIMA
         isActiveForTrading = true;
         powerMultiplier = 2.0;
         baseAllocation = 4000;
-        actionReason = '🔥 Extração Máxima: Win rate alto e liquidez profunda. Potência dobrada (2.0x).';
-      } else if (efficiencyScore >= 65) {
+        temperature = 'HOT_MAX_EXTRACT';
+        temperatureLabel = '🔥 EXTRAÇÃO MÁXIMA (2.0x)';
+        actionReason = '🔥 Win rate elevado e book favorável. Potência dobrada (2.0x).';
+      } else if (efficiencyScore >= 48) {
+        // 🟢 NÍVEL NORMAL
         isActiveForTrading = true;
-        powerMultiplier = 1.25;
-        baseAllocation = 2500;
-        actionReason = 'Alta eficiência no fluxo institucional. Potência moderada (1.25x).';
-      } else if (efficiencyScore >= 45) {
+        powerMultiplier = 1.0;
+        baseAllocation = 2000;
+        temperature = 'NORMAL';
+        temperatureLabel = '🟢 Normal (1.0x)';
+        actionReason = 'Mercado padrão. Executando entradas com lote base seguro.';
+      } else if (efficiencyScore >= 35) {
+        // 🛡️ NÍVEL DEFENSIVO / CAUTELA
         isActiveForTrading = true;
-        powerMultiplier = 0.75;
-        baseAllocation = 1500;
-        actionReason = 'Mercado lateral/choppy. Redução de exposição para proteção de capital.';
+        powerMultiplier = 0.5;
+        baseAllocation = 1000;
+        temperature = 'COLD_DEFENSE';
+        temperatureLabel = '🛡️ Defesa / Cautela (0.5x)';
+        actionReason = 'Mercado truncado/ruído. Redução cautelar da mão para 0.5x.';
       } else {
-        // ⛔ PAR DESATIVADO PELA IA
+        // ⛔ PAR DESATIVADO
         isActiveForTrading = false;
         powerMultiplier = 0.0;
         baseAllocation = 0;
-        actionReason = '⛔ Par pausado pela IA: Baixa assertividade ou spread alto para evitar entrega de lucro.';
+        temperature = 'COLD_DEFENSE';
+        temperatureLabel = '⛔ Pausado (0.0x)';
+        actionReason = '⛔ Par pausado pela IA: Condições desfavoráveis para proteger o patrimônio.';
       }
 
       const status: DynamicPairStatus = {
@@ -95,6 +142,8 @@ export class AutoPairSelectorEngine {
         isActiveForTrading,
         regime,
         efficiencyScore,
+        temperature,
+        temperatureLabel,
         powerMultiplier,
         recommendedAllocationUsd: baseAllocation,
         actionReason,

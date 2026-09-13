@@ -317,23 +317,29 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
         {tab === 'AUTONOMY' && (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
-              <span>CONTROLE DINÂMICO DE PARES (SELEÇÃO DA IA + POTÊNCIA ADAPTATIVA)</span>
-              <span className="text-accent">Auto-Adaptação Ativa</span>
+              <span>CONTROLE TERMODINÂMICO & POTÊNCIA DA IA (0.5x A 5.0x EXTRAÇÃO SUPREMA)</span>
+              <span className="text-accent font-bold">Auto-Adaptação Ativa</span>
             </div>
 
             <div className="space-y-1.5">
               {dynamicPairs.map((pair) => {
                 const stat = pairStats.find(s => s.symbol === pair.symbol);
-                const isMaxExtract = pair.powerMultiplier >= 2.0;
+                const isGodMode = pair.powerMultiplier >= 5.0;
+                const isGalactic = pair.powerMultiplier >= 4.0 && pair.powerMultiplier < 5.0;
+                const isSupernova = pair.powerMultiplier >= 3.0 && pair.powerMultiplier < 4.0;
+                const isMaxExtract = pair.powerMultiplier >= 2.0 && pair.powerMultiplier < 3.0;
+
+                let cardBorderClass = 'bg-surface/80 border-border/80';
+                if (isGodMode) cardBorderClass = 'bg-gradient-to-r from-purple-950/40 via-accent/20 to-amber-950/40 border-amber-400 shadow-lg shadow-amber-500/20';
+                else if (isGalactic) cardBorderClass = 'bg-indigo-950/30 border-purple-400 shadow-md shadow-purple-500/20';
+                else if (isSupernova) cardBorderClass = 'bg-rose-950/30 border-rose-400 shadow-md shadow-rose-500/20';
+                else if (isMaxExtract) cardBorderClass = 'bg-accent/15 border-accent shadow-md shadow-accent-glow/20';
+                else if (!pair.isActiveForTrading) cardBorderClass = 'bg-surface/30 border-dashed border-border/40 opacity-60';
 
                 return (
                   <div
                     key={pair.symbol}
-                    className={`p-2 rounded border transition-all flex items-center justify-between ${
-                      pair.isActiveForTrading
-                        ? (isMaxExtract ? 'bg-accent/15 border-accent shadow-md shadow-accent-glow/20' : 'bg-surface/80 border-border/80')
-                        : 'bg-surface/30 border-dashed border-border/40 opacity-60'
-                    }`}
+                    className={`p-2 rounded border transition-all flex items-center justify-between ${cardBorderClass}`}
                   >
                     <div className="flex items-center space-x-3">
                       <button
@@ -354,10 +360,27 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
                           <span className="text-[9px] px-1.5 py-0.2 rounded bg-background/80 border border-border text-slate-300">
                             {pair.regime.replace('_', ' ')}
                           </span>
+
+                          {/* Temperatura / Potência Badge */}
+                          {isGodMode && (
+                            <span className="flex items-center text-[9px] px-2 py-0.5 rounded bg-gradient-to-r from-amber-500/30 to-purple-500/30 text-amber-300 border border-amber-400 font-extrabold animate-pulse">
+                              ⚡🏛️ EXTRAÇÃO DEUS (5.0x)
+                            </span>
+                          )}
+                          {isGalactic && (
+                            <span className="flex items-center text-[9px] px-1.5 py-0.2 rounded bg-purple-500/25 text-purple-300 border border-purple-400 font-bold animate-pulse">
+                              🌌 GALÁCTICA (4.0x)
+                            </span>
+                          )}
+                          {isSupernova && (
+                            <span className="flex items-center text-[9px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold">
+                              💥 POWER (3.0x)
+                            </span>
+                          )}
                           {isMaxExtract && (
-                            <span className="flex items-center text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold animate-pulse">
+                            <span className="flex items-center text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold">
                               <Flame className="w-3 h-3 mr-0.5 text-amber-400 inline" />
-                              EXTRAÇÃO MÁXIMA
+                              MÁXIMA (2.0x)
                             </span>
                           )}
                         </div>
@@ -375,7 +398,7 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
 
                       <div>
                         <div className="text-[9px] text-slate-400">POTÊNCIA / MÃO</div>
-                        <div className={`font-bold ${isMaxExtract ? 'text-amber-400' : 'text-accent'}`}>
+                        <div className={`font-bold ${isGodMode ? 'text-amber-300 font-black text-sm' : (isGalactic ? 'text-purple-300' : (isMaxExtract ? 'text-amber-400' : 'text-accent'))}`}>
                           {pair.powerMultiplier}x (${pair.recommendedAllocationUsd.toLocaleString()})
                         </div>
                       </div>
