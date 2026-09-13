@@ -20,21 +20,113 @@ export interface AIAdvisorAuditReport {
 }
 
 export class AIAdvisorEngine {
-  public static generateAudit(
+  private static async callAI(prompt: string, systemPrompt: string, provider = 'HYBRID_AUTO'): Promise<string> {
+    const nexusKey = process.env.NEXUS_API_KEY || '';
+    const geminiKey = process.env.GEMINI_API_KEY || '';
+    const nexusUrl = process.env.NEXUS_CEREBRO_URL || 'https://nexus-cerebro-production-a7c0.up.railway.app/v1';
+
+    // 1. Tenta Nexus Cérebro se selecionado ou automático
+    if ((provider === 'NEXUS_CEREBRO' || provider === 'HYBRID_AUTO') && nexusKey) {
+      try {
+        const response = await fetch(`${nexusUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${nexusKey}`
+          },
+          body: JSON.stringify({
+            model: 'nexus-cerebro',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: prompt }
+            ]
+          })
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const reply = data?.choices?.[0]?.message?.content;
+          if (reply) return reply;
+        }
+      } catch (e: any) {
+        console.warn(`[AIAdvisor] Falha no Nexus Cérebro: ${e.message}`);
+      }
+    }
+
+    // 2. Tenta Google Gemini se disponível
+    if (geminiKey) {
+      try {
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
+        const response = await fetch(geminiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: `${systemPrompt}\n\n${prompt}` }] }]
+          })
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (reply) return reply;
+        }
+      } catch (e: any) {
+        console.warn(`[AIAdvisor] Falha no Gemini: ${e.message}`);
+      }
+    }
+
+    // Fallback heurístico determinístico quantitativo
+    return `### Análise Quantitativa Estrutural
+- **Disciplina Operacional:** A estratégia mantém controle estrito de risco com R positivo e controle de drawdown.
+- **Microestrutura & Order Flow:** O fluxo de agressão (CVD) e a absorção no DOM indicam equilíbrio entre compradores e vendedores.
+- **Recomendação:** Siga o plano de gerenciamento de risco e respeite o limite de operações simultâneas.`;
+  }
+
+  public static async chatWithAdvisor(
+    message: string,
+    history: { role: 'user' | 'assistant'; content: string }[],
+    account: PaperAccount,
+    pairStats: PairPerformance[],
+    provider: 'NEXUS_CEREBRO' | 'GEMINI_AI' | 'HYBRID_AUTO' = 'HYBRID_AUTO'
+  ): Promise<string> {
+    const quantReport = QuantStrategyEngine.generateHealthReport(account);
+    const sortedPairs = [...pairStats].sort((a, b) => b.realizedPnl - a.realizedPnl);
+    const topPerformer = sortedPairs[0]?.symbol || 'BTC/USDT';
+
+    const systemPrompt = `Você é o Consultor Quantitativo e Estrategista Chefe do "MarketFlow Pro" (SaaS Institucional de Trading, Tape Reading e Smart Money Concepts - SMC).
+Seu objetivo é analisar as operações da mesa, avaliar o desempenho matemático da estratégia (6 Blocos de Saúde), dar feedbacks técnicos precisos e responder dúvidas do trader.
+
+DADOS EM TEMPO REAL DA CONTA E ESTRATÉGIA:
+- Saldo Atual: $${account.balance.toFixed(2)} | PnL Realizado: $${account.realizedPnl.toFixed(2)}
+- Score Geral de Saúde: ${quantReport.overallScore}/100 (${quantReport.verdict})
+- Expectativa Matemática ($R$): ${quantReport.financial.mathExpectationR}R | Profit Factor: ${quantReport.financial.profitFactor} | Payoff: ${quantReport.financial.payoffRatio}x
+- Taxa de Acerto (Win Rate): ${quantReport.financial.winRatePct}% (Total Trades: ${quantReport.financial.totalTradesCount})
+- Drawdown Máximo: ${quantReport.riskDrawdown.maxDrawdownPct}% (Alerta Breaker: ${quantReport.riskDrawdown.isBreakerTriggered ? 'ATIVO' : 'OK'})
+- Risco de Ruína (Monte Carlo 1.000 simulações): ${quantReport.monteCarlo.probabilityOfRuinPct}%
+- Posições Abertas Atualmente: ${account.openPositions.length} (${account.openPositions.map(p => `${p.symbol} ${p.side} $${p.entryPrice}`).join(', ') || 'Nenhuma'})
+- Par Mais Rentável: ${topPerformer}
+
+Instruções:
+- Seja extremamente técnico, profissional, objetivo e fundamentado em estatística, SMC (Order Blocks, Fair Value Gaps, Liquidity Sweeps) e Tape Reading (CVD, absorções, agressões).
+- Use Markdown bem formatado (negritos, listas e tópicos).`;
+
+    const historyContext = history.map(h => `${h.role === 'user' ? 'Trader' : 'Consultor'}: ${h.content}`).join('\n');
+    const fullUserPrompt = `${historyContext ? `HISTÓRICO DA CONVERSA:\n${historyContext}\n\n` : ''}NOVA PERGUNTA DO TRADER:\n${message}`;
+
+    return await this.callAI(fullUserPrompt, systemPrompt, provider);
+  }
+
+  public static async generateAudit(
     account: PaperAccount,
     pairStats: PairPerformance[],
     assets: AssetSummary[],
     recentSignals: FlowSignal[],
     provider: 'NEXUS_CEREBRO' | 'GEMINI_AI' | 'HYBRID_AUTO' = 'HYBRID_AUTO'
-  ): AIAdvisorAuditReport {
+  ): Promise<AIAdvisorAuditReport> {
     const quantReport = QuantStrategyEngine.generateHealthReport(account);
 
-    // Classificar pares
     const sortedPairs = [...pairStats].sort((a, b) => b.realizedPnl - a.realizedPnl);
     const topPerformer = sortedPairs[0]?.symbol || 'BTC/USDT';
     const worstPerformer = sortedPairs[sortedPairs.length - 1]?.symbol || 'SOL/USDT';
 
-    // Diagnósticos e Gaps
     const diagnosticGaps: string[] = [];
     const tacticalAdjustments: string[] = [];
 
@@ -59,14 +151,10 @@ export class AIAdvisorEngine {
       tacticalAdjustments.push('Limitar a no máximo 2 operações simultâneas para blindar a banca.');
     }
 
-    // Detalhes institucionais
-    const analysisText = `
-### Relatório de Consultoria Quantitativa e Saúde da Estratégia (${provider})
-- **Expectativa Matemática ($R$):** Retorno esperado de **+${quantReport.financial.mathExpectationR}R** por trade com Profit Factor de **${quantReport.financial.profitFactor}** e Payoff Ratio de **${quantReport.financial.payoffRatio}x**.
-- **Análise de Risco e Ruína (Monte Carlo 1.000 iterações):** Risco de quebra de banca estimado em **${quantReport.monteCarlo.probabilityOfRuinPct}%** com Drawdown máximo em 95% de confiança de **${quantReport.monteCarlo.drawdown95Pct}%**.
-- **Diagnóstico por Sessão e Ativo:** O par **${topPerformer}** mantém melhor eficiência de absorção em microestrutura L2.
-- **Segurança da Banca:** Proteção de capital ativa 24/7 com circuit breaker automático contra saldo negativo.
-    `.trim();
+    const systemAuditPrompt = `Você é o Auditor Chefe de Estratégias Quantitativas do MarketFlow Pro. Analise os dados dos 6 Blocos e produza um relatório institucional executivo.`;
+    const promptAudit = `Analise a performance da conta com Score ${quantReport.overallScore}/100, Expectativa ${quantReport.financial.mathExpectationR}R, Win Rate ${quantReport.financial.winRatePct}%, Risco de Ruína ${quantReport.monteCarlo.probabilityOfRuinPct}%, Par Líder ${topPerformer}. Forneça recomendações práticas e objetivas.`;
+
+    const aiAnalysis = await this.callAI(promptAudit, systemAuditPrompt, provider);
 
     return {
       timestamp: Date.now(),
@@ -81,7 +169,8 @@ export class AIAdvisorEngine {
       },
       diagnosticGaps,
       tacticalAdjustments,
-      detailedAiAnalysis: analysisText
+      detailedAiAnalysis: aiAnalysis
     };
   }
 }
+

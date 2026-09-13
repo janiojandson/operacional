@@ -154,7 +154,7 @@ app.post('/api/ai-advisor/audit', async (req, res) => {
   const pairStats = PairPerformanceTracker.calculate(account.history, summaries);
   const recentSignals = flowEngine.getRecentSignals();
 
-  const auditReport = AIAdvisorEngine.generateAudit(
+  const auditReport = await AIAdvisorEngine.generateAudit(
     account,
     pairStats,
     summaries,
@@ -162,6 +162,32 @@ app.post('/api/ai-advisor/audit', async (req, res) => {
     provider
   );
   res.json(auditReport);
+});
+
+app.post('/api/ai-advisor/chat', async (req, res) => {
+  try {
+    const { message, history = [], provider = 'HYBRID_AUTO' } = req.body;
+    if (!message) {
+      return res.status(400).json({ error: 'Mensagem é obrigatória' });
+    }
+
+    const account = paperTrading.getAccountState();
+    const summaries = marketManager.getSummaries();
+    const pairStats = PairPerformanceTracker.calculate(account.history, summaries);
+
+    const reply = await AIAdvisorEngine.chatWithAdvisor(
+      message,
+      history,
+      account,
+      pairStats,
+      provider
+    );
+
+    res.json({ success: true, reply, timestamp: Date.now() });
+  } catch (error: any) {
+    console.error('Erro no chat com o consultor IA:', error);
+    res.status(500).json({ error: error.message || 'Erro ao processar mensagem com o Consultor IA' });
+  }
 });
 
 app.get('/api/assets/:symbol/state', (req, res) => {
