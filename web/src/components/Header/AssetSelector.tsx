@@ -1,6 +1,7 @@
 import React from 'react';
 import { AssetSummary } from '../../../shared/types';
 import { TrendingUp, TrendingDown, Radio, Brain } from 'lucide-react';
+import { TenantSelector } from './TenantSelector';
 
 interface AssetSelectorProps {
   assets: AssetSummary[];
@@ -35,6 +36,9 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Multi-Tenant Organization Switcher */}
+        <TenantSelector />
 
         {/* Asset Badges */}
         <div className="flex items-center space-x-2 overflow-x-auto py-1">
