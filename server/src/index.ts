@@ -11,6 +11,7 @@ import { PaperTradingEngine } from './engine/paperTradingEngine';
 import { PairPerformanceTracker } from './engine/pairPerformanceTracker';
 import { AutoPairSelectorEngine, DynamicPairStatus } from './engine/autoPairSelectorEngine';
 import { AIAdvisorEngine } from './engine/aiAdvisorEngine';
+import { QuantStrategyEngine } from './engine/quantStrategyEngine';
 import { ClientCopyTraderEngine } from './engine/clientCopyTraderEngine';
 import { FlowSignal, OrderBookData } from '../../shared/types';
 import { ClientAccountConfig } from '../../shared/clientTypes';
@@ -138,6 +139,12 @@ app.post('/api/pairs/:symbol/toggle', (req, res) => {
   AutoPairSelectorEngine.toggleManualOverride(symbol, active);
   const { dynamicPairs } = recalculateAllPairs();
   res.json({ status: 'ok', symbol, active, dynamicPairs });
+});
+
+app.get('/api/strategy/health-report', (req, res) => {
+  const account = paperTrading.getAccountState();
+  const report = QuantStrategyEngine.generateHealthReport(account);
+  res.json(report);
 });
 
 app.post('/api/ai-advisor/audit', async (req, res) => {

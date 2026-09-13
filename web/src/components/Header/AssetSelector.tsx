@@ -8,6 +8,7 @@ interface AssetSelectorProps {
   onSelect: (symbol: string) => void;
   isConnected: boolean;
   onOpenAdvisor: () => void;
+  onOpenQuantHealth: () => void;
 }
 
 export const AssetSelector: React.FC<AssetSelectorProps> = ({
@@ -15,7 +16,8 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
   activeSymbol,
   onSelect,
   isConnected,
-  onOpenAdvisor
+  onOpenAdvisor,
+  onOpenQuantHealth
 }) => {
   return (
     <header className="flex items-center justify-between px-4 py-2 bg-surface/90 border-b border-border/80 backdrop-blur-md select-none">
@@ -29,7 +31,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
             <span className="font-bold text-sm text-white tracking-wide">MARKETFLOW <span className="text-accent">PRO</span></span>
             <div className="text-[10px] text-slate-400 font-mono flex items-center space-x-1">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>INSTITUTIONAL FLOW v0.2</span>
+              <span>INSTITUTIONAL QUANT v0.3</span>
             </div>
           </div>
         </div>
@@ -62,14 +64,22 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
         </div>
       </div>
 
-      {/* Consultor IA Trigger & Connection Indicator */}
-      <div className="flex items-center space-x-3">
+      {/* Actions */}
+      <div className="flex items-center space-x-2.5">
+        <button
+          onClick={onOpenQuantHealth}
+          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/40 text-xs font-bold font-mono transition-all"
+        >
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+          <span>SAÚDE DA ESTRATÉGIA (6 BLOCOS)</span>
+        </button>
+
         <button
           onClick={onOpenAdvisor}
           className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-accent to-purple-600 hover:from-accent/90 hover:to-purple-500 text-white text-xs font-bold font-mono shadow-md shadow-accent-glow transition-all"
         >
           <Brain className="w-4 h-4" />
-          <span>CONSULTOR IA (AUDITORIA)</span>
+          <span>CONSULTOR IA</span>
         </button>
 
         <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-surface border border-border text-xs font-mono">

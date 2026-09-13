@@ -7,10 +7,12 @@ import { TapeReader } from './components/Tape/TapeReader';
 import { SignalsFeed } from './components/Signals/SignalsFeed';
 import { PaperTradingPanel } from './components/PaperTrading/PaperTradingPanel';
 import { AIAdvisorModal } from './components/Advisor/AIAdvisorModal';
+import { QuantStrategyHealthModal } from './components/Advisor/QuantStrategyHealthModal';
 
 export default function App() {
   const [activeSymbol, setActiveSymbol] = useState<string>('BTC/USDT');
   const [isAdvisorOpen, setIsAdvisorOpen] = useState<boolean>(false);
+  const [isQuantHealthOpen, setIsQuantHealthOpen] = useState<boolean>(false);
 
   const {
     isConnected,
@@ -38,6 +40,7 @@ export default function App() {
         onSelect={setActiveSymbol}
         isConnected={isConnected}
         onOpenAdvisor={() => setIsAdvisorOpen(true)}
+        onOpenQuantHealth={() => setIsQuantHealthOpen(true)}
       />
 
       {/* Main Workspace Grid */}
@@ -89,6 +92,12 @@ export default function App() {
         isOpen={isAdvisorOpen}
         onClose={() => setIsAdvisorOpen(false)}
         pairStats={pairStats}
+      />
+
+      {/* 6-Block Quantitative Strategy Health Modal */}
+      <QuantStrategyHealthModal
+        isOpen={isQuantHealthOpen}
+        onClose={() => setIsQuantHealthOpen(false)}
       />
     </div>
   );

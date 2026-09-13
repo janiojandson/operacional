@@ -1,6 +1,7 @@
 import { FlowSignal } from '../../shared/types';
 import { SimulatedTrade, PaperAccount } from '../../shared/paperTypes';
 import { AutoPairSelectorEngine } from './autoPairSelectorEngine';
+import { QuantStrategyEngine } from './quantStrategyEngine';
 
 export class PaperTradingEngine {
   private balance: number = 10000; // $10,000 banca inicial
@@ -54,6 +55,11 @@ export class PaperTradingEngine {
     const notionalAllocation = pairConfig?.recommendedAllocationUsd || 2000;
     const powerLabel = pairConfig?.powerMultiplier ? ` [Potência ${pairConfig.powerMultiplier}x]` : '';
 
+    const now = Date.now();
+    const session = QuantStrategyEngine.determineSession(now);
+    const dayOfWeek = QuantStrategyEngine.determineDayOfWeek(now);
+    const regime = pairConfig?.regime || 'TREND';
+
     const newTrade: SimulatedTrade = {
       id: `sim-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       symbol: signal.symbol,
@@ -64,8 +70,12 @@ export class PaperTradingEngine {
       stopLoss,
       pnlUsd: 0,
       pnlPct: 0,
+      rMultiple: 0,
+      session,
+      dayOfWeek,
+      marketRegime: regime,
       status: 'OPEN',
-      entryTime: Math.floor(Date.now() / 1000),
+      entryTime: Math.floor(now / 1000),
       signalReason: `${signal.message}${powerLabel}`
     };
 
@@ -92,20 +102,22 @@ export class PaperTradingEngine {
 
     let closed = false;
 
-    // Checar Take Profit
+    // Checar Take Profit (2.0R)
     if (
       (trade.type === 'BUY' && currentPrice >= trade.takeProfit) ||
       (trade.type === 'SELL' && currentPrice <= trade.takeProfit)
     ) {
       trade.status = 'CLOSED_TP';
+      trade.rMultiple = 2.0;
       closed = true;
     }
-    // Checar Stop Loss
+    // Checar Stop Loss (-1.0R)
     else if (
       (trade.type === 'BUY' && currentPrice <= trade.stopLoss) ||
       (trade.type === 'SELL' && currentPrice >= trade.stopLoss)
     ) {
       trade.status = 'CLOSED_SL';
+      trade.rMultiple = -1.0;
       closed = true;
     }
 
@@ -114,7 +126,7 @@ export class PaperTradingEngine {
       this.realizedPnl += trade.pnlUsd;
       this.balance += trade.pnlUsd;
       this.history.unshift(trade);
-      if (this.history.length > 50) this.history.pop();
+      if (this.history.length > 100) this.history.pop();
       this.openPositions.delete(symbol);
       this.broadcastUpdate(trade);
     } else {
