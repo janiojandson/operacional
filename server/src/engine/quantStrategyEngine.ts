@@ -497,14 +497,13 @@ export class QuantStrategyEngine {
     const directions = ['BUY', 'SELL'];
     const byDirection = buildSegment(directions, t => t.type);
 
-    // Auditoria Específica de Temperatura (0.5x até 5.0x Deus)
+    // Auditoria Específica de Temperatura (1.5x até 5.0x Deus)
     const tempTiers: { level: TemperatureLevel; label: string }[] = [
       { level: 'DIVINE_CONFLUENCE', label: '⚡🏛️ Extração Suprema / Deus (5.0x)' },
       { level: 'GALACTIC_SURGE', label: '🌌 Extração Galáctica (4.0x)' },
       { level: 'SUPERNOVA_POWER', label: '💥 Extração Power (3.0x)' },
       { level: 'HOT_MAX_EXTRACT', label: '🔥 Extração Máxima (2.0x)' },
-      { level: 'NORMAL', label: '🟢 Normal (1.0x)' },
-      { level: 'COLD_DEFENSE', label: '🛡️ Defesa / Cautela (0.5x)' }
+      { level: 'NORMAL', label: '⚡ Base Quant Ativa (1.5x)' }
     ];
 
     const byTemperature = tempTiers.map(tier => {

@@ -318,11 +318,11 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
           <div className="space-y-2">
             <div className="flex flex-col space-y-1 text-slate-400 px-1 bg-surface/40 p-2 rounded border border-border/40">
               <div className="flex items-center justify-between text-[11px]">
-                <span className="font-bold text-slate-200">CONTROLE TERMODINÂMICO & POTÊNCIA DA IA (0.5x A 5.0x EXTRAÇÃO SUPREMA)</span>
+                <span className="font-bold text-slate-200">CONTROLE TERMODINÂMICO & POTÊNCIA DA IA (1.5x A 5.0x EXTRAÇÃO SUPREMA)</span>
                 <span className="text-accent font-bold text-[10px] px-2 py-0.5 rounded bg-accent/10 border border-accent/20">Auto-Adaptação Ativa</span>
               </div>
               <p className="text-[10px] text-slate-400 leading-relaxed font-sans">
-                A IA analisa em tempo real o fluxo de ordens (Order Flow), desequilíbrio de book, densidade institucional e volatilidade de cada par. Ela recalcula autonomamente a temperatura e alavanca a mão de <span className="text-accent font-semibold">0.5x</span> (modo conservador/defensivo) até <span className="text-amber-400 font-semibold">5.0x</span> (Extração Suprema / Modo Deus) nas confluências de altíssima probabilidade, além de pausar ou reativar pares automaticamente.
+                A IA analisa em tempo real o fluxo de ordens (Order Flow), desequilíbrio de book, densidade institucional e volatilidade de cada par. Ela recalcula autonomamente a temperatura e opera a partir de <span className="text-accent font-semibold">1.5x</span> (lote base acelerado) até <span className="text-amber-400 font-semibold">5.0x</span> (Extração Suprema / Modo Deus) nas confluências de altíssima probabilidade, pausando pares desfavoráveis para proteção de capital.
               </p>
             </div>
 

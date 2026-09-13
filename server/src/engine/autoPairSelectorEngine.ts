@@ -71,13 +71,13 @@ export class AutoPairSelectorEngine {
 
       efficiencyScore = Math.max(10, Math.min(100, efficiencyScore));
 
-      // Escala Termodinâmica de Confluência & Potência da Mão
+      // Escala Termodinâmica de Confluência & Potência da Mão (A partir de 1.5x até 5.0x)
       let isActiveForTrading = true;
-      let powerMultiplier = 1.0;
-      let baseAllocation = 2000;
-      let temperature: TemperatureLevel = 'NORMAL';
-      let temperatureLabel = 'Normal (1.0x)';
-      let actionReason = 'Operando normalmente em regime equilibrado.';
+      let powerMultiplier = 1.5;
+      let baseAllocation = 3000;
+      let temperature: TemperatureLevel = 'HOT_MAX_EXTRACT';
+      let temperatureLabel = '🔥 Base Quant (1.5x)';
+      let actionReason = 'Operando com lote base calibrado a 1.5x em regime ativo.';
 
       if (efficiencyScore >= 95 && spreadScore === 'TIGHT' && liquidityScore === 'DEEP') {
         // ⚡🏛️ NÍVEL DIVINO (DEUS): Confluência Absoluta (Absorption + Imbalance + Win Rate > 80% + Spread Mínimo)
@@ -103,32 +103,24 @@ export class AutoPairSelectorEngine {
         temperature = 'SUPERNOVA_POWER';
         temperatureLabel = '💥 EXTRAÇÃO POWER (3.0x)';
         actionReason = '⚡ Momento de alta densidade compradora/vendedora. Potência triplicada (3.0x).';
-      } else if (efficiencyScore >= 70) {
-        // 🔥 NÍVEL EXTRAÇÃO MÁXIMA
+      } else if (efficiencyScore >= 68) {
+        // 🔥 NÍVEL EXTRAÇÃO MÁXIMA (2.0x - 2.5x)
         isActiveForTrading = true;
         powerMultiplier = 2.0;
         baseAllocation = 4000;
         temperature = 'HOT_MAX_EXTRACT';
         temperatureLabel = '🔥 EXTRAÇÃO MÁXIMA (2.0x)';
-        actionReason = '🔥 Win rate elevado e book favorável. Potência dobrada (2.0x).';
-      } else if (efficiencyScore >= 48) {
-        // 🟢 NÍVEL NORMAL
+        actionReason = '🔥 Win rate elevado e book favorável. Potência elevada para 2.0x.';
+      } else if (efficiencyScore >= 45) {
+        // ⚡ NÍVEL BASE QUANT (1.5x)
         isActiveForTrading = true;
-        powerMultiplier = 1.0;
-        baseAllocation = 2000;
-        temperature = 'NORMAL';
-        temperatureLabel = '🟢 Normal (1.0x)';
-        actionReason = 'Mercado padrão. Executando entradas com lote base seguro.';
-      } else if (efficiencyScore >= 35) {
-        // 🛡️ NÍVEL DEFENSIVO / CAUTELA
-        isActiveForTrading = true;
-        powerMultiplier = 0.5;
-        baseAllocation = 1000;
-        temperature = 'COLD_DEFENSE';
-        temperatureLabel = '🛡️ Defesa / Cautela (0.5x)';
-        actionReason = 'Mercado truncado/ruído. Redução cautelar da mão para 0.5x.';
+        powerMultiplier = 1.5;
+        baseAllocation = 3000;
+        temperature = 'HOT_MAX_EXTRACT';
+        temperatureLabel = '⚡ Base Quant (1.5x)';
+        actionReason = 'Mercado favorável. Operação iniciada com temperatura mínima de 1.5x.';
       } else {
-        // ⛔ PAR DESATIVADO
+        // ⛔ PAR DESATIVADO PELA IA
         isActiveForTrading = false;
         powerMultiplier = 0.0;
         baseAllocation = 0;
