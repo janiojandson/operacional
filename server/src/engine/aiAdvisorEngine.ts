@@ -52,16 +52,17 @@ export class AIAdvisorEngine {
       }
     }
 
-    // 2. Tenta Google Gemini se disponível
+    // 2. Tenta Google Gemini se disponível (3.7 Flash oficial ativo)
     if (geminiKey) {
       try {
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key=${geminiKey}`;
         const response = await fetch(geminiUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: `${systemPrompt}\n\n${prompt}` }] }]
-          })
+          }),
+          signal: AbortSignal.timeout(15000)
         });
         if (response.ok) {
           const data = await response.json();
@@ -69,7 +70,7 @@ export class AIAdvisorEngine {
           if (reply) return reply;
         }
       } catch (e: any) {
-        console.warn(`[AIAdvisor] Falha no Gemini: ${e.message}`);
+        console.warn(`[AIAdvisor] Falha no Gemini 3.7: ${e.message}`);
       }
     }
 
