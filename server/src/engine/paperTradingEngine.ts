@@ -53,6 +53,8 @@ export class PaperTradingEngine {
 
     // Potência adaptativa (se tá dando certo, dobra a mão)
     const notionalAllocation = pairConfig?.recommendedAllocationUsd || 2000;
+    const powerMultiplier = pairConfig?.powerMultiplier || 1.0;
+    const temperature = pairConfig?.temperature || 'NORMAL';
     const powerLabel = pairConfig?.powerMultiplier ? ` [Potência ${pairConfig.powerMultiplier}x]` : '';
 
     const now = Date.now();
@@ -71,6 +73,8 @@ export class PaperTradingEngine {
       pnlUsd: 0,
       pnlPct: 0,
       rMultiple: 0,
+      powerMultiplier,
+      temperature,
       session,
       dayOfWeek,
       marketRegime: regime,

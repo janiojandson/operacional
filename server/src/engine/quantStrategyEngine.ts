@@ -408,11 +408,84 @@ export class QuantStrategyEngine {
     const directions = ['BUY', 'SELL'];
     const byDirection = buildSegment(directions, t => t.type);
 
+    // Auditoria Específica de Temperatura (0.5x até 5.0x Deus)
+    const tempTiers: { level: TemperatureLevel; label: string }[] = [
+      { level: 'DIVINE_CONFLUENCE', label: '⚡🏛️ Extração Suprema / Deus (5.0x)' },
+      { level: 'GALACTIC_SURGE', label: '🌌 Extração Galáctica (4.0x)' },
+      { level: 'SUPERNOVA_POWER', label: '💥 Extração Power (3.0x)' },
+      { level: 'HOT_MAX_EXTRACT', label: '🔥 Extração Máxima (2.0x)' },
+      { level: 'NORMAL', label: '🟢 Normal (1.0x)' },
+      { level: 'COLD_DEFENSE', label: '🛡️ Defesa / Cautela (0.5x)' }
+    ];
+
+    const byTemperature = tempTiers.map(tier => {
+      const matchTrades = trades.filter(t => t.temperature === tier.level || (!t.temperature && tier.level === 'NORMAL'));
+      const count = matchTrades.length;
+      if (count === 0) {
+        return {
+          temperature: tier.level,
+          label: tier.label,
+          totalTrades: 0,
+          winRate: 0,
+          profitFactor: 0,
+          netPnlUsd: 0,
+          avgPnlPerTrade: 0,
+          maxDrawdownUsd: 0,
+          healthVerdict: 'NEUTRO' as const
+        };
+      }
+
+      const wins = matchTrades.filter(t => t.pnlUsd > 0).length;
+      const grossW = matchTrades.filter(t => t.pnlUsd > 0).reduce((s, t) => s + t.pnlUsd, 0);
+      const grossL = matchTrades.filter(t => t.pnlUsd <= 0).reduce((s, t) => s + Math.abs(t.pnlUsd), 0);
+      const net = Number((grossW - grossL).toFixed(2));
+      const pf = grossL > 0 ? Number((grossW / grossL).toFixed(2)) : (grossW > 0 ? 99.9 : 0);
+      const winRate = Number(((wins / count) * 100).toFixed(1));
+      const avgPnl = Number((net / count).toFixed(2));
+
+      let healthVerdict: 'ALAVANCOU COM SUCESSO' | 'NEUTRO' | 'DESTRUIU VALOR / ALTO RISCO' = 'NEUTRO';
+      if (net > 0 && pf >= 1.5) {
+        healthVerdict = 'ALAVANCOU COM SUCESSO';
+      } else if (net < 0 || pf < 0.9) {
+        healthVerdict = 'DESTRUIU VALOR / ALTO RISCO';
+      }
+
+      return {
+        temperature: tier.level,
+        label: tier.label,
+        totalTrades: count,
+        winRate,
+        profitFactor: pf,
+        netPnlUsd: net,
+        avgPnlPerTrade: avgPnl,
+        maxDrawdownUsd: grossL,
+        healthVerdict
+      };
+    });
+
+    // Detectar Limite Saudável Ideal
+    const successfulTemps = byTemperature.filter(t => t.totalTrades > 0 && t.healthVerdict === 'ALAVANCOU COM SUCESSO');
+    const destructiveTemps = byTemperature.filter(t => t.totalTrades > 0 && t.healthVerdict === 'DESTRUIU VALOR / ALTO RISCO');
+
+    let optimalTemperatureLimit = 'Temperatura Saudável até 2.0x / 3.0x';
+    let exposureImpactVerdict = 'Aumento de potência operando em faixa segura e saudável.';
+
+    if (destructiveTemps.length > 0) {
+      optimalTemperatureLimit = `Alerta: Cortar potência em níveis ${destructiveTemps.map(d => d.temperature).join(', ')}`;
+      exposureImpactVerdict = `Detectada perda de eficiência em mão elevada (${destructiveTemps[0].label}). Recomenda-se travar a mão máxima em 2.0x.`;
+    } else if (successfulTemps.some(t => t.temperature === 'DIVINE_CONFLUENCE' || t.temperature === 'GALACTIC_SURGE')) {
+      optimalTemperatureLimit = 'Potência Alta 4.0x / 5.0x com Edge Estatístico Validado';
+      exposureImpactVerdict = 'A alavancagem em momentos de confluência severa aumentou a rentabilidade global sem inflar o drawdown.';
+    }
+
     return {
       bySymbol,
       bySession,
       byDayOfWeek,
-      byDirection
+      byDirection,
+      byTemperature,
+      optimalTemperatureLimit,
+      exposureImpactVerdict
     };
   }
 

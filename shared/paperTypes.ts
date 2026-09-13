@@ -1,5 +1,10 @@
-export type SessionType = 'ASIA' | 'LONDON' | 'NY';
-export type MarketRegime = 'TREND' | 'RANGE' | 'HIGH_VOLATILITY';
+export type TemperatureLevel = 
+  | 'COLD_DEFENSE'       // 0.0x / 0.5x (Defesa)
+  | 'NORMAL'             // 1.0x (Padrão)
+  | 'HOT_MAX_EXTRACT'    // 2.0x (Extração Máxima)
+  | 'SUPERNOVA_POWER'    // 3.0x (Extração Power)
+  | 'GALACTIC_SURGE'     // 4.0x (Extração Galáctica)
+  | 'DIVINE_CONFLUENCE'; // 5.0x (Extração Suprema / Deus)
 
 export interface SimulatedTrade {
   id: string;
@@ -12,6 +17,8 @@ export interface SimulatedTrade {
   pnlUsd: number;
   pnlPct: number;
   rMultiple: number; // R-Multiple (ex: +2.0R, -1.0R)
+  powerMultiplier: number; // 0.5, 1.0, 2.0, 3.0, 4.0, 5.0
+  temperature: TemperatureLevel;
   session: SessionType;
   dayOfWeek: string; // 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'
   marketRegime: MarketRegime;
@@ -100,11 +107,26 @@ export interface SegmentItem {
   mathExpectationR: number;
 }
 
+export interface TemperatureImpactAnalysis {
+  temperature: TemperatureLevel;
+  label: string;
+  totalTrades: number;
+  winRate: number;
+  profitFactor: number;
+  netPnlUsd: number;
+  avgPnlPerTrade: number;
+  maxDrawdownUsd: number;
+  healthVerdict: 'ALAVANCOU COM SUCESSO' | 'NEUTRO' | 'DESTRUIU VALOR / ALTO RISCO';
+}
+
 export interface ContextSegmentationBlock {
   bySymbol: SegmentItem[];
   bySession: SegmentItem[];
   byDayOfWeek: SegmentItem[];
   byDirection: SegmentItem[];
+  byTemperature: TemperatureImpactAnalysis[];
+  optimalTemperatureLimit: string;
+  exposureImpactVerdict: string;
 }
 
 export interface MonteCarloBlock {

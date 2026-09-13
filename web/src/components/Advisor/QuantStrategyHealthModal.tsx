@@ -479,6 +479,61 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
                       </div>
                     </div>
                   </div>
+
+                  {/* Auditoria Específica de Temperatura e Impacto da Potência */}
+                  <div className="p-4 rounded-xl bg-surface/90 border border-border/80 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-300 flex items-center space-x-1.5">
+                        <Zap className="w-4 h-4 text-amber-400" />
+                        <span>AUDITORIA DE TEMPERATURA DA MÃO (0.5x A 5.0x DEUS) - IMPACTO NO RESULTADO</span>
+                      </span>
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-accent/20 text-accent font-bold border border-accent/30">
+                        {report.segmentation.optimalTemperatureLimit}
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-slate-300 font-sans">
+                      {report.segmentation.exposureImpactVerdict}
+                    </p>
+
+                    <div className="space-y-2">
+                      {report.segmentation.byTemperature?.map((temp, idx) => (
+                        <div key={idx} className="p-2.5 rounded-lg bg-background/70 border border-border/60 flex items-center justify-between text-xs">
+                          <div>
+                            <span className="font-bold text-white block">{temp.label}</span>
+                            <span className="text-[10px] text-slate-400 font-sans">{temp.totalTrades} operações executadas</span>
+                          </div>
+
+                          <div className="flex items-center space-x-5 font-mono">
+                            <div>
+                              <span className="text-slate-400 text-[9px] block">WIN RATE</span>
+                              <span className="font-bold text-amber-400">{temp.winRate}%</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 text-[9px] block">PROFIT FACTOR</span>
+                              <span className="font-bold text-slate-200">{temp.profitFactor}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 text-[9px] block">LUCRO TOTAL</span>
+                              <span className={`font-bold ${temp.netPnlUsd >= 0 ? 'text-buy' : 'text-sell'}`}>
+                                {temp.netPnlUsd >= 0 ? `+$${temp.netPnlUsd}` : `-$${Math.abs(temp.netPnlUsd)}`}
+                              </span>
+                            </div>
+                            <div className="w-36 text-right">
+                              <span className="text-slate-400 text-[9px] block">STATUS DE EFICIÊNCIA</span>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                temp.healthVerdict === 'ALAVANCOU COM SUCESSO' 
+                                  ? 'bg-emerald-500/20 text-emerald-300' 
+                                  : (temp.healthVerdict === 'DESTRUIU VALOR / ALTO RISCO' ? 'bg-rose-500/20 text-rose-300' : 'text-slate-400')
+                              }`}>
+                                {temp.healthVerdict}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
 
