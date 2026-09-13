@@ -1,30 +1,67 @@
-import React, { useState } from 'react';
-import { Shield, Plus, Lock, Unlock, Trash2, Users, DollarSign, Clock, AlertTriangle, CheckCircle, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Shield, Plus, Lock, Unlock, Trash2, Users, DollarSign, Clock, AlertTriangle, CheckCircle, X, Sparkles, Send, PhoneCall, RefreshCw } from 'lucide-react';
 import { ClientProtectionAccount } from '../../../../shared/types';
 
 interface ClientProtectionModalProps {
   isOpen: boolean;
   onClose: () => void;
-  clients: ClientProtectionAccount[];
-  onRefresh: () => void;
+  clients?: ClientProtectionAccount[];
+  onRefresh?: () => void;
 }
 
 export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
   isOpen,
   onClose,
-  clients,
+  clients: initialClients,
   onRefresh
 }) => {
+  const [localClients, setLocalClients] = useState<ClientProtectionAccount[]>(initialClients || []);
   const [showAddForm, setShowAddForm] = useState(false);
   const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
   const [initialBalance, setInitialBalance] = useState(10000);
   const [targetGainUsd, setTargetGainUsd] = useState(1000);
-  const [trailingLossUsd, setTrailingLossUsd] = useState(500);
+  const [trailingLossUsd, setTrailingLossUsd] = useState(400);
   const [timeWindow, setTimeWindow] = useState<'30m' | '1h' | '1d' | '1w' | '1m'>('1d');
-  const [selectedPairs, setSelectedPairs] = useState<string[]>(['BTC/USDT', 'ETH/USDT', 'EUR/USD']);
+  const [selectedPairs, setSelectedPairs] = useState<string[]>(['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'EUR/USD']);
   const [loading, setLoading] = useState(false);
+  const [sendingAlertId, setSendingAlertId] = useState<string | null>(null);
+
+  const fetchClients = async () => {
+    try {
+      const res = await fetch('/api/client-protection');
+      if (res.ok) {
+        const data = await res.json();
+        setLocalClients(data.clients || []);
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar clientes:', e);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchClients();
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (initialClients && initialClients.length > 0) {
+      setLocalClients(initialClients);
+    }
+  }, [initialClients]);
 
   if (!isOpen) return null;
+
+  // Cálculos de Sugestão Inteligente (Baseado em Payoff 2.5R e Gestão de Banca 24/7)
+  const suggestedStopLoss = Math.round(initialBalance * 0.04); // 4% de Stop / Trailing Loss
+  const suggestedTargetGain = Math.round(initialBalance * 0.10); // 10% de Meta de Lucro (2.5x o Stop)
+  const suggestedLotBase = Math.round(initialBalance * 0.20); // 20% de alocação de margem por trade
+
+  const handleApplyQuantSuggestions = () => {
+    setTrailingLossUsd(suggestedStopLoss);
+    setTargetGainUsd(suggestedTargetGain);
+  };
 
   const handleAddClient = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,6 +74,7 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
+          phone,
           initialBalance: Number(initialBalance),
           targetGainUsd: Number(targetGainUsd),
           trailingLossUsd: Number(trailingLossUsd),
@@ -46,8 +84,10 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
       });
       if (res.ok) {
         setName('');
+        setPhone('');
         setShowAddForm(false);
-        onRefresh();
+        fetchClients();
+        if (onRefresh) onRefresh();
       }
     } catch (e) {
       console.error(e);
@@ -59,7 +99,8 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
   const handleUnlock = async (id: string) => {
     try {
       await fetch(`/api/client-protection/${id}/unlock`, { method: 'POST' });
-      onRefresh();
+      fetchClients();
+      if (onRefresh) onRefresh();
     } catch (e) {
       console.error(e);
     }
@@ -68,17 +109,53 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
   const handleDelete = async (id: string) => {
     try {
       await fetch(`/api/client-protection/${id}`, { method: 'DELETE' });
-      onRefresh();
+      fetchClients();
+      if (onRefresh) onRefresh();
     } catch (e) {
       console.error(e);
     }
   };
 
+  const handleSendManualWhatsAppReport = async (client: ClientProtectionAccount) => {
+    if (!client.phone) {
+      alert('Este cliente não possui número de WhatsApp cadastrado.');
+      return;
+    }
+    setSendingAlertId(client.id);
+    try {
+      const netPnl = client.currentBalance - client.initialBalance;
+      const res = await fetch('/api/client-protection/send-alert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: client.phone,
+          message: `📊 *Relatório Diário — MarketFlow Pro*\n\n` +
+            `👤 *Conta:* ${client.name}\n` +
+            `💰 *Banca Inicial:* $${client.initialBalance.toLocaleString()}\n` +
+            `💵 *Saldo Atual:* $${client.currentBalance.toFixed(2)}\n` +
+            `📈 *Resultado:* ${netPnl >= 0 ? `+$${netPnl.toFixed(2)}` : `-$${Math.abs(netPnl).toFixed(2)}`}\n` +
+            `🛡️ *Status da Proteção:* ${client.status === 'ACTIVE' ? '✅ Protegido e Operando' : (client.status === 'LOCKED_GAIN' ? '🎯 Meta Batida (Pausado)' : '🛑 Stop Acionado (Pausado)')}\n\n` +
+            `_Notificação disparada pelo Hub Oficial LicitaRadar/MarketFlow._`
+        })
+      });
+      if (res.ok) {
+        alert(`✅ Notificação enviada com sucesso para o WhatsApp (${client.phone}) via Hub!`);
+      } else {
+        alert('⚠️ Hub de Comunicação não respondeu. Verifique a conexão com o WhatsApp.');
+      }
+    } catch (e) {
+      alert('Erro ao disparar mensagem.');
+    } finally {
+      setSendingAlertId(null);
+    }
+  };
+
   const allAvailablePairs = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'EUR/USD', 'GBP/USD', 'USD/JPY', 'XAU/USD'];
+  const clientsList = Array.isArray(localClients) ? localClients : [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 select-none animate-in fade-in duration-200 font-sans">
-      <div className="bg-surface border border-border/80 w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[85vh]">
+      <div className="bg-surface border border-border/80 w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[88vh]">
         
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border/80 bg-surface/95">
@@ -96,7 +173,7 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Gestão individual de bancas, travas temporais (30m, 1h, dia, semana) e Target Gain / Trailing Loss.
+                Gestão individual de bancas, travas temporais e alertas automáticos via Hub WhatsApp (Instância Licitações).
               </p>
             </div>
           </div>
@@ -127,11 +204,32 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
               <div className="flex items-center justify-between border-b border-border/60 pb-2">
                 <span className="text-xs font-bold text-emerald-400 flex items-center space-x-1.5">
                   <Users className="w-4 h-4" />
-                  <span>Cadastrar Novo Cliente / Subconta Fictícia</span>
+                  <span>Cadastrar Novo Cliente / Subconta com Proteção 24/7</span>
                 </span>
+                <span className="text-[10px] text-slate-400 font-mono">Disparos pelo Hub de Licitações</span>
               </div>
 
-              <div className="grid grid-cols-3 gap-4 text-xs font-mono">
+              {/* Sugestões Quants Automáticas */}
+              <div className="p-3 rounded-lg bg-surface/90 border border-emerald-500/30 flex items-center justify-between text-xs font-mono">
+                <div className="flex items-center space-x-4">
+                  <div className="flex items-center space-x-1.5 text-amber-300 font-bold">
+                    <Sparkles className="w-4 h-4" />
+                    <span>SUGESTÕES QUANTS (Banca ${initialBalance.toLocaleString()}):</span>
+                  </div>
+                  <span className="text-slate-300">Stop Ideal: <strong className="text-rose-400">${suggestedStopLoss} (4%)</strong></span>
+                  <span className="text-slate-300">Meta Lucro: <strong className="text-emerald-400">+${suggestedTargetGain} (10% | 2.5R)</strong></span>
+                  <span className="text-slate-300">Lote Base: <strong className="text-accent">${suggestedLotBase} (20%)</strong></span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleApplyQuantSuggestions}
+                  className="px-2.5 py-1 rounded bg-accent/20 hover:bg-accent/30 text-accent font-bold border border-accent/40 text-[10px] transition-all"
+                >
+                  ⚡ Aplicar Sugestões
+                </button>
+              </div>
+
+              <div className="grid grid-cols-4 gap-3 text-xs font-mono">
                 <div>
                   <label className="text-slate-400 text-[11px] block mb-1">Nome do Cliente / Mesa:</label>
                   <input
@@ -140,6 +238,17 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Ex: Mesa Alpha ou Cliente Silva"
+                    className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-accent"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-slate-400 text-[11px] block mb-1">WhatsApp para Alertas:</label>
+                  <input
+                    type="text"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="Ex: 5541999998888"
                     className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-accent"
                   />
                 </div>
@@ -157,7 +266,7 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-slate-400 text-[11px] block mb-1">Janela de Proteção (Time Window):</label>
+                  <label className="text-slate-400 text-[11px] block mb-1">Janela de Proteção:</label>
                   <select
                     value={timeWindow}
                     onChange={(e) => setTimeWindow(e.target.value as any)}
@@ -181,7 +290,6 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
                     min={10}
                     value={targetGainUsd}
                     onChange={(e) => setTargetGainUsd(Number(e.target.value))}
-                    placeholder="Ex: 1000"
                     className="w-full bg-surface border border-emerald-500/40 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -194,7 +302,6 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
                     min={10}
                     value={trailingLossUsd}
                     onChange={(e) => setTrailingLossUsd(Number(e.target.value))}
-                    placeholder="Ex: 500"
                     className="w-full bg-surface border border-rose-500/40 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-rose-500"
                   />
                 </div>
@@ -241,7 +348,7 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
 
           {/* Client Cards List */}
           <div className="grid grid-cols-2 gap-4">
-            {clients.map((cli) => {
+            {clientsList.map((cli) => {
               const netPnl = cli.currentBalance - cli.initialBalance;
               const isProfit = netPnl >= 0;
               const pnlPct = cli.initialBalance > 0 ? ((netPnl / cli.initialBalance) * 100).toFixed(2) : '0';
@@ -265,10 +372,24 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
                           {cli.timeWindow}
                         </span>
                       </div>
-                      <span className="text-[11px] text-slate-400 font-sans">ID: {cli.id}</span>
+                      <span className="text-[11px] text-slate-400 font-sans">
+                        ID: {cli.id} {cli.phone ? `• 📱 ${cli.phone}` : ''}
+                      </span>
                     </div>
 
                     <div className="flex items-center space-x-2">
+                      {cli.phone && (
+                        <button
+                          onClick={() => handleSendManualWhatsAppReport(cli)}
+                          disabled={sendingAlertId === cli.id}
+                          title="Enviar resumo da conta para o WhatsApp do cliente"
+                          className="flex items-center space-x-1 px-2 py-1 rounded bg-teal-600/20 text-teal-300 border border-teal-500/40 text-[10px] font-bold hover:bg-teal-600/30"
+                        >
+                          <Send className={`w-3 h-3 ${sendingAlertId === cli.id ? 'animate-spin' : ''}`} />
+                          <span>WhatsApp</span>
+                        </button>
+                      )}
+
                       {cli.status !== 'ACTIVE' ? (
                         <button
                           onClick={() => handleUnlock(cli.id)}
@@ -336,7 +457,7 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
             })}
           </div>
 
-          {clients.length === 0 && (
+          {clientsList.length === 0 && (
             <div className="py-16 flex flex-col items-center justify-center space-y-3 text-slate-400">
               <Shield className="w-12 h-12 text-slate-600 animate-pulse" />
               <p className="text-sm font-sans">Nenhum cliente cadastrado. Clique em "Novo Cliente" para criar uma subconta protegida.</p>

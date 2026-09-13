@@ -220,6 +220,20 @@ app.post('/api/client-protection/:id/unlock', (req, res) => {
   res.json(client);
 });
 
+app.post('/api/client-protection/send-alert', async (req, res) => {
+  const { phone, clientName, messageType, currentBalance, initialBalance, dailyPnl, reason } = req.body;
+  const result = await ClientProtectionEngine.sendWhatsAppAlert({
+    phone,
+    clientName,
+    messageType: messageType || 'SUMMARY',
+    currentBalance: Number(currentBalance || 0),
+    initialBalance: Number(initialBalance || 0),
+    dailyPnl: Number(dailyPnl || 0),
+    reason
+  });
+  res.json(result);
+});
+
 // Barra de Pressão de Fluxo Institucional (Buy/Sell Pressure)
 app.get('/api/assets/:symbol/pressure', (req, res) => {
   const symbol = decodeURIComponent(req.params.symbol);

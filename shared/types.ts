@@ -65,6 +65,7 @@ export type ChartTimeframe = '1m' | '3m' | '5m' | '15m' | '1h' | '4h' | '1D';
 export interface ClientProtectionAccount {
   id: string;
   name: string;
+  phone?: string;
   initialBalance: number;
   currentBalance: number;
   equity: number;
