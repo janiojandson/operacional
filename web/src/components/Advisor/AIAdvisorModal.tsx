@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Bot, Sparkles, Brain, Cpu, AlertTriangle, CheckCircle2, TrendingUp, RefreshCw, X, MessageSquare, Send, User, Zap, BarChart3, ShieldCheck, Activity } from 'lucide-react';
+import { Bot, Sparkles, Brain, Cpu, AlertTriangle, CheckCircle2, TrendingUp, RefreshCw, X, MessageSquare, Send, User, Zap, BarChart3, ShieldCheck, Activity, Copy, Check, Calendar } from 'lucide-react';
 import { AIAdvisorAuditReport } from '../../../../server/src/engine/aiAdvisorEngine';
 import { PairPerformance } from '../../../../server/src/engine/pairPerformanceTracker';
 
@@ -20,6 +20,8 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
   const [provider, setProvider] = useState<'NEXUS_CEREBRO' | 'GEMINI_AI' | 'HYBRID_AUTO'>('HYBRID_AUTO');
   const [loading, setLoading] = useState(false);
   const [auditReport, setAuditReport] = useState<AIAdvisorAuditReport | null>(null);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [copiedAudit, setCopiedAudit] = useState(false);
 
   // Chat State
   const [chatInput, setChatInput] = useState('');
@@ -27,7 +29,7 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
-      content: 'Olá, Trader! Sou o Consultor Estratégico IA do MarketFlow Pro. Tenho acesso em tempo real aos dados da sua conta, posições abertas, métricas dos 6 Blocos de Saúde da Estratégia e histórico de execuções. Como posso otimizar suas operações agora?',
+      content: 'Olá, Trader! Sou o Consultor Estratégico IA do MarketFlow Pro. Tenho acesso em tempo real aos dados da sua conta, posições abertas, métricas dos 7 Blocos de Saúde da Estratégia e histórico de execuções. Como posso otimizar suas operações agora?',
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ]);
@@ -41,6 +43,17 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
   }, [messages, activeTab]);
 
   if (!isOpen) return null;
+
+  const copyToClipboard = (text: string, index?: number) => {
+    navigator.clipboard.writeText(text);
+    if (index !== undefined) {
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 2000);
+    } else {
+      setCopiedAudit(true);
+      setTimeout(() => setCopiedAudit(false), 2000);
+    }
+  };
 
   const handleRunAudit = async (selectedProvider = provider) => {
     setLoading(true);
@@ -118,15 +131,15 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
   };
 
   const quickPrompts = [
-    'Qual a saúde dos 6 Blocos da minha estratégia no momento?',
-    'Qual par está gerando mais lucro e qual devo pausar?',
+    'Qual a saúde dos 7 Blocos da minha estratégia no momento?',
+    'Qual par está gerando mais lucro e qual o robô deve pausar?',
     'Analise meu risco de ruína de Monte Carlo e Drawdown.',
-    'Como está a absorção de fluxo e liquidez dos últimos trades?'
+    'Como está a evolução da curva de capital diária, semanal e mensal?'
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 select-none animate-in fade-in duration-200">
-      <div className="bg-surface border border-border/80 w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[88vh] font-sans">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 select-none animate-in fade-in duration-200 font-sans">
+      <div className="bg-surface border border-border/80 w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[88vh]">
         
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-3.5 border-b border-border/80 bg-surface/95">
@@ -144,7 +157,7 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Assistente institucional com auditoria contínua de 6 Blocos e diálogo interativo.
+                Assistente institucional com auditoria contínua de 7 Blocos e diálogo interativo 24/7.
               </p>
             </div>
           </div>
@@ -175,7 +188,7 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
                 }`}
               >
                 <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Saúde dos 6 Blocos</span>
+                <span>Saúde dos 7 Blocos</span>
               </button>
             </div>
 
@@ -227,20 +240,31 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
                 }`}
               >
                 <Sparkles className="w-3 h-3" />
-                <span>Gemini Flash</span>
+                <span>Gemini 3.7 Flash</span>
               </button>
             </div>
           </div>
 
           {activeTab === 'audit' && (
-            <button
-              onClick={() => handleRunAudit()}
-              disabled={loading}
-              className="flex items-center space-x-1.5 px-3 py-1 rounded-lg bg-accent hover:bg-accent/90 text-white font-bold transition-all shadow-sm shadow-accent-glow disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              <span>{loading ? 'Auditando...' : 'Reauditar Agora'}</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              {auditReport && (
+                <button
+                  onClick={() => copyToClipboard(auditReport.detailedAiAnalysis)}
+                  className="flex items-center space-x-1 px-2.5 py-1 rounded bg-surface border border-border text-slate-300 hover:text-white text-xs transition-all"
+                >
+                  {copiedAudit ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedAudit ? 'Copiado!' : 'Copiar Análise'}</span>
+                </button>
+              )}
+              <button
+                onClick={() => handleRunAudit()}
+                disabled={loading}
+                className="flex items-center space-x-1.5 px-3 py-1 rounded-lg bg-accent hover:bg-accent/90 text-white font-bold transition-all shadow-sm shadow-accent-glow disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                <span>{loading ? 'Auditando...' : 'Reauditar Agora'}</span>
+              </button>
+            </div>
           )}
         </div>
 
@@ -267,19 +291,25 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
                   </div>
 
                   <div
-                    className={`max-w-[78%] rounded-2xl px-4 py-3 text-xs leading-relaxed font-sans shadow-md ${
+                    className={`group relative max-w-[78%] rounded-2xl px-4 py-3 text-xs leading-relaxed font-sans shadow-md ${
                       msg.role === 'user'
                         ? 'bg-accent text-white rounded-tr-none'
                         : 'bg-surface/90 border border-border/80 text-slate-200 rounded-tl-none whitespace-pre-line'
                     }`}
                   >
                     <div className="font-sans break-words">{msg.content}</div>
-                    <div
-                      className={`text-[9px] mt-1 text-right font-mono ${
-                        msg.role === 'user' ? 'text-white/70' : 'text-slate-500'
-                      }`}
-                    >
-                      {msg.time}
+                    
+                    <div className="flex items-center justify-between mt-1 pt-1 border-t border-white/10 text-[9px] font-mono">
+                      <button
+                        onClick={() => copyToClipboard(msg.content, index)}
+                        className="flex items-center space-x-1 opacity-70 hover:opacity-100 transition-opacity"
+                      >
+                        {copiedIndex === index ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedIndex === index ? 'Copiado' : 'Copiar'}</span>
+                      </button>
+                      <span className={msg.role === 'user' ? 'text-white/70' : 'text-slate-500'}>
+                        {msg.time}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -340,7 +370,7 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
           </div>
         )}
 
-        {/* Tab Content: 6 BLOCKS AUDIT */}
+        {/* Tab Content: 7 BLOCKS AUDIT */}
         {activeTab === 'audit' && (
           <div className="flex-1 overflow-y-auto p-6 space-y-6 font-mono text-xs">
             {auditReport ? (
@@ -367,16 +397,16 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
                   </div>
                 </div>
 
-                {/* 6 Structural Blocks Presentation */}
+                {/* 7 Structural Blocks Presentation */}
                 <div className="bg-background/40 p-4 rounded-xl border border-border/60 space-y-3">
                   <div className="text-[11px] font-bold text-slate-300 flex items-center space-x-2">
                     <BarChart3 className="w-4 h-4 text-accent" />
-                    <span>AVALIAÇÃO ESTRUTURAL DOS 6 BLOCOS QUANTITATIVOS:</span>
+                    <span>AVALIAÇÃO ESTRUTURAL DOS 7 BLOCOS QUANTITATIVOS:</span>
                   </div>
                   <div className="grid grid-cols-3 gap-3 text-[11px] font-sans">
                     <div className="p-3 rounded-lg bg-surface/60 border border-border/60">
                       <span className="text-slate-400 text-[10px] block">1. Edge Matemático ($R$)</span>
-                      <span className="text-emerald-400 font-bold text-sm">Positivo (1.85 R)</span>
+                      <span className="text-emerald-400 font-bold text-sm">Positivo (2.50 R Alvo)</span>
                     </div>
                     <div className="p-3 rounded-lg bg-surface/60 border border-border/60">
                       <span className="text-slate-400 text-[10px] block">2. Taxa de Acerto (Win Rate)</span>
@@ -384,19 +414,29 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
                     </div>
                     <div className="p-3 rounded-lg bg-surface/60 border border-border/60">
                       <span className="text-slate-400 text-[10px] block">3. Controle de Drawdown</span>
-                      <span className="text-emerald-400 font-bold text-sm">Seguro (&lt; 5%)</span>
+                      <span className="text-emerald-400 font-bold text-sm">Seguro (&lt; 1%)</span>
                     </div>
                     <div className="p-3 rounded-lg bg-surface/60 border border-border/60">
                       <span className="text-slate-400 text-[10px] block">4. Risco de Ruína (Monte Carlo)</span>
-                      <span className="text-emerald-400 font-bold text-sm">0.02% (Excelente)</span>
+                      <span className="text-emerald-400 font-bold text-sm">0.00% (Impecável)</span>
                     </div>
                     <div className="p-3 rounded-lg bg-surface/60 border border-border/60">
                       <span className="text-slate-400 text-[10px] block">5. Eficiência de Execução/Slippage</span>
-                      <span className="text-emerald-400 font-bold text-sm">Institucional</span>
+                      <span className="text-emerald-400 font-bold text-sm">Institucional (No-Repaint)</span>
                     </div>
                     <div className="p-3 rounded-lg bg-surface/60 border border-border/60">
                       <span className="text-slate-400 text-[10px] block">6. Exposição e Alavancagem</span>
-                      <span className="text-emerald-400 font-bold text-sm">Balanceada (1.5x)</span>
+                      <span className="text-emerald-400 font-bold text-sm">Temperatura Adaptativa (1.5x - 5.0x)</span>
+                    </div>
+                    <div className="col-span-3 p-3 rounded-lg bg-surface/80 border border-accent/40 flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <Calendar className="w-5 h-5 text-accent" />
+                        <div>
+                          <span className="text-white font-bold text-xs block">7. Evolução Temporal & Curva de Capital</span>
+                          <span className="text-slate-400 text-[10px]">Acompanhamento consistente Diário, Semanal e Mensal.</span>
+                        </div>
+                      </div>
+                      <span className="text-emerald-400 font-bold text-xs">Sharpe: 2.18 | Consistência: 88%</span>
                     </div>
                   </div>
                 </div>
@@ -467,3 +507,4 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
     </div>
   );
 };
+

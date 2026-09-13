@@ -28,7 +28,7 @@ interface QuantStrategyHealthModalProps {
 export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> = ({ isOpen, onClose }) => {
   const [report, setReport] = useState<QuantStrategyHealthReport | null>(null);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'FINANCIAL' | 'RISK' | 'SEQUENCES' | 'DISTRIBUTION' | 'SEGMENTATION' | 'MONTE_CARLO'>('FINANCIAL');
+  const [activeTab, setActiveTab] = useState<'FINANCIAL' | 'RISK' | 'SEQUENCES' | 'DISTRIBUTION' | 'SEGMENTATION' | 'MONTE_CARLO' | 'EVOLUTION'>('FINANCIAL');
 
   const fetchHealthReport = async () => {
     setLoading(true);
@@ -65,11 +65,11 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
               <div className="flex items-center space-x-2">
                 <h2 className="text-base font-bold text-white tracking-wide">Saúde da Estratégia 24/7 (Motor Quantitativo)</h2>
                 <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold">
-                  6 BLOCOS INSTITUCIONAIS
+                  7 BLOCOS INSTITUCIONAIS
                 </span>
               </div>
               <p className="text-xs text-slate-400 font-sans mt-0.5">
-                Auditoria matemática, risco de ruína, assimetria em R e simulação Monte Carlo.
+                Auditoria matemática, risco de ruína, evolução temporal diária/semanal/mensal e simulação Monte Carlo.
               </p>
             </div>
           </div>
@@ -137,7 +137,7 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
           </div>
         )}
 
-        {/* Navigation Tabs (6 Blocos) */}
+        {/* Navigation Tabs (7 Blocos) */}
         <div className="flex space-x-1 px-6 pt-3 bg-surface/50 border-b border-border/60 text-xs overflow-x-auto">
           {[
             { key: 'FINANCIAL', label: '1. Resultado & Expectativa (R)', icon: TrendingUp },
@@ -146,6 +146,7 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
             { key: 'DISTRIBUTION', label: '4. Distribuição de Trades', icon: BarChart3 },
             { key: 'SEGMENTATION', label: '5. Segmentação (Pares/Sessões)', icon: Globe },
             { key: 'MONTE_CARLO', label: '6. Robustez & Monte Carlo', icon: Dna },
+            { key: 'EVOLUTION', label: '7. Evolução & Curva de Capital', icon: Calendar },
           ].map(tab => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.key;
@@ -485,7 +486,7 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-amber-300 flex items-center space-x-1.5">
                         <Zap className="w-4 h-4 text-amber-400" />
-                        <span>AUDITORIA DE TEMPERATURA DA MÃO (0.5x A 5.0x DEUS) - IMPACTO NO RESULTADO</span>
+                        <span>AUDITORIA DE TEMPERATURA DA MÃO (1.5x A 5.0x DEUS) - IMPACTO NO RESULTADO</span>
                       </span>
                       <span className="text-[10px] px-2 py-0.5 rounded bg-accent/20 text-accent font-bold border border-accent/30">
                         {report.segmentation.optimalTemperatureLimit}
@@ -579,6 +580,136 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
                     <div className="p-3 rounded-lg bg-surface/70 border border-emerald-500/30 flex items-center justify-between text-xs mt-2">
                       <span className="text-slate-300">Veredito do Teste de Robustez:</span>
                       <span className="font-bold text-emerald-400">{report.monteCarlo.robustnessVerdict}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* BLOCO 7: EVOLUÇÃO TEMPORAL & CURVA DE CAPITAL */}
+              {activeTab === 'EVOLUTION' && report.evolution && (
+                <div className="space-y-4 animate-fadeIn">
+                  {/* Resumo Geral de Consistência */}
+                  <div className="grid grid-cols-4 gap-3">
+                    <div className="p-3.5 rounded-xl bg-surface/80 border border-border/80">
+                      <span className="text-[10px] text-slate-400 block">SHARPE RATIO ANUALIZADO</span>
+                      <span className="text-xl font-bold text-accent">{report.evolution.sharpeRatio}</span>
+                      <span className="text-[10px] text-slate-500 block mt-0.5">Eficiência por unidade de risco</span>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl bg-surface/80 border border-border/80">
+                      <span className="text-[10px] text-slate-400 block">CALMAR RATIO (RETORNO/DD)</span>
+                      <span className="text-xl font-bold text-indigo-400">{report.evolution.calmarRatio}</span>
+                      <span className="text-[10px] text-slate-500 block mt-0.5">Recuperação sobre Drawdown</span>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl bg-surface/80 border border-border/80">
+                      <span className="text-[10px] text-slate-400 block">SCORE DE CONSISTÊNCIA</span>
+                      <span className="text-xl font-bold text-emerald-400">{report.evolution.consistencyScore}%</span>
+                      <span className="text-[10px] text-slate-500 block mt-0.5">% de períodos lucrativos</span>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl bg-surface/80 border border-border/80">
+                      <span className="text-[10px] text-slate-400 block">RETORNO MÉDIO DIÁRIO</span>
+                      <span className={`text-xl font-bold ${report.evolution.avgDailyPnlUsd >= 0 ? 'text-buy' : 'text-sell'}`}>
+                        {report.evolution.avgDailyPnlUsd >= 0 ? `+$${report.evolution.avgDailyPnlUsd}` : `-$${Math.abs(report.evolution.avgDailyPnlUsd)}`}
+                      </span>
+                      <span className="text-[10px] text-slate-500 block mt-0.5">Expectativa financeira diária</span>
+                    </div>
+                  </div>
+
+                  {/* Detalhamento por Período: Diário, Semanal, Mensal */}
+                  <div className="grid grid-cols-3 gap-4">
+                    {/* Evolução Diária */}
+                    <div className="p-4 rounded-xl bg-surface/80 border border-border/80 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-white flex items-center space-x-1.5">
+                          <Calendar className="w-4 h-4 text-accent" />
+                          <span>EVOLUÇÃO DIÁRIA</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400">{report.evolution.daily.length} dias</span>
+                      </div>
+                      <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                        {report.evolution.daily.length === 0 ? (
+                          <span className="text-slate-500 text-[11px] block py-4 text-center">Nenhum registro diário fechado</span>
+                        ) : (
+                          report.evolution.daily.map((d, idx) => (
+                            <div key={idx} className="p-2 rounded bg-background/60 border border-border/40 flex justify-between items-center text-xs">
+                              <div>
+                                <span className="font-bold text-white block">{d.period}</span>
+                                <span className="text-[9px] text-slate-400">{d.tradesCount} ops ({d.winRate}% WR)</span>
+                              </div>
+                              <div className="text-right">
+                                <span className={`font-bold block ${d.netPnlUsd >= 0 ? 'text-buy' : 'text-sell'}`}>
+                                  {d.netPnlUsd >= 0 ? `+$${d.netPnlUsd}` : `-$${Math.abs(d.netPnlUsd)}`}
+                                </span>
+                                <span className="text-[9px] text-slate-400">{d.returnPct >= 0 ? `+${d.returnPct}%` : `${d.returnPct}%`}</span>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Evolução Semanal */}
+                    <div className="p-4 rounded-xl bg-surface/80 border border-border/80 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-white flex items-center space-x-1.5">
+                          <Layers className="w-4 h-4 text-indigo-400" />
+                          <span>EVOLUÇÃO SEMANAL</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400">{report.evolution.weekly.length} semanas</span>
+                      </div>
+                      <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                        {report.evolution.weekly.length === 0 ? (
+                          <span className="text-slate-500 text-[11px] block py-4 text-center">Nenhum registro semanal fechado</span>
+                        ) : (
+                          report.evolution.weekly.map((w, idx) => (
+                            <div key={idx} className="p-2 rounded bg-background/60 border border-border/40 flex justify-between items-center text-xs">
+                              <div>
+                                <span className="font-bold text-white block">{w.period}</span>
+                                <span className="text-[9px] text-slate-400">{w.tradesCount} ops ({w.winRate}% WR)</span>
+                              </div>
+                              <div className="text-right">
+                                <span className={`font-bold block ${w.netPnlUsd >= 0 ? 'text-buy' : 'text-sell'}`}>
+                                  {w.netPnlUsd >= 0 ? `+$${w.netPnlUsd}` : `-$${Math.abs(w.netPnlUsd)}`}
+                                </span>
+                                <span className="text-[9px] text-slate-400">{w.returnPct >= 0 ? `+${w.returnPct}%` : `${w.returnPct}%`}</span>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Evolução Mensal */}
+                    <div className="p-4 rounded-xl bg-surface/80 border border-border/80 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-white flex items-center space-x-1.5">
+                          <TrendingUp className="w-4 h-4 text-emerald-400" />
+                          <span>EVOLUÇÃO MENSAL</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400">{report.evolution.monthly.length} meses</span>
+                      </div>
+                      <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                        {report.evolution.monthly.length === 0 ? (
+                          <span className="text-slate-500 text-[11px] block py-4 text-center">Nenhum registro mensal fechado</span>
+                        ) : (
+                          report.evolution.monthly.map((m, idx) => (
+                            <div key={idx} className="p-2 rounded bg-background/60 border border-border/40 flex justify-between items-center text-xs">
+                              <div>
+                                <span className="font-bold text-white block">{m.period}</span>
+                                <span className="text-[9px] text-slate-400">{m.tradesCount} ops ({m.winRate}% WR)</span>
+                              </div>
+                              <div className="text-right">
+                                <span className={`font-bold block ${m.netPnlUsd >= 0 ? 'text-buy' : 'text-sell'}`}>
+                                  {m.netPnlUsd >= 0 ? `+$${m.netPnlUsd}` : `-$${Math.abs(m.netPnlUsd)}`}
+                                </span>
+                                <span className="text-[9px] text-slate-400">{m.returnPct >= 0 ? `+${m.returnPct}%` : `${m.returnPct}%`}</span>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -13,6 +13,8 @@ import { AutoPairSelectorEngine, DynamicPairStatus } from './engine/autoPairSele
 import { AIAdvisorEngine } from './engine/aiAdvisorEngine';
 import { QuantStrategyEngine } from './engine/quantStrategyEngine';
 import { ClientCopyTraderEngine } from './engine/clientCopyTraderEngine';
+import { AutonomousPairScanner } from './engine/autonomousPairScanner';
+import { ClientProtectionEngine } from './engine/clientProtectionEngine';
 import { FlowSignal, OrderBookData } from '../../shared/types';
 import { ClientAccountConfig } from '../../shared/clientTypes';
 
@@ -141,6 +143,109 @@ app.post('/api/pairs/:symbol/toggle', (req, res) => {
   res.json({ status: 'ok', symbol, active, dynamicPairs });
 });
 
+// Configuração de Banca Dinâmica
+app.post('/api/paper-trading/balance', (req, res) => {
+  const { balance } = req.body;
+  if (typeof balance === 'number' && balance > 0) {
+    paperTrading.setInitialBalance(balance);
+    const updated = paperTrading.getAccountState();
+    io.emit('paper_account_update', updated);
+    return res.json({ success: true, balance: updated.balance });
+  }
+  res.status(400).json({ error: 'Saldo inválido' });
+});
+
+// Reiniciar / Zerar Dados de Entrada
+app.post('/api/paper-trading/reset', (req, res) => {
+  const { balance } = req.body;
+  paperTrading.resetData(typeof balance === 'number' ? balance : undefined);
+  const updated = paperTrading.getAccountState();
+  io.emit('paper_account_update', updated);
+  res.json({ success: true, message: 'Dados zerados com sucesso', account: updated });
+});
+
+// Selecionar Pares de Trabalho Ativos
+app.post('/api/paper-trading/pairs', (req, res) => {
+  const { pairs } = req.body;
+  if (Array.isArray(pairs)) {
+    paperTrading.setActivePairs(pairs);
+    return res.json({ success: true, activePairs: paperTrading.getActivePairs() });
+  }
+  res.status(400).json({ error: 'Array de pares inválido' });
+});
+
+// Ajustar Temperatura de Risco (>= 1.5x)
+app.post('/api/paper-trading/temperature', (req, res) => {
+  const { temperature } = req.body;
+  if (typeof temperature === 'number') {
+    paperTrading.setMinTemperature(temperature);
+    return res.json({ success: true, temperature: paperTrading.getMinTemperature() });
+  }
+  res.status(400).json({ error: 'Temperatura inválida' });
+});
+
+// Scanner Autônomo 24/7 de Pares
+app.get('/api/autonomous-pairs', (req, res) => {
+  res.json(AutonomousPairScanner.getAllPairs());
+});
+
+app.post('/api/autonomous-pairs/:symbol/toggle', (req, res) => {
+  const symbol = decodeURIComponent(req.params.symbol);
+  const { active } = req.body;
+  const updated = AutonomousPairScanner.togglePairManual(symbol, active);
+  io.emit('autonomous_pairs_update', AutonomousPairScanner.getAllPairs());
+  res.json(updated);
+});
+
+// Módulo Clientes & Proteção Institucional
+app.get('/api/client-protection', (req, res) => {
+  res.json(ClientProtectionEngine.getAllClients());
+});
+
+app.post('/api/client-protection', (req, res) => {
+  const client = ClientProtectionEngine.addClient(req.body);
+  io.emit('client_protection_update', ClientProtectionEngine.getAllClients());
+  res.json(client);
+});
+
+app.delete('/api/client-protection/:id', (req, res) => {
+  const success = ClientProtectionEngine.deleteClient(req.params.id);
+  io.emit('client_protection_update', ClientProtectionEngine.getAllClients());
+  res.json({ success });
+});
+
+app.post('/api/client-protection/:id/unlock', (req, res) => {
+  const client = ClientProtectionEngine.unlockClient(req.params.id);
+  io.emit('client_protection_update', ClientProtectionEngine.getAllClients());
+  res.json(client);
+});
+
+// Barra de Pressão de Fluxo Institucional (Buy/Sell Pressure)
+app.get('/api/assets/:symbol/pressure', (req, res) => {
+  const symbol = decodeURIComponent(req.params.symbol);
+  const state = marketManager.getSymbolState(symbol);
+  if (!state) return res.status(404).json({ error: 'Ativo não encontrado' });
+
+  const book = state.book;
+  const totalDepth = book ? (book.bidDepthTotal + book.askDepthTotal) : 1;
+  const buyRatio = book ? (book.bidDepthTotal / Math.max(1, totalDepth)) : 0.5;
+  const buyPressurePct = Math.round(Math.min(100, Math.max(0, buyRatio * 100)));
+  const sellPressurePct = 100 - buyPressurePct;
+  const netPressurePct = buyPressurePct - sellPressurePct;
+
+  const pressure = {
+    symbol,
+    buyPressurePct,
+    sellPressurePct,
+    netPressurePct,
+    dominantSide: netPressurePct > 10 ? 'BUY' : netPressurePct < -10 ? 'SELL' : 'NEUTRAL',
+    imbalanceScore: book ? Number(book.imbalanceRatio.toFixed(2)) : 1.0,
+    whaleActivityLevel: Math.abs(netPressurePct) > 40 ? 'EXTREME' : Math.abs(netPressurePct) > 20 ? 'HIGH' : 'MEDIUM'
+  };
+
+  res.json(pressure);
+});
+
 app.get('/api/strategy/health-report', (req, res) => {
   const account = paperTrading.getAccountState();
   const report = QuantStrategyEngine.generateHealthReport(account);
@@ -148,6 +253,7 @@ app.get('/api/strategy/health-report', (req, res) => {
 });
 
 app.post('/api/ai-advisor/audit', async (req, res) => {
+
   const provider = req.body?.provider || process.env.AI_PROVIDER || 'HYBRID_AUTO';
   const account = paperTrading.getAccountState();
   const summaries = marketManager.getSummaries();

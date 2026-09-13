@@ -29,6 +29,15 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
   const [showFlowMarkers, setShowFlowMarkers] = useState(true);
   const [showVolumeProfile, setShowVolumeProfile] = useState(true);
+  const [selectedTf, setSelectedTf] = useState<'1m' | '3m' | '5m' | '15m' | '1h' | '4h' | '1D'>('1m');
+
+  // Cálculo da barra de pressão institucional em tempo real
+  const buyRatio = activeCandle 
+    ? Math.max(0.05, Math.min(0.95, (activeCandle.buyVolume || 1) / Math.max(1, (activeCandle.buyVolume + activeCandle.sellVolume) || 1)))
+    : 0.55;
+  const buyPressurePct = Math.round(buyRatio * 100);
+  const sellPressurePct = 100 - buyPressurePct;
+  const dominantSide = buyPressurePct > 55 ? 'BUY' : sellPressurePct > 55 ? 'SELL' : 'NEUTRAL';
 
   // Initialize Chart
   useEffect(() => {
@@ -225,44 +234,101 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
   return (
     <div className="relative w-full h-full flex flex-col bg-background">
-      {/* Chart Top Bar with Pro Indicator Toggles */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border/70 bg-surface/50 backdrop-blur-sm">
-        <div className="flex items-center space-x-3">
-          <span className="font-mono font-bold text-base text-white tracking-wider">{symbol}</span>
-          <span className="text-xs bg-accent/20 text-accent font-medium px-2 py-0.5 rounded border border-accent/30">
-            Order Flow 1M (Sem Repaint)
-          </span>
+      {/* Chart Top Bar with Pro Indicator Toggles, Timeframe & Flow Pressure */}
+      <div className="flex flex-col border-b border-border/70 bg-surface/60 backdrop-blur-sm select-none">
+        {/* Top Control Bar */}
+        <div className="flex items-center justify-between px-4 py-2">
+          <div className="flex items-center space-x-3">
+            <span className="font-mono font-bold text-base text-white tracking-wider">{symbol}</span>
+            
+            {/* Timeframe Selector */}
+            <div className="flex items-center bg-background/80 p-0.5 rounded-md border border-border/70 text-[11px] font-mono">
+              {(['1m', '3m', '5m', '15m', '1h', '4h', '1D'] as const).map((tf) => (
+                <button
+                  key={tf}
+                  onClick={() => setSelectedTf(tf)}
+                  className={`px-2 py-0.5 rounded transition-all ${
+                    selectedTf === tf
+                      ? 'bg-accent text-white font-bold shadow-sm'
+                      : 'text-slate-400 hover:text-white hover:bg-surface-hover'
+                  }`}
+                >
+                  {tf}
+                </button>
+              ))}
+            </div>
 
-          {/* Indicator Toggles */}
-          <div className="flex items-center space-x-2 ml-4">
-            <button
-              onClick={() => setShowFlowMarkers(!showFlowMarkers)}
-              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-mono border transition-all ${
-                showFlowMarkers
-                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                  : 'bg-surface text-slate-400 border-border'
-              }`}
-            >
-              {showFlowMarkers ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-              <span>Sinais no Gráfico</span>
-            </button>
+            {/* Indicator Toggles */}
+            <div className="flex items-center space-x-2 ml-2">
+              <button
+                onClick={() => setShowFlowMarkers(!showFlowMarkers)}
+                className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-mono border transition-all ${
+                  showFlowMarkers
+                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                    : 'bg-surface text-slate-400 border-border'
+                }`}
+              >
+                {showFlowMarkers ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                <span>Gatilhos de Fluxo</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Delta & CVD HUD */}
+          <div className="flex items-center space-x-4 text-xs font-mono">
+            <div className="flex items-center space-x-1.5">
+              <span className="text-slate-400">Delta CVD:</span>
+              <span className={`font-semibold ${activeCandle && activeCandle.cvd >= 0 ? 'text-buy' : 'text-sell'}`}>
+                {activeCandle ? (activeCandle.cvd >= 0 ? `+${activeCandle.cvd.toLocaleString()}` : activeCandle.cvd.toLocaleString()) : '0'}
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Delta & CVD HUD */}
-        <div className="flex items-center space-x-4 text-xs font-mono">
-          <div className="flex items-center space-x-1.5">
-            <span className="text-slate-400">Delta Acumulado (CVD):</span>
-            <span className={`font-semibold ${activeCandle && activeCandle.cvd >= 0 ? 'text-buy' : 'text-sell'}`}>
-              {activeCandle ? (activeCandle.cvd >= 0 ? `+${activeCandle.cvd.toLocaleString()}` : activeCandle.cvd.toLocaleString()) : '0'}
+        {/* 📊 BARRA DE PRESSÃO DE FLUXO INSTITUCIONAL (Buy/Sell Pressure) */}
+        <div className="px-4 py-1.5 bg-background/40 border-t border-border/40 flex items-center space-x-3 text-[11px] font-mono">
+          <div className="flex items-center space-x-1.5 shrink-0 text-slate-300 font-semibold">
+            <Activity className="w-3.5 h-3.5 text-accent animate-pulse" />
+            <span>PRESSÃO INSTITUCIONAL:</span>
+          </div>
+
+          {/* Visual Dual-Colored Pressure Bar */}
+          <div className="flex-1 flex items-center space-x-2">
+            <span className="text-emerald-400 font-bold text-[10px] w-12 text-right">
+              {buyPressurePct}% BUY
             </span>
+            
+            <div className="flex-1 h-2.5 bg-surface rounded-full overflow-hidden flex border border-border/60 p-0.5">
+              <div 
+                className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-l-full transition-all duration-300 shadow-sm shadow-emerald-500/50"
+                style={{ width: `${buyPressurePct}%` }}
+              />
+              <div 
+                className="h-full bg-gradient-to-r from-rose-500 to-rose-600 rounded-r-full transition-all duration-300 shadow-sm shadow-rose-500/50"
+                style={{ width: `${sellPressurePct}%` }}
+              />
+            </div>
+
+            <span className="text-rose-400 font-bold text-[10px] w-12">
+              {sellPressurePct}% SELL
+            </span>
+          </div>
+
+          <div className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 border ${
+            dominantSide === 'BUY'
+              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+              : dominantSide === 'SELL'
+              ? 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+              : 'bg-surface text-slate-400 border-border'
+          }`}>
+            {dominantSide === 'BUY' ? '🔥 ABSORÇÃO / DOMÍNIO COMPRADOR' : dominantSide === 'SELL' ? '⚠️ PRESSÃO / DOMÍNIO VENDEDOR' : '⚖️ FLUXO EM EQUILÍBRIO'}
           </div>
         </div>
       </div>
 
       {/* Floating Active Trade Box if In Position */}
       {openPosition && openPosition.symbol === symbol && (
-        <div className="absolute top-12 left-4 z-20 bg-surface/90 border border-accent/50 rounded-lg p-2.5 backdrop-blur-md shadow-xl text-xs font-mono flex items-center space-x-4 animate-pulse">
+        <div className="absolute top-20 left-4 z-20 bg-surface/90 border border-accent/50 rounded-lg p-2.5 backdrop-blur-md shadow-xl text-xs font-mono flex items-center space-x-4 animate-pulse">
           <div className="flex items-center space-x-2">
             <span className={`px-2 py-0.5 rounded font-bold ${openPosition.type === 'BUY' ? 'bg-buy text-black' : 'bg-sell text-white'}`}>
               {openPosition.type}
@@ -292,3 +358,4 @@ export const ChartPro: React.FC<ChartProProps> = ({
     </div>
   );
 };
+

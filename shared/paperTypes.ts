@@ -1,3 +1,5 @@
+import { SessionType, MarketRegime } from './types';
+
 export type TemperatureLevel = 
   | 'COLD_DEFENSE'       // 0.0x / 0.5x (Defesa)
   | 'NORMAL'             // 1.0x (Padrão)
@@ -139,6 +141,14 @@ export interface MonteCarloBlock {
   robustnessVerdict: 'EXCELENTE' | 'ROBUSTA' | 'MODERADA' | 'VULNERÁVEL';
 }
 
+export interface EquityEvolutionBlock {
+  daily: { period: string; pnlUsd: number; returnPct: number; winRate: number; tradesCount: number }[];
+  weekly: { period: string; pnlUsd: number; returnPct: number; winRate: number; tradesCount: number }[];
+  monthly: { period: string; pnlUsd: number; returnPct: number; winRate: number; tradesCount: number }[];
+  sharpeRatio: number;
+  consistencyScore: number; // 0 a 100
+}
+
 export interface QuantStrategyHealthReport {
   timestamp: number;
   financial: FinancialMetricsBlock;
@@ -147,7 +157,9 @@ export interface QuantStrategyHealthReport {
   distribution: DistributionBlock;
   segmentation: ContextSegmentationBlock;
   monteCarlo: MonteCarloBlock;
+  evolution: EquityEvolutionBlock; // 7º Bloco: Evolução Temporal
   overallScore: number; // 0 a 100
   verdict: string;
   actionableInsights: string[];
 }
+

@@ -4,33 +4,77 @@ import { AutoPairSelectorEngine } from './autoPairSelectorEngine';
 import { QuantStrategyEngine } from './quantStrategyEngine';
 
 export class PaperTradingEngine {
-  private balance: number = 10000; // $10,000 banca inicial
+  private initialBalance: number = 10000;
+  private balance: number = 10000;
   private realizedPnl: number = 0;
   private openPositions: Map<string, SimulatedTrade> = new Map();
   private history: SimulatedTrade[] = [];
   private onUpdateCallback?: (account: PaperAccount, newTradeEvent?: SimulatedTrade) => void;
+  private activePairs: Set<string> = new Set(['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'EUR/USD', 'GBP/USD', 'USD/JPY']);
+  private minTemperature: number = 1.5; // Temperatura mínima de trabalho a partir de 1.5x
 
   constructor(onUpdate?: (account: PaperAccount, newTradeEvent?: SimulatedTrade) => void) {
     this.onUpdateCallback = onUpdate;
   }
 
+  public setInitialBalance(newBalance: number) {
+    if (newBalance > 0) {
+      this.initialBalance = newBalance;
+      this.balance = newBalance;
+      this.realizedPnl = 0;
+      this.openPositions.clear();
+      this.history = [];
+      this.broadcastUpdate();
+    }
+  }
+
+  public resetData(customBalance?: number) {
+    const targetBalance = customBalance || this.initialBalance;
+    this.initialBalance = targetBalance;
+    this.balance = targetBalance;
+    this.realizedPnl = 0;
+    this.openPositions.clear();
+    this.history = [];
+    this.broadcastUpdate();
+  }
+
+  public setActivePairs(pairs: string[]) {
+    this.activePairs = new Set(pairs);
+  }
+
+  public getActivePairs(): string[] {
+    return Array.from(this.activePairs);
+  }
+
+  public setMinTemperature(temp: number) {
+    this.minTemperature = Math.max(1.5, temp);
+  }
+
+  public getMinTemperature(): number {
+    return this.minTemperature;
+  }
+
   // Executa uma entrada automatizada SEM REPAINT quando um sinal de fluxo qualificado ocorre
   public handleSignal(signal: FlowSignal, currentPrice: number) {
-    // 1. Verificar se o par está ativo para trading de acordo com o Consultor IA
-    const pairConfig = AutoPairSelectorEngine.getPairConfig(signal.symbol);
-    if (pairConfig && !pairConfig.isActiveForTrading) {
-      // Par pausado pela IA devido a baixa assertividade ou spread desfavorável
+    // 1. Verificar se o par está habilitado pelo usuário
+    if (!this.activePairs.has(signal.symbol)) {
       return;
     }
 
-    // 2. Se já tem posição aberta nesse ativo, não faz overtrading
+    // 2. Verificar se o par está ativo para trading de acordo com o Consultor IA
+    const pairConfig = AutoPairSelectorEngine.getPairConfig(signal.symbol);
+    if (pairConfig && !pairConfig.isActiveForTrading) {
+      return;
+    }
+
+    // 3. Se já tem posição aberta nesse ativo, não faz overtrading
     if (this.openPositions.has(signal.symbol)) {
       return;
     }
 
     let tradeType: 'BUY' | 'SELL' | null = null;
-    let slDistancePct = 0.0035; // 0.35% de Stop Loss
-    let tpDistancePct = 0.0070; // 0.70% de Take Profit (Risco/Retorno 1:2)
+    let slDistancePct = 0.0030; // 0.30% de Stop Loss
+    let tpDistancePct = 0.0075; // 0.75% de Take Profit (Risco/Retorno 2.5R)
 
     if (signal.type === 'ABSORPTION_BUY') {
       tradeType = 'SELL';
@@ -51,11 +95,12 @@ export class PaperTradingEngine {
       ? Number((currentPrice * (1 + tpDistancePct)).toFixed(currentPrice > 500 ? 2 : 5))
       : Number((currentPrice * (1 - tpDistancePct)).toFixed(currentPrice > 500 ? 2 : 5));
 
-    // Potência adaptativa (se tá dando certo, dobra a mão)
-    const notionalAllocation = pairConfig?.recommendedAllocationUsd || 2000;
-    const powerMultiplier = pairConfig?.powerMultiplier || 1.0;
-    const temperature = pairConfig?.temperature || 'NORMAL';
-    const powerLabel = pairConfig?.powerMultiplier ? ` [Potência ${pairConfig.powerMultiplier}x]` : '';
+    // Potência proporcional à banca (20% por trade padrão)
+    const baseAllocation = Math.max(100, this.balance * 0.20);
+    const powerMultiplier = Math.max(this.minTemperature, pairConfig?.powerMultiplier || 1.5);
+    const notionalAllocation = baseAllocation * (powerMultiplier / 1.5);
+    const temperature = pairConfig?.temperature || 'HOT_MAX_EXTRACT';
+    const powerLabel = ` [Potência ${powerMultiplier.toFixed(1)}x]`;
 
     const now = Date.now();
     const session = QuantStrategyEngine.determineSession(now);
@@ -94,8 +139,8 @@ export class PaperTradingEngine {
 
     trade.currentPrice = currentPrice;
     
-    const pairConfig = AutoPairSelectorEngine.getPairConfig(symbol);
-    const notionalSize = pairConfig?.recommendedAllocationUsd || 2000;
+    const baseAllocation = Math.max(100, this.balance * 0.20);
+    const notionalSize = baseAllocation * (trade.powerMultiplier / 1.5);
 
     const priceDeltaPct = trade.type === 'BUY' 
       ? (currentPrice - trade.entryPrice) / trade.entryPrice
@@ -106,13 +151,13 @@ export class PaperTradingEngine {
 
     let closed = false;
 
-    // Checar Take Profit (2.0R)
+    // Checar Take Profit (2.5R)
     if (
       (trade.type === 'BUY' && currentPrice >= trade.takeProfit) ||
       (trade.type === 'SELL' && currentPrice <= trade.takeProfit)
     ) {
       trade.status = 'CLOSED_TP';
-      trade.rMultiple = 2.0;
+      trade.rMultiple = 2.5;
       closed = true;
     }
     // Checar Stop Loss (-1.0R)
@@ -164,3 +209,4 @@ export class PaperTradingEngine {
     }
   }
 }
+

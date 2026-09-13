@@ -3,3 +3,7 @@ dist
 .env
 *.log
 .DS_Store
+test_models.js
+extract_strategy.js
+run_extract.ps1
+Estrategia_texto.txt

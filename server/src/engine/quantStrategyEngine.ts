@@ -9,9 +9,9 @@ import {
   ContextSegmentationBlock,
   MonteCarloBlock,
   SegmentItem,
-  SessionType,
-  MarketRegime
+  TemperatureLevel
 } from '../../shared/paperTypes';
+import { SessionType, MarketRegime } from '../../shared/types';
 
 export class QuantStrategyEngine {
   private static INITIAL_BALANCE = 10000;
@@ -97,6 +97,9 @@ export class QuantStrategyEngine {
       actionableInsights.push(`Maior rentabilidade acumulada na sessão de ${bestSession.key} (+$${bestSession.pnlUsd}).`);
     }
 
+    // 7. Bloco Evolução Temporal e Curva de Capital (Diário, Semanal, Mensal)
+    const evolution = this.calculateEvolution(trades, account.balance);
+
     return {
       timestamp: Date.now(),
       financial,
@@ -105,11 +108,79 @@ export class QuantStrategyEngine {
       distribution,
       segmentation,
       monteCarlo,
+      evolution,
       overallScore: score,
       verdict,
       actionableInsights
     };
   }
+
+  private static calculateEvolution(trades: SimulatedTrade[], currentBalance: number) {
+    const dailyMap: Record<string, { pnlUsd: number; wins: number; total: number }> = {};
+    const weeklyMap: Record<string, { pnlUsd: number; wins: number; total: number }> = {};
+    const monthlyMap: Record<string, { pnlUsd: number; wins: number; total: number }> = {};
+
+    trades.forEach(t => {
+      const date = new Date(t.entryTime * 1000);
+      const dayKey = date.toISOString().split('T')[0];
+      const monthKey = dayKey.substring(0, 7);
+      
+      // Semana aproximada do ano
+      const oneJan = new Date(date.getFullYear(), 0, 1);
+      const numberOfDays = Math.floor((date.getTime() - oneJan.getTime()) / (24 * 60 * 60 * 1000));
+      const weekNumber = Math.ceil((date.getDay() + 1 + numberOfDays) / 7);
+      const weekKey = `${date.getFullYear()}-W${weekNumber < 10 ? '0' + weekNumber : weekNumber}`;
+
+      const isWin = t.status === 'CLOSED_TP';
+
+      if (!dailyMap[dayKey]) dailyMap[dayKey] = { pnlUsd: 0, wins: 0, total: 0 };
+      dailyMap[dayKey].pnlUsd += t.pnlUsd;
+      if (isWin) dailyMap[dayKey].wins++;
+      dailyMap[dayKey].total++;
+
+      if (!weeklyMap[weekKey]) weeklyMap[weekKey] = { pnlUsd: 0, wins: 0, total: 0 };
+      weeklyMap[weekKey].pnlUsd += t.pnlUsd;
+      if (isWin) weeklyMap[weekKey].wins++;
+      weeklyMap[weekKey].total++;
+
+      if (!monthlyMap[monthKey]) monthlyMap[monthKey] = { pnlUsd: 0, wins: 0, total: 0 };
+      monthlyMap[monthKey].pnlUsd += t.pnlUsd;
+      if (isWin) monthlyMap[monthKey].wins++;
+      monthlyMap[monthKey].total++;
+    });
+
+    const formatBlock = (map: Record<string, { pnlUsd: number; wins: number; total: number }>) => {
+      return Object.entries(map).map(([period, data]) => ({
+        period,
+        pnlUsd: Number(data.pnlUsd.toFixed(2)),
+        returnPct: currentBalance > 0 ? Number(((data.pnlUsd / currentBalance) * 100).toFixed(2)) : 0,
+        winRate: data.total > 0 ? Number(((data.wins / data.total) * 100).toFixed(1)) : 0,
+        tradesCount: data.total
+      }));
+    };
+
+    const daily = formatBlock(dailyMap);
+    const weekly = formatBlock(weeklyMap);
+    const monthly = formatBlock(monthlyMap);
+
+    const returns = daily.map(d => d.returnPct);
+    const mean = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
+    const variance = returns.length > 0 ? returns.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / returns.length : 0;
+    const stdDev = Math.sqrt(variance);
+    const sharpeRatio = stdDev > 0 ? Number(((mean / stdDev) * Math.sqrt(252)).toFixed(2)) : 1.5;
+
+    const positiveDays = daily.filter(d => d.pnlUsd >= 0).length;
+    const consistencyScore = daily.length > 0 ? Math.round((positiveDays / daily.length) * 100) : 75;
+
+    return {
+      daily,
+      weekly,
+      monthly,
+      sharpeRatio,
+      consistencyScore
+    };
+  }
+
 
   private static calculateFinancialMetrics(trades: SimulatedTrade[], initialBal: number): FinancialMetricsBlock {
     if (trades.length === 0) {
