@@ -19,7 +19,7 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
   const handleRunAudit = async (selectedProvider = provider) => {
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:4000/api/ai-advisor/audit', {
+      const res = await fetch('/api/ai-advisor/audit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider: selectedProvider })

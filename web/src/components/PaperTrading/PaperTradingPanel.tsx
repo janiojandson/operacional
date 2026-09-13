@@ -42,7 +42,7 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
 
   const handleTogglePair = async (symbol: string, currentActive: boolean) => {
     try {
-      await fetch(`http://localhost:4000/api/pairs/${encodeURIComponent(symbol)}/toggle`, {
+      await fetch(`/api/pairs/${encodeURIComponent(symbol)}/toggle`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ active: !currentActive })
@@ -73,7 +73,7 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
     };
 
     try {
-      await fetch('http://localhost:4000/api/clients', {
+      await fetch('/api/clients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newConfig)

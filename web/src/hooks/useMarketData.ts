@@ -23,7 +23,10 @@ export function useMarketData(activeSymbol: string) {
 
   // Initialize Socket connection
   useEffect(() => {
-    const s = io('http://localhost:4000', {
+    const isLocal = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+    const serverUrl = isLocal ? 'http://localhost:4000' : window.location.origin;
+
+    const s = io(serverUrl, {
       transports: ['websocket', 'polling']
     });
 
@@ -88,7 +91,7 @@ export function useMarketData(activeSymbol: string) {
   useEffect(() => {
     if (!activeSymbol) return;
 
-    fetch(`http://localhost:4000/api/assets/${encodeURIComponent(activeSymbol)}/state`)
+    fetch(`/api/assets/${encodeURIComponent(activeSymbol)}/state`)
       .then(res => res.json())
       .then(data => {
         if (data.candles) setCandles(data.candles);
