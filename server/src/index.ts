@@ -212,7 +212,7 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`🚀 MarketFlow Pro Backend Server running at http://localhost:${PORT}`);
-  console.log(`📡 WebSocket Gateway ready on ws://localhost:${PORT}`);
+server.listen(Number(PORT), '0.0.0.0', () => {
+  console.log(`🚀 MarketFlow Pro Backend Server running at http://0.0.0.0:${PORT}`);
+  console.log(`📡 WebSocket Gateway ready on ws://0.0.0.0:${PORT}`);
 });
