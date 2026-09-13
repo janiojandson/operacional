@@ -87,10 +87,12 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
     setChatLoading(true);
 
     try {
-      const historyPayload = messages.map((m) => ({
-        role: m.role,
-        content: m.content
-      }));
+      const historyPayload = messages
+        .filter((m, idx) => !(idx === 0 && m.role === 'assistant' && m.content.startsWith('Olá, Trader!')))
+        .map((m) => ({
+          role: m.role,
+          content: m.content
+        }));
 
       const res = await fetch('/api/ai-advisor/chat', {
         method: 'POST',

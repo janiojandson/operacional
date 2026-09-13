@@ -109,7 +109,8 @@ Instruções:
 - Seja extremamente técnico, profissional, objetivo e fundamentado em estatística, SMC (Order Blocks, Fair Value Gaps, Liquidity Sweeps) e Tape Reading (CVD, absorções, agressões).
 - Use Markdown bem formatado (negritos, listas e tópicos).`;
 
-    const historyContext = history.map(h => `${h.role === 'user' ? 'Trader' : 'Consultor'}: ${h.content}`).join('\n');
+    const filteredHistory = history.filter(h => !h.content.startsWith('Olá, Trader!') && !h.content.startsWith('Ola, Trader!'));
+    const historyContext = filteredHistory.map(h => `${h.role === 'user' ? 'Trader' : 'Consultor'}: ${h.content}`).join('\n');
     const fullUserPrompt = `${historyContext ? `HISTÓRICO DA CONVERSA:\n${historyContext}\n\n` : ''}NOVA PERGUNTA DO TRADER:\n${message}`;
 
     return await this.callAI(fullUserPrompt, systemPrompt, provider);

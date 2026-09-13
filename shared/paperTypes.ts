@@ -141,12 +141,23 @@ export interface MonteCarloBlock {
   robustnessVerdict: 'EXCELENTE' | 'ROBUSTA' | 'MODERADA' | 'VULNERÁVEL';
 }
 
+export interface EquityPeriodStat {
+  period: string;
+  pnlUsd: number;
+  netPnlUsd: number;
+  returnPct: number;
+  winRate: number;
+  tradesCount: number;
+}
+
 export interface EquityEvolutionBlock {
-  daily: { period: string; pnlUsd: number; returnPct: number; winRate: number; tradesCount: number }[];
-  weekly: { period: string; pnlUsd: number; returnPct: number; winRate: number; tradesCount: number }[];
-  monthly: { period: string; pnlUsd: number; returnPct: number; winRate: number; tradesCount: number }[];
+  daily: EquityPeriodStat[];
+  weekly: EquityPeriodStat[];
+  monthly: EquityPeriodStat[];
   sharpeRatio: number;
+  calmarRatio: number;
   consistencyScore: number; // 0 a 100
+  avgDailyPnlUsd: number;
 }
 
 export interface QuantStrategyHealthReport {

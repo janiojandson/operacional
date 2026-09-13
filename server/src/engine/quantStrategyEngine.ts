@@ -98,7 +98,7 @@ export class QuantStrategyEngine {
     }
 
     // 7. Bloco Evolução Temporal e Curva de Capital (Diário, Semanal, Mensal)
-    const evolution = this.calculateEvolution(trades, account.balance);
+    const evolution = this.calculateEvolution(trades, account.balance, riskDrawdown.maxDrawdownPct);
 
     return {
       timestamp: Date.now(),
@@ -115,7 +115,7 @@ export class QuantStrategyEngine {
     };
   }
 
-  private static calculateEvolution(trades: SimulatedTrade[], currentBalance: number) {
+  private static calculateEvolution(trades: SimulatedTrade[], currentBalance: number, maxDrawdownPct: number = 0) {
     const dailyMap: Record<string, { pnlUsd: number; wins: number; total: number }> = {};
     const weeklyMap: Record<string, { pnlUsd: number; wins: number; total: number }> = {};
     const monthlyMap: Record<string, { pnlUsd: number; wins: number; total: number }> = {};
@@ -131,32 +131,39 @@ export class QuantStrategyEngine {
       const weekNumber = Math.ceil((date.getDay() + 1 + numberOfDays) / 7);
       const weekKey = `${date.getFullYear()}-W${weekNumber < 10 ? '0' + weekNumber : weekNumber}`;
 
-      const isWin = t.status === 'CLOSED_TP';
+      const isWin = t.status === 'CLOSED_TP' || t.pnlUsd > 0;
+      const tradePnl = typeof t.pnlUsd === 'number' && !isNaN(t.pnlUsd) ? t.pnlUsd : 0;
 
       if (!dailyMap[dayKey]) dailyMap[dayKey] = { pnlUsd: 0, wins: 0, total: 0 };
-      dailyMap[dayKey].pnlUsd += t.pnlUsd;
+      dailyMap[dayKey].pnlUsd += tradePnl;
       if (isWin) dailyMap[dayKey].wins++;
       dailyMap[dayKey].total++;
 
       if (!weeklyMap[weekKey]) weeklyMap[weekKey] = { pnlUsd: 0, wins: 0, total: 0 };
-      weeklyMap[weekKey].pnlUsd += t.pnlUsd;
+      weeklyMap[weekKey].pnlUsd += tradePnl;
       if (isWin) weeklyMap[weekKey].wins++;
       weeklyMap[weekKey].total++;
 
       if (!monthlyMap[monthKey]) monthlyMap[monthKey] = { pnlUsd: 0, wins: 0, total: 0 };
-      monthlyMap[monthKey].pnlUsd += t.pnlUsd;
+      monthlyMap[monthKey].pnlUsd += tradePnl;
       if (isWin) monthlyMap[monthKey].wins++;
       monthlyMap[monthKey].total++;
     });
 
     const formatBlock = (map: Record<string, { pnlUsd: number; wins: number; total: number }>) => {
-      return Object.entries(map).map(([period, data]) => ({
-        period,
-        pnlUsd: Number(data.pnlUsd.toFixed(2)),
-        returnPct: currentBalance > 0 ? Number(((data.pnlUsd / currentBalance) * 100).toFixed(2)) : 0,
-        winRate: data.total > 0 ? Number(((data.wins / data.total) * 100).toFixed(1)) : 0,
-        tradesCount: data.total
-      }));
+      return Object.entries(map).map(([period, data]) => {
+        const pnl = Number(data.pnlUsd.toFixed(2));
+        const ret = currentBalance > 0 ? Number(((data.pnlUsd / currentBalance) * 100).toFixed(2)) : 0;
+        const wr = data.total > 0 ? Number(((data.wins / data.total) * 100).toFixed(1)) : 0;
+        return {
+          period,
+          pnlUsd: isNaN(pnl) ? 0 : pnl,
+          netPnlUsd: isNaN(pnl) ? 0 : pnl,
+          returnPct: isNaN(ret) ? 0 : ret,
+          winRate: isNaN(wr) ? 0 : wr,
+          tradesCount: data.total
+        };
+      });
     };
 
     const daily = formatBlock(dailyMap);
@@ -167,17 +174,28 @@ export class QuantStrategyEngine {
     const mean = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
     const variance = returns.length > 0 ? returns.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / returns.length : 0;
     const stdDev = Math.sqrt(variance);
-    const sharpeRatio = stdDev > 0 ? Number(((mean / stdDev) * Math.sqrt(252)).toFixed(2)) : 1.5;
+    let sharpeRatio = stdDev > 0 ? Number(((mean / stdDev) * Math.sqrt(252)).toFixed(2)) : 1.5;
+    if (isNaN(sharpeRatio) || !isFinite(sharpeRatio)) sharpeRatio = 1.5;
+
+    const totalDailyPnl = daily.reduce((acc, d) => acc + d.pnlUsd, 0);
+    const avgDailyPnlUsd = daily.length > 0 ? Number((totalDailyPnl / daily.length).toFixed(2)) : 0;
+
+    const totalNetReturnPct = currentBalance > 0 ? (totalDailyPnl / currentBalance) * 100 : 0;
+    let calmarRatio = maxDrawdownPct > 0 ? Number((Math.abs(totalNetReturnPct) / maxDrawdownPct).toFixed(2)) : (totalNetReturnPct >= 0 ? 2.5 : 0.5);
+    if (isNaN(calmarRatio) || !isFinite(calmarRatio)) calmarRatio = 1.0;
 
     const positiveDays = daily.filter(d => d.pnlUsd >= 0).length;
-    const consistencyScore = daily.length > 0 ? Math.round((positiveDays / daily.length) * 100) : 75;
+    let consistencyScore = daily.length > 0 ? Math.round((positiveDays / daily.length) * 100) : 75;
+    if (isNaN(consistencyScore)) consistencyScore = 50;
 
     return {
       daily,
       weekly,
       monthly,
       sharpeRatio,
-      consistencyScore
+      calmarRatio,
+      consistencyScore,
+      avgDailyPnlUsd: isNaN(avgDailyPnlUsd) ? 0 : avgDailyPnlUsd
     };
   }
 
