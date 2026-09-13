@@ -322,8 +322,6 @@ export default function App() {
       <ClientProtectionModal
         isOpen={isClientsOpen}
         onClose={() => setIsClientsOpen(false)}
-        clients={clients}
-        onRefresh={() => {}}
       />
     </div>
   );

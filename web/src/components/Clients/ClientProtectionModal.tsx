@@ -32,7 +32,13 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
       const res = await fetch('/api/client-protection');
       if (res.ok) {
         const data = await res.json();
-        setLocalClients(data.clients || []);
+        if (Array.isArray(data)) {
+          setLocalClients(data);
+        } else if (data && Array.isArray(data.clients)) {
+          setLocalClients(data.clients);
+        } else {
+          setLocalClients([]);
+        }
       }
     } catch (e) {
       console.warn('Erro ao carregar clientes:', e);

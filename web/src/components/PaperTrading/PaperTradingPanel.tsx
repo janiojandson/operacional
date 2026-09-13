@@ -27,10 +27,22 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
   const [newClientName, setNewClientName] = useState('');
   const [newExchange, setNewExchange] = useState<'BYBIT' | 'BINANCE'>('BYBIT');
   const [newApiKey, setNewApiKey] = useState('');
-  const [newMaxLoss, setNewMaxLoss] = useState(250);
-  const [newMaxProfit, setNewMaxProfit] = useState(500);
-  const [newLot, setNewLot] = useState(1000);
-  const [newPhone, setNewPhone] = useState('5511999999999');
+  const [newClientBalance, setNewClientBalance] = useState(10000);
+  const [newMaxLoss, setNewMaxLoss] = useState(400); // 4%
+  const [newMaxProfit, setNewMaxProfit] = useState(1000); // 10%
+  const [newLot, setNewLot] = useState(2000); // 20%
+  const [newPhone, setNewPhone] = useState('5541999998888');
+
+  // Sugestões Quants Automáticas
+  const tabSuggestedStop = Math.round(newClientBalance * 0.04);
+  const tabSuggestedProfit = Math.round(newClientBalance * 0.10);
+  const tabSuggestedLot = Math.round(newClientBalance * 0.20);
+
+  const handleApplyTabSuggestions = () => {
+    setNewMaxLoss(tabSuggestedStop);
+    setNewMaxProfit(tabSuggestedProfit);
+    setNewLot(tabSuggestedLot);
+  };
 
   if (!account) {
     return (
@@ -208,7 +220,33 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-4 gap-2">
+                {/* Sugestões Quants Automáticas e Ajuda */}
+                <div className="p-2 rounded bg-background/80 border border-emerald-500/30 flex items-center justify-between text-[10px]">
+                  <div className="flex items-center space-x-3 text-slate-300">
+                    <span className="text-amber-300 font-bold">💡 Ajuda Quant:</span>
+                    <span>Stop: <strong className="text-rose-400">${tabSuggestedStop} (4%)</strong></span>
+                    <span>Meta Lucro: <strong className="text-emerald-400">+${tabSuggestedProfit} (10% | 2.5R)</strong></span>
+                    <span>Lote Base: <strong className="text-accent">${tabSuggestedLot} (20%)</strong></span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleApplyTabSuggestions}
+                    className="px-2 py-0.5 rounded bg-accent/20 hover:bg-accent/30 text-accent font-bold border border-accent/40 text-[9px] transition-all"
+                  >
+                    ⚡ Aplicar Sugestões
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-5 gap-2">
+                  <div>
+                    <label className="text-slate-300 text-[9px] block">BANCA DO CLIENTE ($)</label>
+                    <input 
+                      type="number" 
+                      value={newClientBalance} 
+                      onChange={e => setNewClientBalance(Number(e.target.value))}
+                      className="w-full bg-background border border-border px-2 py-1 rounded text-white text-xs font-mono"
+                    />
+                  </div>
                   <div>
                     <label className="text-rose-400 text-[9px] block">STOP LOSS DIÁRIO ($)</label>
                     <input 
