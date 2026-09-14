@@ -8,15 +8,15 @@
     "dev:server": "tsx server/src/index.ts",
     "dev:web": "vite web",
     "build:web": "vite build web",
-    "start": "node server/dist/index.js"
+    "build": "npm run build:web",
+    "start": "tsx server/src/index.ts"
   },
   "dependencies": {
     "@types/bcryptjs": "^2.4.6",
-    "@types/better-sqlite3": "^9.6.0",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/pg": "^8.23.1",
     "@types/react-router-dom": "^5.3.3",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^13.0.3",
     "ccxt": "^4.4.63",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -26,6 +26,7 @@
     "jsonwebtoken": "^9.0.3",
     "lightweight-charts": "^4.2.1",
     "lucide-react": "^0.475.0",
+    "pg": "^8.23.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.18.3",

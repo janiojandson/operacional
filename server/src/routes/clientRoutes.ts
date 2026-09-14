@@ -7,7 +7,6 @@ import { BybitExecutionEngine } from '../engine/bybitExecutionEngine.js';
 export const clientRouter = Router();
 clientRouter.use(requireClient);
 
-// Helper: pega clientId do token OU do param se admin
 function getClientId(req: Request): string | null {
   if (req.user?.role === 'ADMIN') {
     return (req.params.clientId || req.query.clientId) as string || null;
@@ -15,7 +14,7 @@ function getClientId(req: Request): string | null {
   return req.user?.clientId || null;
 }
 
-// POST /api/client/api-keys — registrar/atualizar API Keys Bybit
+// POST /api/client/api-keys
 clientRouter.post('/api-keys', async (req: Request, res: Response) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado no token.' });
@@ -24,7 +23,6 @@ clientRouter.post('/api-keys', async (req: Request, res: Response) => {
   if (!apiKey || !apiSecret) {
     return res.status(400).json({ error: 'apiKey e apiSecret são obrigatórios.' });
   }
-
   if (apiKey.length < 10 || apiSecret.length < 10) {
     return res.status(400).json({ error: 'Chaves inválidas — verifique se copiou corretamente da Bybit.' });
   }
@@ -32,8 +30,7 @@ clientRouter.post('/api-keys', async (req: Request, res: Response) => {
   try {
     const encKey = encrypt(apiKey);
     const encSecret = encrypt(apiSecret);
-    ClientConfigDB.updateApiKeys(clientId, encKey, encSecret, testnet);
-
+    await ClientConfigDB.updateApiKeys(clientId, encKey, encSecret, testnet);
     res.json({
       success: true,
       message: 'API Keys salvas com criptografia AES-256. Clique em "Testar Conexão" para validar.',
@@ -44,13 +41,12 @@ clientRouter.post('/api-keys', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/client/api-keys/test — testar conectividade com a Bybit
+// POST /api/client/api-keys/test
 clientRouter.post('/api-keys/test', async (req: Request, res: Response) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
 
   const result = await BybitExecutionEngine.connectAndValidate(clientId);
-
   if (result.success) {
     res.json({
       success: true,
@@ -67,52 +63,50 @@ clientRouter.post('/api-keys/test', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/client/account — saldo e info da conta real Bybit
+// GET /api/client/account
 clientRouter.get('/account', async (req: Request, res: Response) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
 
-  const config = ClientConfigDB.findByClientId(clientId);
+  const config = await ClientConfigDB.findByClientId(clientId);
   if (!config) return res.status(404).json({ error: 'Configuração de cliente não encontrada.' });
 
-  // Buscar dados reais da Bybit se API estiver conectada
   let bybitAccount = null;
-  if (config.api_connected === 1 && config.bybit_api_key_enc) {
+  if (Number(config.api_connected) === 1 && config.bybit_api_key_enc) {
     bybitAccount = await BybitExecutionEngine.getAccountBalance(clientId);
     if (bybitAccount) {
-      ClientConfigDB.updateBalance(clientId, bybitAccount.walletBalance);
+      await ClientConfigDB.updateBalance(clientId, bybitAccount.walletBalance);
     }
   }
 
   res.json({
     clientId,
-    balance: bybitAccount?.walletBalance ?? config.balance,
-    availableBalance: bybitAccount?.availableBalance ?? config.balance,
-    equity: bybitAccount?.equity ?? config.balance,
+    balance: bybitAccount?.walletBalance ?? Number(config.balance),
+    availableBalance: bybitAccount?.availableBalance ?? Number(config.balance),
+    equity: bybitAccount?.equity ?? Number(config.balance),
     unrealisedPnl: bybitAccount?.unrealisedPnl ?? 0,
-    riskPct: config.risk_pct,
-    leverage: config.leverage,
-    maxDailyLossUsd: config.max_daily_loss_usd,
-    maxDailyProfitUsd: config.max_daily_profit_usd,
-    maxOpenPositions: config.max_open_positions,
-    isActive: config.is_active === 1,
-    apiConnected: config.api_connected === 1,
-    bybitTestnet: config.bybit_testnet === 1,
+    riskPct: Number(config.risk_pct),
+    leverage: Number(config.leverage),
+    maxDailyLossUsd: Number(config.max_daily_loss_usd),
+    maxDailyProfitUsd: Number(config.max_daily_profit_usd),
+    maxOpenPositions: Number(config.max_open_positions),
+    isActive: Number(config.is_active) === 1,
+    apiConnected: Number(config.api_connected) === 1,
+    bybitTestnet: Number(config.bybit_testnet) === 1,
     hasApiKeys: !!(config.bybit_api_key_enc),
     notificationPhone: config.notification_phone
   });
 });
 
-// GET /api/client/positions — posições abertas reais na Bybit
+// GET /api/client/positions
 clientRouter.get('/positions', async (req: Request, res: Response) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
-
   const positions = await BybitExecutionEngine.getOpenPositions(clientId);
   res.json(positions);
 });
 
-// GET /api/client/history — histórico de trades (local + Bybit)
+// GET /api/client/history
 clientRouter.get('/history', async (req: Request, res: Response) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
@@ -120,22 +114,20 @@ clientRouter.get('/history', async (req: Request, res: Response) => {
   const { limit = 100, source = 'local' } = req.query;
 
   if (source === 'bybit') {
-    // Buscar diretamente da Bybit
     const trades = await BybitExecutionEngine.getBybitTradeHistory(clientId);
     return res.json(trades);
   }
 
-  // Histórico local (banco SQLite)
-  const trades = TradeHistoryDB.findByClientId(clientId, Number(limit));
+  const trades = await TradeHistoryDB.findByClientId(clientId, Number(limit));
   res.json(trades);
 });
 
-// GET /api/client/history/download — exportar histórico como CSV
+// GET /api/client/history/download
 clientRouter.get('/history/download', async (req: Request, res: Response) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
 
-  const trades = TradeHistoryDB.findByClientId(clientId, 10000);
+  const trades = await TradeHistoryDB.findByClientId(clientId, 10000);
 
   const headers = ['id', 'symbol', 'side', 'entry_price', 'close_price', 'qty', 'notional_usd', 'pnl_usd', 'leverage', 'status', 'signal_reason', 'entry_time', 'close_time'];
   const formatDate = (ts: number | null) => ts ? new Date(ts).toISOString() : '';
@@ -154,14 +146,13 @@ clientRouter.get('/history/download', async (req: Request, res: Response) => {
   res.send('\uFEFF' + csvRows.join('\n'));
 });
 
-// POST /api/client/risk — atualizar configuração de risco
-clientRouter.post('/risk', (req: Request, res: Response) => {
+// POST /api/client/risk
+clientRouter.post('/risk', async (req: Request, res: Response) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
 
   const { riskPct, leverage, maxDailyLossUsd, maxDailyProfitUsd, fixedLotUsd } = req.body;
 
-  // Validações de segurança
   if (riskPct !== undefined && (riskPct < 0.1 || riskPct > 5)) {
     return res.status(400).json({ error: 'Risk% deve ser entre 0.1% e 5%.' });
   }
@@ -169,16 +160,16 @@ clientRouter.post('/risk', (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Alavancagem deve ser entre 1x e 50x.' });
   }
 
-  ClientConfigDB.updateRiskConfig(clientId, { riskPct, leverage, maxDailyLossUsd, maxDailyProfitUsd, fixedLotUsd });
+  await ClientConfigDB.updateRiskConfig(clientId, { riskPct, leverage, maxDailyLossUsd, maxDailyProfitUsd, fixedLotUsd });
 
-  const updated = ClientConfigDB.findByClientId(clientId);
+  const updated = await ClientConfigDB.findByClientId(clientId);
   res.json({
     success: true,
     config: {
-      riskPct: updated?.risk_pct,
-      leverage: updated?.leverage,
-      maxDailyLossUsd: updated?.max_daily_loss_usd,
-      maxDailyProfitUsd: updated?.max_daily_profit_usd
+      riskPct: Number(updated?.risk_pct),
+      leverage: Number(updated?.leverage),
+      maxDailyLossUsd: Number(updated?.max_daily_loss_usd),
+      maxDailyProfitUsd: Number(updated?.max_daily_profit_usd)
     }
   });
 });

@@ -115,7 +115,7 @@ export class BybitExecutionEngine {
    * Testa conexão com a API do cliente e retorna info da conta
    */
   static async connectAndValidate(clientId: string): Promise<{ success: boolean; accountInfo?: BybitAccountInfo; maskedKey?: string; error?: string }> {
-    const config = ClientConfigDB.findByClientId(clientId);
+    const config = await ClientConfigDB.findByClientId(clientId);
     if (!config || !config.bybit_api_key_enc || !config.bybit_api_secret_enc) {
       return { success: false, error: 'Chaves de API não configuradas para este cliente.' };
     }
@@ -123,7 +123,7 @@ export class BybitExecutionEngine {
     try {
       const apiKey = decrypt(config.bybit_api_key_enc);
       const apiSecret = decrypt(config.bybit_api_secret_enc);
-      const testnet = config.bybit_testnet === 1;
+      const testnet = Number(config.bybit_testnet) === 1;
 
       const exchange = createBybitClient(apiKey, apiSecret, testnet);
 
@@ -140,8 +140,8 @@ export class BybitExecutionEngine {
       };
 
       // Atualizar status de conexão no banco
-      ClientConfigDB.setApiConnected(clientId, true);
-      ClientConfigDB.updateBalance(clientId, accountInfo.walletBalance);
+      await ClientConfigDB.setApiConnected(clientId, true);
+      await ClientConfigDB.updateBalance(clientId, accountInfo.walletBalance);
 
       return {
         success: true,
@@ -149,7 +149,7 @@ export class BybitExecutionEngine {
         maskedKey: maskApiKey(apiKey)
       };
     } catch (err: any) {
-      ClientConfigDB.setApiConnected(clientId, false);
+      await ClientConfigDB.setApiConnected(clientId, false);
       console.error(`[BybitEngine] Falha ao conectar cliente ${clientId}:`, err.message);
       return {
         success: false,
@@ -162,7 +162,7 @@ export class BybitExecutionEngine {
    * Busca saldo real da conta Bybit do cliente
    */
   static async getAccountBalance(clientId: string): Promise<BybitAccountInfo | null> {
-    const config = ClientConfigDB.findByClientId(clientId);
+    const config = await ClientConfigDB.findByClientId(clientId);
     if (!config?.bybit_api_key_enc || !config?.bybit_api_secret_enc) return null;
 
     try {
@@ -190,7 +190,7 @@ export class BybitExecutionEngine {
    * Busca posições abertas reais do cliente
    */
   static async getOpenPositions(clientId: string): Promise<BybitPosition[]> {
-    const config = ClientConfigDB.findByClientId(clientId);
+    const config = await ClientConfigDB.findByClientId(clientId);
     if (!config?.bybit_api_key_enc) return [];
 
     try {
@@ -222,8 +222,8 @@ export class BybitExecutionEngine {
    * Executa uma ordem de copy trade para o cliente com sizing automático
    */
   static async executeCopyTrade(clientId: string, payload: TradePayload): Promise<{ success: boolean; orderId?: string; sizing?: SizingResult; error?: string }> {
-    const config = ClientConfigDB.findByClientId(clientId);
-    if (!config || config.is_active === 0 || !config.bybit_api_key_enc) {
+    const config = await ClientConfigDB.findByClientId(clientId);
+    if (!config || Number(config.is_active) === 0 || !config.bybit_api_key_enc) {
       return { success: false, error: 'Cliente inativo ou sem API Key configurada.' };
     }
 
@@ -242,19 +242,19 @@ export class BybitExecutionEngine {
       const qtyStep = market.precision?.amount ?? 0.001;
 
       // Calcular tamanho da posição
-      const balance = config.balance > 0 ? config.balance : 100;
+      const balance = Number(config.balance) > 0 ? Number(config.balance) : 100;
       const sizing = calculatePositionSize({
         balance,
-        riskPct: config.risk_pct,
+        riskPct: Number(config.risk_pct),
         entryPrice: payload.entryPrice,
         stopLoss: payload.stopLoss,
-        leverage: config.leverage,
+        leverage: Number(config.leverage),
         minQty,
         qtyStep: typeof qtyStep === 'number' ? qtyStep : 0.001
       });
 
       // Configurar alavancagem isolada ANTES de abrir a posição
-      await exchange.setLeverage(config.leverage, ccxtSymbol, { marginMode: 'isolated' }).catch(() => {});
+      await exchange.setLeverage(Number(config.leverage), ccxtSymbol, { marginMode: 'isolated' }).catch(() => {});
 
       // Executar ordem Market com TP e SL embutidos
       const side = payload.side === 'BUY' ? 'buy' : 'sell';
@@ -272,7 +272,7 @@ export class BybitExecutionEngine {
 
       // Registrar no histórico local
       const tradeId = `trade-${clientId}-${Date.now()}`;
-      TradeHistoryDB.insert({
+      await TradeHistoryDB.insert({
         id: tradeId,
         client_id: clientId,
         symbol: payload.symbol,
@@ -280,7 +280,7 @@ export class BybitExecutionEngine {
         entry_price: payload.entryPrice,
         qty: sizing.qty,
         notional_usd: sizing.notionalUsd,
-        leverage: config.leverage,
+        leverage: Number(config.leverage),
         status: 'OPEN',
         signal_reason: payload.signalReason,
         bybitOrderId: order.id,
@@ -298,7 +298,7 @@ export class BybitExecutionEngine {
    * Busca histórico de trades da Bybit (últimas 100 operações)
    */
   static async getBybitTradeHistory(clientId: string, symbol?: string): Promise<any[]> {
-    const config = ClientConfigDB.findByClientId(clientId);
+    const config = await ClientConfigDB.findByClientId(clientId);
     if (!config?.bybit_api_key_enc) return [];
 
     try {

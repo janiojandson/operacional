@@ -24,9 +24,7 @@ import { authRouter } from './auth/authRoutes.js';
 import { adminRouter } from './routes/adminRoutes.js';
 import { clientRouter } from './routes/clientRoutes.js';
 import { requireAuth } from './auth/authMiddleware.js';
-
-// Inicializar banco de dados (cria tabelas e admin padrão)
-import './database/db.js';
+import { initDatabase } from './database/db.js';
 
 dotenv.config();
 
@@ -400,8 +398,17 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(Number(PORT), '0.0.0.0', () => {
-  console.log(`🚀 MarketFlow Pro SaaS Backend running at http://0.0.0.0:${PORT}`);
-  console.log(`🔒 Segurança: JWT + AES-256 + Helmet + Rate Limiting ATIVO`);
-  console.log(`📡 WebSocket Gateway ready on ws://0.0.0.0:${PORT}`);
-});
+// Inicializar banco de dados ANTES de iniciar o servidor
+initDatabase()
+  .then(() => {
+    server.listen(Number(PORT), '0.0.0.0', () => {
+      console.log(`🚀 MarketFlow Pro SaaS Backend running at http://0.0.0.0:${PORT}`);
+      console.log(`🔒 Segurança: JWT + AES-256 + Helmet + Rate Limiting ATIVO`);
+      console.log(`🐘 Banco de Dados: PostgreSQL Railway conectado`);
+      console.log(`📡 WebSocket Gateway ready on ws://0.0.0.0:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error('❌ Falha ao inicializar banco de dados PostgreSQL:', err.message);
+    process.exit(1);
+  });
