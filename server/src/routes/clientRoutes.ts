@@ -94,8 +94,16 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
     apiConnected: Number(config.api_connected) === 1,
     bybitTestnet: Number(config.bybit_testnet) === 1,
     hasApiKeys: !!(config.bybit_api_key_enc),
-    notificationPhone: config.notification_phone
+    notificationPhone: config.notification_phone,
+    planType: config.plan_type || 'FREE_TRIAL',
+    planExpiresAt: config.plan_expires_at ? Number(config.plan_expires_at) : null
   });
+});
+
+// GET /api/client/announcements
+clientRouter.get('/announcements', async (req: Request, res: Response) => {
+  const announcements = await AnnouncementDB.listActive();
+  res.json(announcements);
 });
 
 // GET /api/client/positions
@@ -122,16 +130,77 @@ clientRouter.get('/history', async (req: Request, res: Response) => {
   res.json(trades);
 });
 
-// GET /api/client/history/download
+// GET /api/client/history/download — Planilha Excel (.xls) ou CSV
 clientRouter.get('/history/download', async (req: Request, res: Response) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
 
+  const { format = 'excel' } = req.query;
   const trades = await TradeHistoryDB.findByClientId(clientId, 10000);
+  const formatDate = (ts: number | null) => ts ? new Date(ts).toLocaleString('pt-BR') : '';
 
+  if (format === 'excel' || format === 'xlsx') {
+    const tableRows = trades.map(t => `
+      <tr>
+        <td style="text-align: left; font-weight: bold;">${t.symbol}</td>
+        <td style="text-align: center; color: ${t.side === 'BUY' ? '#10b981' : '#f43f5e'}; font-weight: bold;">${t.side}</td>
+        <td style="text-align: right;">$${Number(t.entry_price).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        <td style="text-align: right;">${t.close_price ? '$' + Number(t.close_price).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}</td>
+        <td style="text-align: right;">${t.qty}</td>
+        <td style="text-align: right;">$${Number(t.notional_usd).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        <td style="text-align: right; font-weight: bold; color: ${(t.pnl_usd ?? 0) >= 0 ? '#10b981' : '#f43f5e'};">${t.pnl_usd != null ? (t.pnl_usd >= 0 ? '+' : '') + '$' + Number(t.pnl_usd).toFixed(2) : '—'}</td>
+        <td style="text-align: center;">${t.leverage ? t.leverage + 'x' : '—'}</td>
+        <td style="text-align: center;">${t.status}</td>
+        <td style="text-align: left;">${t.signal_reason || 'Manual / Estratégia Quant'}</td>
+        <td style="text-align: center;">${formatDate(t.entry_time)}</td>
+        <td style="text-align: center;">${formatDate(t.close_time)}</td>
+      </tr>
+    `).join('');
+
+    const excelHtml = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8">
+        <style>
+          th { background-color: #1e1b4b; color: #ffffff; font-family: Arial; font-size: 11pt; padding: 8px; }
+          td { font-family: Arial; font-size: 10pt; padding: 6px; border: 0.5pt solid #cbd5e1; }
+        </style>
+      </head>
+      <body>
+        <h2 style="font-family: Arial; color: #312e81;">MarketFlow Pro — Relatório de Operações</h2>
+        <p style="font-family: Arial; font-size: 10pt; color: #64748b;">Cliente: <b>${clientId}</b> | Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+        <table border="1">
+          <thead>
+            <tr>
+              <th>Par / Ativo</th>
+              <th>Lado</th>
+              <th>Preço Entrada</th>
+              <th>Preço Saída</th>
+              <th>Quantidade</th>
+              <th>Volume USD</th>
+              <th>Resultado P&L ($)</th>
+              <th>Alavancagem</th>
+              <th>Status</th>
+              <th>Motivo do Sinal</th>
+              <th>Data/Hora Entrada</th>
+              <th>Data/Hora Fechamento</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+      </body>
+      </html>
+    `;
+
+    res.setHeader('Content-Type', 'application/vnd.ms-excel; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="historico-trades-${clientId}-${Date.now()}.xls"`);
+    return res.send(excelHtml);
+  }
+
+  // Fallback CSV
   const headers = ['id', 'symbol', 'side', 'entry_price', 'close_price', 'qty', 'notional_usd', 'pnl_usd', 'leverage', 'status', 'signal_reason', 'entry_time', 'close_time'];
-  const formatDate = (ts: number | null) => ts ? new Date(ts).toISOString() : '';
-
   const csvRows = [
     headers.join(','),
     ...trades.map(t => [

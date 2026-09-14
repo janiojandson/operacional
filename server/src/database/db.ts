@@ -73,6 +73,8 @@ export async function initDatabase(): Promise<void> {
       balance NUMERIC NOT NULL DEFAULT 0.0,
       is_active INTEGER NOT NULL DEFAULT 1,
       api_connected INTEGER NOT NULL DEFAULT 0,
+      plan_type TEXT NOT NULL DEFAULT 'FREE_TRIAL',
+      plan_expires_at BIGINT,
       created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
       updated_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
       FOREIGN KEY(user_id) REFERENCES app_users(id)
@@ -114,10 +116,28 @@ export async function initDatabase(): Promise<void> {
     )
   `);
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS announcements (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'INFO' CHECK(type IN ('INFO', 'WARNING', 'PLAN_UPGRADE', 'URGENT')),
+      action_url TEXT,
+      action_label TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
+    )
+  `);
+
+  // Migrações seguras (adicionar colunas se tabela já existia)
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_type TEXT NOT NULL DEFAULT 'FREE_TRIAL'`).catch(() => {});
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_expires_at BIGINT`).catch(() => {});
+
   // Índices para performance
   await query(`CREATE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_trade_history_client ON trade_history(client_id, entry_time DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_balance_edits_client ON balance_edits(client_id, timestamp DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_announcements_active ON announcements(is_active, created_at DESC)`);
 
   console.log('[DB] ✅ Tabelas PostgreSQL inicializadas com sucesso.');
 
@@ -134,6 +154,15 @@ export async function initDatabase(): Promise<void> {
       [adminId, adminEmail, hash]
     );
     console.log(`[DB] ✅ Admin padrão criado: ${adminEmail}`);
+  }
+
+  // Seed anúncio de boas-vindas se não houver
+  const existingAnnouncements = await queryOne('SELECT id FROM announcements LIMIT 1');
+  if (!existingAnnouncements) {
+    await query(
+      `INSERT INTO announcements (id, title, message, type, is_active) VALUES ($1, $2, $3, $4, 1)`,
+      ['ann-welcome', '🚀 Bem-vindo ao MarketFlow Pro!', 'Conecte sua API da Bybit e configure seu perfil de risco na aba "Gerenciar Risco" para começar a operar.', 'INFO']
+    );
   }
 }
 
@@ -167,6 +196,19 @@ export interface ClientConfigRow {
   balance: number;
   is_active: number;
   api_connected: number;
+  plan_type: 'FREE_TRIAL' | 'MONTHLY' | 'QUARTERLY' | 'ANNUAL' | 'LIFETIME';
+  plan_expires_at: number | null;
+  created_at: number;
+}
+
+export interface AnnouncementRow {
+  id: string;
+  title: string;
+  message: string;
+  type: 'INFO' | 'WARNING' | 'PLAN_UPGRADE' | 'URGENT';
+  action_url: string | null;
+  action_label: string | null;
+  is_active: number;
   created_at: number;
 }
 
@@ -231,10 +273,11 @@ export const ClientConfigDB = {
   findByUserId: (userId: string) =>
     queryOne<ClientConfigRow>('SELECT * FROM client_configs WHERE user_id = $1', [userId]),
 
-  create: async (data: { clientId: string; userId: string; name?: string }) => {
+  create: async (data: { clientId: string; userId: string; name?: string; planType?: string; planExpiresAt?: number }) => {
+    const expires = data.planExpiresAt || (Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 dias grátis padrão
     await query(
-      `INSERT INTO client_configs (client_id, user_id) VALUES ($1, $2) ON CONFLICT (client_id) DO NOTHING`,
-      [data.clientId, data.userId]
+      `INSERT INTO client_configs (client_id, user_id, plan_type, plan_expires_at) VALUES ($1, $2, $3, $4) ON CONFLICT (client_id) DO NOTHING`,
+      [data.clientId, data.userId, data.planType || 'FREE_TRIAL', expires]
     );
   },
 
@@ -256,6 +299,13 @@ export const ClientConfigDB = {
     await query(
       'UPDATE client_configs SET balance = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $2',
       [balance, clientId]
+    );
+  },
+
+  updatePlan: async (clientId: string, planType: string, planExpiresAt: number) => {
+    await query(
+      'UPDATE client_configs SET plan_type = $1, plan_expires_at = $2, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $3',
+      [planType, planExpiresAt, clientId]
     );
   },
 
@@ -282,6 +332,29 @@ export const ClientConfigDB = {
 
   listAll: () =>
     query<ClientConfigRow>('SELECT * FROM client_configs ORDER BY created_at DESC')
+};
+
+// ─── Funções de Acesso — AnnouncementDB ───────────────────────────────────
+
+export const AnnouncementDB = {
+  listActive: () =>
+    query<AnnouncementRow>('SELECT * FROM announcements WHERE is_active = 1 ORDER BY created_at DESC'),
+
+  listAll: () =>
+    query<AnnouncementRow>('SELECT * FROM announcements ORDER BY created_at DESC'),
+
+  create: async (data: { id: string; title: string; message: string; type?: string; actionUrl?: string; actionLabel?: string }) => {
+    await query(
+      `INSERT INTO announcements (id, title, message, type, action_url, action_label, is_active) VALUES ($1, $2, $3, $4, $5, $6, 1)`,
+      [data.id, data.title, data.message, data.type || 'INFO', data.actionUrl || null, data.actionLabel || null]
+    );
+  },
+
+  delete: (id: string) =>
+    query('DELETE FROM announcements WHERE id = $1', [id]),
+
+  toggleActive: (id: string, active: boolean) =>
+    query('UPDATE announcements SET is_active = $1 WHERE id = $2', [active ? 1 : 0, id])
 };
 
 // ─── Funções de Acesso — TradeHistoryDB ───────────────────────────────────
@@ -338,3 +411,4 @@ export const BalanceEditDB = {
 };
 
 export default pool;
+

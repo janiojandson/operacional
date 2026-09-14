@@ -6,6 +6,8 @@ export interface AuthUser {
   role: 'ADMIN' | 'CLIENT';
   clientId?: string;
   name?: string;
+  planType?: string;
+  planExpiresAt?: number | null;
 }
 
 interface AuthContextValue {
@@ -13,6 +15,7 @@ interface AuthContextValue {
   token: string | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  signup: (name: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   isAdmin: boolean;
   isClient: boolean;
@@ -51,6 +54,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error || 'Erro ao fazer login.' };
+
+      setToken(data.token);
+      setUser(data.user);
+      localStorage.setItem('mfp_token', data.token);
+      localStorage.setItem('mfp_user', JSON.stringify(data.user));
+
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: 'Erro de conexão com o servidor.' };
+    }
+  };
+
+  const signup = async (name: string, email: string, password: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password })
+      });
+
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao cadastrar conta.' };
 
       setToken(data.token);
       setUser(data.user);

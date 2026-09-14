@@ -4,7 +4,7 @@ import {
   Users, DollarSign, BarChart2, TrendingUp, Activity, Shield,
   Download, Plus, Trash2, Power, PowerOff, RefreshCw, Edit3,
   CheckCircle, XCircle, AlertTriangle, LogOut, ChevronRight,
-  FileText, Terminal, Zap, Clock, Key
+  FileText, Terminal, Zap, Clock, Key, FileSpreadsheet, Bell
 } from 'lucide-react';
 import TradingTerminal from './TradingTerminal';
 
@@ -556,7 +556,11 @@ export default function AdminDashboard() {
                     <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
                     <span>Filtrar</span>
                   </button>
-                  <button onClick={() => handleDownloadReport('csv')} title="Baixar CSV" className="p-2 rounded-xl bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30 transition-all">
+                  <button onClick={() => handleDownloadReport('excel')} title="Baixar Planilha Excel (.xls)" className="p-2 rounded-xl bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30 transition-all flex items-center space-x-1 px-3">
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span className="text-xs font-bold font-mono">Excel</span>
+                  </button>
+                  <button onClick={() => handleDownloadReport('csv')} title="Baixar CSV" className="p-2 rounded-xl bg-surface text-slate-300 border border-border/60 hover:text-white transition-all">
                     <Download className="w-4 h-4" />
                   </button>
                   <button onClick={() => handleDownloadReport('json')} title="Baixar JSON" className="p-2 rounded-xl bg-violet-600/20 text-violet-400 border border-violet-500/30 hover:bg-violet-600/30 transition-all">

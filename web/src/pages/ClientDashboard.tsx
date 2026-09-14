@@ -3,8 +3,9 @@ import { useAuth, authFetch } from '../contexts/AuthContext';
 import {
   TrendingUp, Key, Wifi, WifiOff, DollarSign, BarChart2,
   AlertTriangle, CheckCircle, Loader2, RefreshCw, Download,
-  Eye, EyeOff, LogOut, Shield, Activity, Settings, Clock,
-  Target, TrendingDown, Zap
+  Eye, EyeOff, LogOut, Shield, Activity, Clock,
+  TrendingDown, Zap, FileSpreadsheet, Sparkles, Check,
+  HelpCircle, Info, Bell, ExternalLink, Sliders
 } from 'lucide-react';
 
 type ClientTab = 'overview' | 'api-keys' | 'risk' | 'history';
@@ -23,6 +24,8 @@ interface AccountInfo {
   bybitTestnet: boolean;
   hasApiKeys: boolean;
   notificationPhone?: string;
+  planType?: string;
+  planExpiresAt?: number | null;
 }
 
 interface Position {
@@ -51,12 +54,22 @@ interface TradeRecord {
   close_time: number | null;
 }
 
+interface Announcement {
+  id: string;
+  title: string;
+  message: string;
+  type: 'INFO' | 'WARNING' | 'PLAN_UPGRADE' | 'URGENT';
+  action_url?: string;
+  action_label?: string;
+}
+
 export default function ClientDashboard() {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<ClientTab>('overview');
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
   const [history, setHistory] = useState<TradeRecord[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(false);
   const [notification, setNotification] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
@@ -66,13 +79,14 @@ export default function ClientDashboard() {
   const [showSecret, setShowSecret] = useState(false);
   const [testnet, setTestnet] = useState(true);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message?: string; error?: string; accountInfo?: any } | null>(null);
+  const [testResult, setTestResult] = useState<{ success: boolean; message?: string; error?: string; hint?: string; accountInfo?: any } | null>(null);
 
   // Risk form
-  const [riskPct, setRiskPct] = useState(1);
+  const [riskPct, setRiskPct] = useState(1.0);
   const [leverage, setLeverage] = useState(10);
   const [maxDailyLoss, setMaxDailyLoss] = useState(50);
   const [maxDailyProfit, setMaxDailyProfit] = useState(150);
+  const [selectedPreset, setSelectedPreset] = useState<'conservative' | 'moderate' | 'aggressive' | 'custom'>('moderate');
 
   const notify = (msg: string, type: 'success' | 'error' = 'success') => {
     setNotification({ msg, type });
@@ -94,23 +108,35 @@ export default function ClientDashboard() {
   };
 
   const fetchPositions = async () => {
-    const res = await authFetch('/api/client/positions');
-    if (res.ok) setPositions(await res.json());
+    try {
+      const res = await authFetch('/api/client/positions');
+      if (res.ok) setPositions(await res.json());
+    } catch { }
   };
 
   const fetchHistory = async () => {
     setLoading(true);
-    const res = await authFetch('/api/client/history?limit=50');
-    if (res.ok) setHistory(await res.json());
+    try {
+      const res = await authFetch('/api/client/history?limit=50');
+      if (res.ok) setHistory(await res.json());
+    } catch { }
     setLoading(false);
+  };
+
+  const fetchAnnouncements = async () => {
+    try {
+      const res = await authFetch('/api/client/announcements');
+      if (res.ok) setAnnouncements(await res.json());
+    } catch { }
   };
 
   useEffect(() => {
     fetchAccount();
+    fetchAnnouncements();
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'overview') { fetchAccount(); fetchPositions(); }
+    if (activeTab === 'overview') { fetchAccount(); fetchPositions(); fetchAnnouncements(); }
     if (activeTab === 'history') fetchHistory();
   }, [activeTab]);
 
@@ -119,6 +145,29 @@ export default function ClientDashboard() {
     const interval = setInterval(fetchAccount, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // Presets inteligentes baseados na banca real
+  const applyPreset = (type: 'conservative' | 'moderate' | 'aggressive') => {
+    setSelectedPreset(type);
+    const balance = account?.balance && account.balance > 0 ? account.balance : 100;
+
+    if (type === 'conservative') {
+      setRiskPct(0.5);
+      setLeverage(5);
+      setMaxDailyLoss(Number(Math.max(10, balance * 0.015).toFixed(2))); // 1.5% stop
+      setMaxDailyProfit(Number(Math.max(20, balance * 0.03).toFixed(2))); // 3% meta
+    } else if (type === 'moderate') {
+      setRiskPct(1.0);
+      setLeverage(10);
+      setMaxDailyLoss(Number(Math.max(20, balance * 0.03).toFixed(2))); // 3% stop
+      setMaxDailyProfit(Number(Math.max(50, balance * 0.06).toFixed(2))); // 6% meta
+    } else if (type === 'aggressive') {
+      setRiskPct(2.0);
+      setLeverage(15);
+      setMaxDailyLoss(Number(Math.max(30, balance * 0.05).toFixed(2))); // 5% stop
+      setMaxDailyProfit(Number(Math.max(80, balance * 0.10).toFixed(2))); // 10% meta
+    }
+  };
 
   const handleSaveApiKeys = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -153,28 +202,41 @@ export default function ClientDashboard() {
       method: 'POST',
       body: JSON.stringify({ riskPct, leverage, maxDailyLossUsd: maxDailyLoss, maxDailyProfitUsd: maxDailyProfit })
     });
-    if (res.ok) { notify('✅ Configuração de risco salva!'); fetchAccount(); }
+    if (res.ok) { notify('✅ Configuração de risco salva com sucesso!'); fetchAccount(); }
     else notify('Erro ao salvar configuração.', 'error');
   };
 
-  const handleDownloadHistory = async () => {
+  const handleDownloadHistory = async (format: 'excel' | 'csv') => {
     const token = localStorage.getItem('mfp_token');
-    const res = await fetch('/api/client/history/download', { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(`/api/client/history/download?format=${format}`, { headers: { Authorization: `Bearer ${token}` } });
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `historico-${Date.now()}.csv`;
+    a.download = `historico-operacoes-${Date.now()}.${format === 'excel' ? 'xls' : 'csv'}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    notify(`✅ Planilha ${format.toUpperCase()} gerada e baixada!`);
   };
 
   const totalPnl = history.filter(t => t.pnl_usd != null).reduce((s, t) => s + (t.pnl_usd ?? 0), 0);
   const wins = history.filter(t => (t.pnl_usd ?? 0) > 0).length;
   const closed = history.filter(t => t.status === 'CLOSED').length;
   const winRate = closed > 0 ? ((wins / closed) * 100).toFixed(1) : '0';
+
+  // Projeção didática de risco em tempo real
+  const currentBalance = account?.balance && account.balance > 0 ? account.balance : 100;
+  const simulatedRiskUsd = (currentBalance * (riskPct / 100)).toFixed(2);
+  const simulatedStopDist = 1.0; // 1% stop hipotético
+  const simulatedNotional = (Number(simulatedRiskUsd) / (simulatedStopDist / 100)).toFixed(2);
+  const simulatedMargin = (Number(simulatedNotional) / leverage).toFixed(2);
+
+  // Dias restantes do plano
+  const daysRemaining = account?.planExpiresAt
+    ? Math.max(0, Math.ceil((account.planExpiresAt - Date.now()) / (1000 * 60 * 60 * 24)))
+    : 14;
 
   return (
     <div className="min-h-screen bg-background text-slate-100 font-sans flex flex-col">
@@ -200,6 +262,9 @@ export default function ClientDashboard() {
             <span className="ml-2 text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
               {account?.bybitTestnet ? 'TESTNET' : 'MAINNET'}
             </span>
+            <span className="ml-1.5 text-[10px] font-mono px-2 py-0.5 rounded bg-accent/20 text-accent border border-accent/30">
+              {account?.planType === 'FREE_TRIAL' ? `TRIAL: ${daysRemaining}d restantes` : account?.planType || 'PRO'}
+            </span>
           </div>
         </div>
 
@@ -207,8 +272,8 @@ export default function ClientDashboard() {
           {([
             { id: 'overview', icon: Activity, label: 'Visão Geral' },
             { id: 'api-keys', icon: Key, label: 'API Bybit' },
-            { id: 'risk', icon: Shield, label: 'Risco' },
-            { id: 'history', icon: Clock, label: 'Histórico' }
+            { id: 'risk', icon: Shield, label: 'Gerenciar Risco' },
+            { id: 'history', icon: Clock, label: 'Histórico & Planilhas' }
           ] as const).map(tab => (
             <button
               key={tab.id}
@@ -240,50 +305,98 @@ export default function ClientDashboard() {
         </div>
       </header>
 
-      <main className="flex-1 overflow-auto p-6">
+      <main className="flex-1 overflow-auto p-6 max-w-6xl mx-auto w-full">
+
+        {/* 📢 Avisos em Tela / Banners do Administrador */}
+        {announcements.length > 0 && (
+          <div className="space-y-3 mb-6">
+            {announcements.map(ann => (
+              <div
+                key={ann.id}
+                className={`p-4 rounded-2xl border flex items-start justify-between space-x-3 ${
+                  ann.type === 'URGENT'
+                    ? 'bg-rose-950/40 border-rose-500/50 text-rose-200'
+                    : ann.type === 'PLAN_UPGRADE'
+                    ? 'bg-gradient-to-r from-violet-950/50 to-accent/20 border-accent/40 text-violet-100'
+                    : ann.type === 'WARNING'
+                    ? 'bg-amber-950/40 border-amber-500/40 text-amber-200'
+                    : 'bg-surface border-border/70 text-slate-200'
+                }`}
+              >
+                <div className="flex items-start space-x-3">
+                  <Bell className="w-4 h-4 shrink-0 mt-0.5 text-accent" />
+                  <div>
+                    <h4 className="font-bold text-sm text-white mb-0.5">{ann.title}</h4>
+                    <p className="text-xs text-slate-300">{ann.message}</p>
+                  </div>
+                </div>
+                {ann.action_url && (
+                  <a
+                    href={ann.action_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="shrink-0 px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-bold hover:bg-accent/80 transition-all flex items-center space-x-1"
+                  >
+                    <span>{ann.action_label || 'Ver Mais'}</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* ── VISÃO GERAL ── */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-white">Minha Conta — Bybit</h2>
-              <button onClick={() => { fetchAccount(); fetchPositions(); }} className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white transition-colors">
+              <div>
+                <h2 className="text-xl font-bold text-white">Minha Conta — Bybit</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Visão consolidada do saldo, posições abertas e réplica do Master Quant.</p>
+              </div>
+              <button onClick={() => { fetchAccount(); fetchPositions(); }} className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white transition-colors bg-surface px-3 py-1.5 rounded-xl border border-border/60">
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span>Atualizar</span>
+                <span>Atualizar Saldo</span>
               </button>
             </div>
 
             {!account?.hasApiKeys && (
-              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start space-x-3 text-sm">
-                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold text-amber-400 mb-1">API Bybit não configurada</p>
-                  <p className="text-amber-300/70">Vá em <strong>API Bybit</strong> para conectar sua conta à corretora e ativar o robô de copy trade.</p>
+              <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start space-x-4 text-sm">
+                <AlertTriangle className="w-6 h-6 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-2">
+                  <p className="font-bold text-amber-400 text-base">API Bybit não conectada</p>
+                  <p className="text-amber-300/80 text-xs">Para que as ordens do Master sejam executadas automaticamente na sua conta com a alocação proporcional calibrada, conecte suas chaves na aba <strong>API Bybit</strong>.</p>
+                  <button
+                    onClick={() => setActiveTab('api-keys')}
+                    className="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 transition-all"
+                  >
+                    Conectar Minha Bybit Agora
+                  </button>
                 </div>
               </div>
             )}
 
             {/* KPI Cards */}
             <div className="grid grid-cols-4 gap-4">
-              <div className="bg-surface border border-border/60 rounded-2xl p-5">
+              <div className="bg-surface border border-border/60 rounded-2xl p-5 shadow-lg shadow-black/20">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-slate-400 font-mono uppercase">Saldo</span>
+                  <span className="text-xs text-slate-400 font-mono uppercase">Saldo Total</span>
                   <DollarSign className="w-4 h-4 text-amber-400" />
                 </div>
                 <div className="text-2xl font-black text-amber-400">${(account?.balance ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                <div className="text-xs text-slate-500 mt-1">USDT na corretora</div>
+                <div className="text-xs text-slate-500 mt-1">USDT na carteira unificada</div>
               </div>
 
-              <div className="bg-surface border border-border/60 rounded-2xl p-5">
+              <div className="bg-surface border border-border/60 rounded-2xl p-5 shadow-lg shadow-black/20">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-slate-400 font-mono uppercase">Disponível</span>
                   <Activity className="w-4 h-4 text-emerald-400" />
                 </div>
                 <div className="text-2xl font-black text-emerald-400">${(account?.availableBalance ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                <div className="text-xs text-slate-500 mt-1">Para novas posições</div>
+                <div className="text-xs text-slate-500 mt-1">Margem livre para trades</div>
               </div>
 
-              <div className="bg-surface border border-border/60 rounded-2xl p-5">
+              <div className="bg-surface border border-border/60 rounded-2xl p-5 shadow-lg shadow-black/20">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-slate-400 font-mono uppercase">P&L Aberto</span>
                   {(account?.unrealisedPnl ?? 0) >= 0 ? <TrendingUp className="w-4 h-4 text-emerald-400" /> : <TrendingDown className="w-4 h-4 text-rose-400" />}
@@ -291,39 +404,45 @@ export default function ClientDashboard() {
                 <div className={`text-2xl font-black ${(account?.unrealisedPnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {(account?.unrealisedPnl ?? 0) >= 0 ? '+' : ''}${(account?.unrealisedPnl ?? 0).toFixed(2)}
                 </div>
-                <div className="text-xs text-slate-500 mt-1">Posições abertas</div>
+                <div className="text-xs text-slate-500 mt-1">Lucro/Prejuízo flutuante</div>
               </div>
 
-              <div className="bg-surface border border-border/60 rounded-2xl p-5">
+              <div className="bg-surface border border-border/60 rounded-2xl p-5 shadow-lg shadow-black/20">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-slate-400 font-mono uppercase">Configuração</span>
+                  <span className="text-xs text-slate-400 font-mono uppercase">Risco & Alavancagem</span>
                   <Zap className="w-4 h-4 text-accent" />
                 </div>
                 <div className="text-2xl font-black text-accent">{account?.riskPct ?? '—'}% / {account?.leverage ?? '—'}x</div>
-                <div className="text-xs text-slate-500 mt-1">Risco por trade / Alavancagem</div>
+                <div className="text-xs text-slate-500 mt-1">Margem Isolada ativa</div>
               </div>
             </div>
 
-            {/* Protection Limits */}
+            {/* Protections and Positions */}
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-surface border border-border/60 rounded-2xl p-5">
-                <h3 className="text-sm font-bold text-white mb-3 flex items-center space-x-2">
-                  <Shield className="w-4 h-4 text-emerald-400" />
-                  <span>Proteções Ativas</span>
-                </h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-bold text-white flex items-center space-x-2">
+                    <Shield className="w-4 h-4 text-emerald-400" />
+                    <span>Proteções & Automação</span>
+                  </h3>
+                  <button onClick={() => setActiveTab('risk')} className="text-xs text-accent hover:underline flex items-center space-x-1 font-mono">
+                    <Sliders className="w-3 h-3" />
+                    <span>Ajustar</span>
+                  </button>
+                </div>
                 <div className="space-y-2 font-mono text-xs">
                   <div className="flex justify-between items-center py-2 border-b border-border/30">
-                    <span className="text-slate-400">Stop Diário (Loss Máximo)</span>
+                    <span className="text-slate-400">Trava de Stop Diário (Loss Máximo)</span>
                     <span className="text-rose-400 font-bold">-${account?.maxDailyLossUsd?.toFixed(2) ?? '—'}</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-border/30">
-                    <span className="text-slate-400">Meta Diária (Gain Target)</span>
+                    <span className="text-slate-400">Meta Diária (Gain Preservado)</span>
                     <span className="text-emerald-400 font-bold">+${account?.maxDailyProfitUsd?.toFixed(2) ?? '—'}</span>
                   </div>
                   <div className="flex justify-between items-center py-2">
-                    <span className="text-slate-400">Status do Robô</span>
+                    <span className="text-slate-400">Status do Robô Copy AI</span>
                     <span className={`font-bold ${account?.isActive ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {account?.isActive ? '● ATIVO' : '⛔ BLOQUEADO'}
+                      {account?.isActive ? '● ATIVO & SINCRONIZADO' : '⛔ PAUSADO'}
                     </span>
                   </div>
                 </div>
@@ -333,10 +452,10 @@ export default function ClientDashboard() {
               <div className="bg-surface border border-border/60 rounded-2xl p-5">
                 <h3 className="text-sm font-bold text-white mb-3 flex items-center space-x-2">
                   <BarChart2 className="w-4 h-4 text-accent" />
-                  <span>Posições Abertas ({positions.length})</span>
+                  <span>Posições Ativas na Bybit ({positions.length})</span>
                 </h3>
                 {positions.length === 0 ? (
-                  <div className="text-sm text-slate-500 text-center py-8">Nenhuma posição aberta no momento.</div>
+                  <div className="text-sm text-slate-500 text-center py-8">Nenhuma posição aberta no momento. O robô entrará automaticamente no próximo sinal do Master.</div>
                 ) : (
                   <div className="space-y-2">
                     {positions.map((p, i) => (
@@ -344,7 +463,7 @@ export default function ClientDashboard() {
                         <div>
                           <span className="font-bold text-white">{p.symbol}</span>
                           <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold ${p.side === 'Buy' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>{p.side}</span>
-                          <span className="ml-2 text-slate-500">{p.leverage}x</span>
+                          <span className="ml-2 text-slate-500">{p.leverage}x (Isolada)</span>
                         </div>
                         <span className={`font-bold ${p.unrealisedPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                           {p.unrealisedPnl >= 0 ? '+' : ''}${p.unrealisedPnl.toFixed(2)}
@@ -360,27 +479,32 @@ export default function ClientDashboard() {
 
         {/* ── API BYBIT ── */}
         {activeTab === 'api-keys' && (
-          <div className="max-w-2xl space-y-5">
-            <h2 className="text-xl font-bold text-white">Conectar API Bybit</h2>
+          <div className="max-w-2xl mx-auto space-y-5">
+            <div>
+              <h2 className="text-xl font-bold text-white">Conectar API Bybit</h2>
+              <p className="text-xs text-slate-400 mt-1">Suas chaves são criptografadas com AES-256 no banco de dados e nunca são expostas.</p>
+            </div>
 
             {/* Instruções */}
-            <div className="p-4 rounded-2xl bg-accent/5 border border-accent/20 text-sm space-y-2">
-              <p className="font-bold text-accent">📋 Como criar sua API Key na Bybit:</p>
-              <ol className="list-decimal list-inside space-y-1 text-slate-400 text-xs font-mono">
-                <li>Acesse bybit.com → Conta → Gerenciamento de API</li>
-                <li>Clique em "Criar Nova Chave" → Tipo: "Chave de API"</li>
-                <li>Nome: "MarketFlow Pro"</li>
-                <li>Permissões necessárias: ✅ <strong className="text-white">Contrato — Pedidos</strong> (só isso)</li>
-                <li>❌ Não habilite "Saques" — nunca necessário</li>
-                <li>Salve a API Key e o Secret antes de fechar</li>
+            <div className="p-5 rounded-2xl bg-accent/5 border border-accent/20 text-sm space-y-3">
+              <p className="font-bold text-accent flex items-center space-x-1.5">
+                <HelpCircle className="w-4 h-4" />
+                <span>Passo a Passo Rápido na Bybit:</span>
+              </p>
+              <ol className="list-decimal list-inside space-y-1.5 text-slate-300 text-xs font-mono">
+                <li>Acesse sua conta em <strong className="text-white">Bybit.com → Perfil → Gerenciamento de API</strong></li>
+                <li>Clique em <strong className="text-white">Criar Nova Chave</strong> → Escolha <em>"Chave de API gerada pelo sistema"</em></li>
+                <li>Habilite as permissões: ✅ <strong className="text-emerald-400">Contrato (Contract - Order / Leitura e Escrita)</strong></li>
+                <li>⚠️ <strong>NÃO</strong> marque Saques (Withdrawals). Nossa plataforma nunca solicita acesso a saques.</li>
+                <li>Cole a API Key e o Secret abaixo e salve.</li>
               </ol>
             </div>
 
             <form onSubmit={handleSaveApiKeys} className="bg-surface border border-border/60 rounded-2xl p-6 space-y-4">
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-bold text-white">Credenciais da API</h3>
+                <h3 className="text-sm font-bold text-white">Credenciais da Corretora</h3>
                 <label className="flex items-center space-x-2 cursor-pointer">
-                  <span className="text-xs font-mono text-slate-400">Testnet</span>
+                  <span className="text-xs font-mono text-slate-400">Ambiente:</span>
                   <div
                     onClick={() => setTestnet(!testnet)}
                     className={`w-10 h-5 rounded-full transition-colors cursor-pointer ${testnet ? 'bg-amber-500' : 'bg-emerald-500'}`}
@@ -388,14 +512,14 @@ export default function ClientDashboard() {
                     <div className={`w-4 h-4 bg-white rounded-full m-0.5 transition-transform ${testnet ? '' : 'translate-x-5'}`} />
                   </div>
                   <span className={`text-xs font-bold font-mono ${testnet ? 'text-amber-400' : 'text-emerald-400'}`}>
-                    {testnet ? 'TESTNET' : 'MAINNET'}
+                    {testnet ? 'TESTNET (Sem Risco)' : 'CONTA REAL (Mainnet)'}
                   </span>
                 </label>
               </div>
 
               {testnet && (
                 <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 font-mono">
-                  ⚠️ Modo Testnet ativo — use as chaves do testnet.bybit.com. Nenhum dinheiro real será utilizado.
+                  ⚠️ Modo Testnet ativo — use as chaves do testnet.bybit.com para testar sem dinheiro real.
                 </div>
               )}
 
@@ -406,7 +530,7 @@ export default function ClientDashboard() {
                   required
                   value={apiKey}
                   onChange={e => setApiKey(e.target.value)}
-                  placeholder="Ex: rG8xkLm..."
+                  placeholder="Ex: rG8xkLm4920..."
                   className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-accent transition-all"
                 />
               </div>
@@ -428,38 +552,43 @@ export default function ClientDashboard() {
                 </div>
               </div>
 
-              <div className="flex space-x-2 pt-2">
-                <button type="submit" className="flex-1 py-2.5 rounded-xl bg-accent hover:bg-accent/80 text-white text-sm font-bold transition-all">
-                  Salvar com Criptografia AES-256
+              <div className="pt-2">
+                <button type="submit" className="w-full py-3 rounded-xl bg-accent hover:bg-accent/80 text-white text-sm font-bold transition-all shadow-lg shadow-accent/20">
+                  Salvar Chaves Criptografadas
                 </button>
               </div>
             </form>
 
             {/* Test Connection */}
             {account?.hasApiKeys && (
-              <div className="bg-surface border border-border/60 rounded-2xl p-5">
-                <h3 className="text-sm font-bold text-white mb-3">Testar Conexão com a Bybit</h3>
-                <button
-                  onClick={handleTestConnection}
-                  disabled={testing}
-                  className="flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-600/30 font-bold text-sm transition-all disabled:opacity-60"
-                >
-                  {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />}
-                  <span>{testing ? 'Testando...' : 'Testar Conexão'}</span>
-                </button>
+              <div className="bg-surface border border-border/60 rounded-2xl p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Validar Conexão com a Bybit</h3>
+                    <p className="text-xs text-slate-400">Testa se a Bybit aceita a chave e busca seu saldo real.</p>
+                  </div>
+                  <button
+                    onClick={handleTestConnection}
+                    disabled={testing}
+                    className="flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-600/30 font-bold text-sm transition-all disabled:opacity-60 shrink-0"
+                  >
+                    {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />}
+                    <span>{testing ? 'Verificando...' : 'Testar Conexão'}</span>
+                  </button>
+                </div>
 
                 {testResult && (
-                  <div className={`mt-3 p-3 rounded-xl border text-xs font-mono ${testResult.success ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-300' : 'bg-rose-950/30 border-rose-500/30 text-rose-300'}`}>
+                  <div className={`p-4 rounded-xl border text-xs font-mono ${testResult.success ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-300' : 'bg-rose-950/30 border-rose-500/30 text-rose-300'}`}>
                     {testResult.success ? (
                       <div className="space-y-1">
-                        <div className="flex items-center space-x-2"><CheckCircle className="w-3.5 h-3.5" /><span className="font-bold">{testResult.message}</span></div>
+                        <div className="flex items-center space-x-2"><CheckCircle className="w-4 h-4" /><span className="font-bold">{testResult.message}</span></div>
                         {testResult.accountInfo && (
-                          <div className="text-slate-300">Saldo detectado: <span className="text-white font-bold">${Number(testResult.accountInfo.walletBalance).toFixed(2)} USDT</span></div>
+                          <div className="text-slate-300">Saldo na Bybit: <span className="text-white font-bold">${Number(testResult.accountInfo.walletBalance).toFixed(2)} USDT</span></div>
                         )}
                       </div>
                     ) : (
                       <div className="flex items-start space-x-2">
-                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                         <div><div className="font-bold">{testResult.error}</div><div className="text-rose-400/70 mt-1">{testResult.hint}</div></div>
                       </div>
                     )}
@@ -470,127 +599,223 @@ export default function ClientDashboard() {
           </div>
         )}
 
-        {/* ── RISCO ── */}
+        {/* ── GERENCIAR RISCO ── */}
         {activeTab === 'risk' && (
-          <div className="max-w-2xl space-y-5">
-            <h2 className="text-xl font-bold text-white">Configuração de Risco</h2>
-
-            <div className="p-4 rounded-2xl bg-surface border border-border/60 text-xs font-mono space-y-2">
-              <p className="text-slate-400">📐 <strong className="text-white">Fórmula de Sizing:</strong></p>
-              <p className="text-slate-300">Notional = (Banca × Risk%) / StopDist% | Margem = Notional / Alavancagem</p>
-              <p className="text-slate-500">Ex: Banca $100, Risk 1%, Stop 1% → Notional $100, Alavancagem 10x → Margem $10 consumida</p>
+          <div className="max-w-3xl mx-auto space-y-6">
+            <div>
+              <h2 className="text-xl font-bold text-white">Gerenciamento de Risco & Alavancagem</h2>
+              <p className="text-xs text-slate-400 mt-0.5">Escolha um perfil quant pronto ou personalize seus limites de perda e ganho.</p>
             </div>
 
-            <form onSubmit={handleSaveRisk} className="bg-surface border border-border/60 rounded-2xl p-6 space-y-5">
+            {/* Presets Inteligentes de 1-Clique */}
+            <div className="grid grid-cols-3 gap-4">
+              <button
+                type="button"
+                onClick={() => applyPreset('conservative')}
+                className={`p-4 rounded-2xl border text-left transition-all ${
+                  selectedPreset === 'conservative'
+                    ? 'bg-emerald-950/40 border-emerald-500/60 shadow-lg shadow-emerald-500/10'
+                    : 'bg-surface border-border/60 hover:border-border'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">🟢 Conservador</span>
+                  {selectedPreset === 'conservative' && <Check className="w-4 h-4 text-emerald-400" />}
+                </div>
+                <div className="text-lg font-black text-white">0.5% / 5x</div>
+                <p className="text-[11px] text-slate-400 mt-1 font-mono">Foco em preservação de capital. Stop diário em 1.5%.</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => applyPreset('moderate')}
+                className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden ${
+                  selectedPreset === 'moderate'
+                    ? 'bg-accent/15 border-accent shadow-lg shadow-accent/20'
+                    : 'bg-surface border-border/60 hover:border-border'
+                }`}
+              >
+                <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-accent text-[9px] font-black text-white">RECOMENDADO</div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-bold text-accent uppercase tracking-wider">🟡 Moderado</span>
+                  {selectedPreset === 'moderate' && <Check className="w-4 h-4 text-accent" />}
+                </div>
+                <div className="text-lg font-black text-white">1.0% / 10x</div>
+                <p className="text-[11px] text-slate-400 mt-1 font-mono">Equilíbrio quant ideal. Stop diário em 3.0%.</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => applyPreset('aggressive')}
+                className={`p-4 rounded-2xl border text-left transition-all ${
+                  selectedPreset === 'aggressive'
+                    ? 'bg-purple-950/40 border-purple-500/60 shadow-lg shadow-purple-500/10'
+                    : 'bg-surface border-border/60 hover:border-border'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-bold text-purple-400 uppercase tracking-wider">🔴 Arrojado</span>
+                  {selectedPreset === 'aggressive' && <Check className="w-4 h-4 text-purple-400" />}
+                </div>
+                <div className="text-lg font-black text-white">2.0% / 15x</div>
+                <p className="text-[11px] text-slate-400 mt-1 font-mono">Trader Pro experiente. Stop diário em 5.0%.</p>
+              </button>
+            </div>
+
+            {/* Explicação Didática e Exemplo Prático */}
+            <div className="p-5 rounded-2xl bg-surface border border-border/60 text-xs font-mono space-y-3">
+              <div className="flex items-center space-x-2 text-white font-bold text-sm">
+                <Info className="w-4 h-4 text-accent" />
+                <span>Como funciona o cálculo de alocação na Bybit:</span>
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-slate-300">
+                <div className="p-3 rounded-xl bg-background/50 border border-border/40 space-y-1">
+                  <span className="text-accent font-bold">1. Margem Isolada (Isolated):</span>
+                  <p className="text-[11px] text-slate-400">Apenas a margem alocada no trade fica em risco. O resto da sua banca não pode ser liquidado.</p>
+                </div>
+                <div className="p-3 rounded-xl bg-background/50 border border-border/40 space-y-1">
+                  <span className="text-emerald-400 font-bold">2. Risk % por Trade:</span>
+                  <p className="text-[11px] text-slate-400">Se o Stop Loss for acionado, você perde estritamente os {riskPct}% configurados.</p>
+                </div>
+              </div>
+
+              {/* Simulação em tempo real */}
+              <div className="p-3 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-between">
+                <div>
+                  <span className="text-slate-400">Exemplo com sua banca atual (${currentBalance.toFixed(2)}):</span>
+                  <div className="text-white font-bold mt-0.5">
+                    Risco Máximo por Trade = <span className="text-emerald-400">${simulatedRiskUsd}</span> | Volume = ${simulatedNotional} | Margem Usada = <span className="text-amber-400">${simulatedMargin}</span>
+                  </div>
+                </div>
+                <span className="px-2 py-1 rounded bg-accent/20 text-accent font-bold text-[10px]">CÁLCULO ATIVO</span>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveRisk} className="bg-surface border border-border/60 rounded-2xl p-6 space-y-6">
               <div>
                 <div className="flex justify-between mb-2">
-                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Risk % por Trade</label>
+                  <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Risk % por Trade (Perda Máxima por Operação)</label>
                   <span className="text-sm font-black text-accent">{riskPct}%</span>
                 </div>
                 <input
                   type="range" min={0.1} max={5} step={0.1}
-                  value={riskPct} onChange={e => setRiskPct(Number(e.target.value))}
-                  className="w-full accent-accent"
+                  value={riskPct} onChange={e => { setRiskPct(Number(e.target.value)); setSelectedPreset('custom'); }}
+                  className="w-full accent-accent cursor-pointer"
                 />
-                <div className="flex justify-between text-[10px] text-slate-600 font-mono mt-1">
-                  <span>0.1% (Conservador)</span><span>2.5% (Padrão)</span><span>5% (Agressivo)</span>
+                <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1">
+                  <span>0.1% (Conservador)</span><span>1.0% (Recomendado)</span><span>5.0% (Máx. Permitido)</span>
                 </div>
               </div>
 
               <div>
                 <div className="flex justify-between mb-2">
-                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Alavancagem (Margem Isolada)</label>
+                  <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Alavancagem em Margem Isolada</label>
                   <span className="text-sm font-black text-accent">{leverage}x</span>
                 </div>
                 <input
                   type="range" min={1} max={50} step={1}
-                  value={leverage} onChange={e => setLeverage(Number(e.target.value))}
-                  className="w-full accent-accent"
+                  value={leverage} onChange={e => { setLeverage(Number(e.target.value)); setSelectedPreset('custom'); }}
+                  className="w-full accent-accent cursor-pointer"
                 />
-                <div className="flex justify-between text-[10px] text-slate-600 font-mono mt-1">
-                  <span>1x</span><span>10x (Padrão)</span><span>50x (Máx. SaaS)</span>
+                <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1">
+                  <span>1x (Sem alavancar)</span><span>10x (Padrão Bybit)</span><span>50x (Máximo)</span>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[11px] text-rose-400 font-mono block mb-1">Stop Diário Máximo (Loss $)</label>
+                  <label className="text-[11px] text-rose-400 font-mono block mb-1">Stop Diário Máximo (Trava de Perda $)</label>
                   <input
                     type="number" min={1} step={0.5}
-                    value={maxDailyLoss} onChange={e => setMaxDailyLoss(Number(e.target.value))}
-                    className="w-full bg-background border border-rose-500/30 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-rose-500"
+                    value={maxDailyLoss} onChange={e => { setMaxDailyLoss(Number(e.target.value)); setSelectedPreset('custom'); }}
+                    className="w-full bg-background border border-rose-500/40 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-rose-500 font-mono"
                   />
+                  <span className="text-[10px] text-slate-500 mt-1 block">O robô pausa se as perdas do dia atingirem esse valor.</span>
                 </div>
                 <div>
-                  <label className="text-[11px] text-emerald-400 font-mono block mb-1">Meta Diária (Gain Target $)</label>
+                  <label className="text-[11px] text-emerald-400 font-mono block mb-1">Meta Diária (Stop Gain $)</label>
                   <input
                     type="number" min={1} step={0.5}
-                    value={maxDailyProfit} onChange={e => setMaxDailyProfit(Number(e.target.value))}
-                    className="w-full bg-background border border-emerald-500/30 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
+                    value={maxDailyProfit} onChange={e => { setMaxDailyProfit(Number(e.target.value)); setSelectedPreset('custom'); }}
+                    className="w-full bg-background border border-emerald-500/40 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500 font-mono"
                   />
+                  <span className="text-[10px] text-slate-500 mt-1 block">Preserva o lucro do dia e suspende novas entradas.</span>
                 </div>
               </div>
 
-              <button type="submit" className="w-full py-2.5 rounded-xl bg-accent hover:bg-accent/80 text-white text-sm font-bold transition-all">
+              <button type="submit" className="w-full py-3 rounded-xl bg-accent hover:bg-accent/80 text-white text-sm font-bold transition-all shadow-lg shadow-accent/20">
                 Salvar Configurações de Risco
               </button>
             </form>
           </div>
         )}
 
-        {/* ── HISTÓRICO ── */}
+        {/* ── HISTÓRICO & PLANILHAS ── */}
         {activeTab === 'history' && (
-          <div className="space-y-5">
+          <div className="space-y-6">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-white">Histórico de Operações</h2>
-              <div className="flex space-x-2">
-                <button onClick={fetchHistory} className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-surface-hover transition-all">
+              <div>
+                <h2 className="text-xl font-bold text-white">Histórico de Operações</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Acompanhe todos os trades executados na sua conta e baixe a planilha formatada.</p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button onClick={fetchHistory} className="p-2 rounded-xl text-slate-400 hover:text-white bg-surface border border-border/60 transition-all">
                   <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                 </button>
-                <button onClick={handleDownloadHistory} className="flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30 text-xs font-bold transition-all">
+                <button
+                  onClick={() => handleDownloadHistory('excel')}
+                  className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-600/30 text-xs font-bold transition-all"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Baixar Planilha Excel (.xls)</span>
+                </button>
+                <button
+                  onClick={() => handleDownloadHistory('csv')}
+                  className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-surface text-slate-300 border border-border/60 hover:text-white text-xs font-bold transition-all"
+                >
                   <Download className="w-3.5 h-3.5" />
-                  <span>Baixar CSV</span>
+                  <span>CSV</span>
                 </button>
               </div>
             </div>
 
-            {/* Summary */}
+            {/* Summary KPI Cards */}
             <div className="grid grid-cols-3 gap-4">
-              <div className="bg-surface border border-border/60 rounded-2xl p-4 text-center">
-                <div className="text-xs text-slate-500 font-mono uppercase mb-1">P&L Total</div>
-                <div className={`text-xl font-black ${totalPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              <div className="bg-surface border border-border/60 rounded-2xl p-5 text-center">
+                <div className="text-xs text-slate-400 font-mono uppercase mb-1">P&L Líquido Realizado</div>
+                <div className={`text-2xl font-black ${totalPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
                 </div>
               </div>
-              <div className="bg-surface border border-border/60 rounded-2xl p-4 text-center">
-                <div className="text-xs text-slate-500 font-mono uppercase mb-1">Win Rate</div>
-                <div className={`text-xl font-black ${Number(winRate) >= 50 ? 'text-emerald-400' : 'text-amber-400'}`}>{winRate}%</div>
+              <div className="bg-surface border border-border/60 rounded-2xl p-5 text-center">
+                <div className="text-xs text-slate-400 font-mono uppercase mb-1">Assertividade (Win Rate)</div>
+                <div className={`text-2xl font-black ${Number(winRate) >= 50 ? 'text-emerald-400' : 'text-amber-400'}`}>{winRate}%</div>
               </div>
-              <div className="bg-surface border border-border/60 rounded-2xl p-4 text-center">
-                <div className="text-xs text-slate-500 font-mono uppercase mb-1">Total de Trades</div>
-                <div className="text-xl font-black text-white">{history.length}</div>
+              <div className="bg-surface border border-border/60 rounded-2xl p-5 text-center">
+                <div className="text-xs text-slate-400 font-mono uppercase mb-1">Total de Trades Registrados</div>
+                <div className="text-2xl font-black text-white">{history.length}</div>
               </div>
             </div>
 
             {/* Table */}
-            <div className="bg-surface border border-border/60 rounded-2xl overflow-hidden">
+            <div className="bg-surface border border-border/60 rounded-2xl overflow-hidden shadow-xl">
               <div className="overflow-x-auto">
                 <table className="w-full text-xs font-mono">
                   <thead>
-                    <tr className="border-b border-border/40 text-slate-500 uppercase tracking-wider text-[10px]">
-                      <th className="text-left px-5 py-3">Par</th>
-                      <th className="text-center px-5 py-3">Lado</th>
-                      <th className="text-right px-5 py-3">Entrada</th>
-                      <th className="text-right px-5 py-3">Saída</th>
-                      <th className="text-right px-5 py-3">Quantidade</th>
-                      <th className="text-right px-5 py-3">P&L</th>
-                      <th className="text-center px-5 py-3">Status</th>
-                      <th className="text-right px-5 py-3">Data</th>
+                    <tr className="border-b border-border/40 text-slate-400 uppercase tracking-wider text-[10px] bg-background/40">
+                      <th className="text-left px-5 py-3.5">Par / Ativo</th>
+                      <th className="text-center px-5 py-3.5">Lado</th>
+                      <th className="text-right px-5 py-3.5">Preço Entrada</th>
+                      <th className="text-right px-5 py-3.5">Preço Saída</th>
+                      <th className="text-right px-5 py-3.5">Quantidade</th>
+                      <th className="text-right px-5 py-3.5">P&L ($)</th>
+                      <th className="text-center px-5 py-3.5">Status</th>
+                      <th className="text-right px-5 py-3.5">Data/Hora</th>
                     </tr>
                   </thead>
                   <tbody>
                     {history.map(t => (
-                      <tr key={t.id} className="border-b border-border/20 hover:bg-surface-hover/20 transition-colors">
+                      <tr key={t.id} className="border-b border-border/20 hover:bg-surface-hover/30 transition-colors">
                         <td className="px-5 py-3 text-white font-semibold">{t.symbol}</td>
                         <td className={`px-5 py-3 text-center font-bold ${t.side === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}`}>{t.side}</td>
                         <td className="px-5 py-3 text-right">${Number(t.entry_price).toLocaleString()}</td>
@@ -600,15 +825,15 @@ export default function ClientDashboard() {
                           {t.pnl_usd != null ? `${t.pnl_usd >= 0 ? '+' : ''}$${Number(t.pnl_usd).toFixed(2)}` : '—'}
                         </td>
                         <td className="px-5 py-3 text-center">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${t.status === 'CLOSED' ? 'bg-slate-500/20 text-slate-400' : 'bg-emerald-500/20 text-emerald-400'}`}>{t.status}</span>
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${t.status === 'CLOSED' ? 'bg-slate-500/20 text-slate-400' : 'bg-emerald-500/20 text-emerald-400'}`}>{t.status}</span>
                         </td>
-                        <td className="px-5 py-3 text-right text-slate-500">{new Date(t.entry_time).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
+                        <td className="px-5 py-3 text-right text-slate-400">{new Date(t.entry_time).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
                 {history.length === 0 && !loading && (
-                  <div className="py-12 text-center text-slate-500">Nenhuma operação registrada ainda.</div>
+                  <div className="py-12 text-center text-slate-500 font-mono text-xs">Nenhuma operação realizada ainda. O robô registrará seus trades aqui.</div>
                 )}
               </div>
             </div>

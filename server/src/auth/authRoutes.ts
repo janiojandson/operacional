@@ -65,7 +65,9 @@ authRouter.get('/me', requireAuth, async (req: Request, res: Response) => {
         apiConnected: Number(cfg.api_connected) === 1,
         bybitTestnet: Number(cfg.bybit_testnet) === 1,
         hasApiKeys: !!(cfg.bybit_api_key_enc),
-        notificationPhone: cfg.notification_phone
+        notificationPhone: cfg.notification_phone,
+        planType: cfg.plan_type || 'FREE_TRIAL',
+        planExpiresAt: cfg.plan_expires_at ? Number(cfg.plan_expires_at) : null
       };
     }
   }
@@ -79,7 +81,70 @@ authRouter.get('/me', requireAuth, async (req: Request, res: Response) => {
   });
 });
 
-// POST /api/auth/register — apenas admin
+// POST /api/auth/signup — Cadastro público gratuito para clientes
+authRouter.post('/signup', async (req: Request, res: Response) => {
+  const { email, password, name } = req.body;
+  if (!email || !password || !name) {
+    return res.status(400).json({ error: 'Nome, email e senha são obrigatórios.' });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres.' });
+  }
+
+  const existing = await UserDB.findByEmail(email.toLowerCase().trim());
+  if (existing) {
+    return res.status(409).json({ error: 'Este email já está cadastrado. Faça login.' });
+  }
+
+  const hash = await bcrypt.hash(password, 12);
+  const userId = `usr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const clientId = `cli-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+  // 14 dias de teste grátis por padrão
+  const planExpiresAt = Date.now() + 14 * 24 * 60 * 60 * 1000;
+
+  await UserDB.create({
+    id: userId,
+    email: email.toLowerCase().trim(),
+    passwordHash: hash,
+    role: 'CLIENT',
+    clientId,
+    name: name.trim()
+  });
+
+  await ClientConfigDB.create({
+    clientId,
+    userId,
+    name: name.trim(),
+    planType: 'FREE_TRIAL',
+    planExpiresAt
+  });
+
+  // Gerar token de acesso imediatamente após o cadastro
+  const token = signToken({
+    userId,
+    email: email.toLowerCase().trim(),
+    role: 'CLIENT',
+    clientId,
+    name: name.trim()
+  });
+
+  res.status(201).json({
+    success: true,
+    token,
+    user: {
+      id: userId,
+      email: email.toLowerCase().trim(),
+      role: 'CLIENT',
+      clientId,
+      name: name.trim(),
+      planType: 'FREE_TRIAL',
+      planExpiresAt
+    }
+  });
+});
+
+// POST /api/auth/register — Cadastro criado por Admin
 authRouter.post('/register', requireAdmin, async (req: Request, res: Response) => {
   const { email, password, name, role = 'CLIENT' } = req.body;
   if (!email || !password || !name) {

@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { requireAdmin } from '../auth/authMiddleware.js';
-import { UserDB, ClientConfigDB, TradeHistoryDB, BalanceEditDB } from '../database/db.js';
+import { UserDB, ClientConfigDB, TradeHistoryDB, BalanceEditDB, AnnouncementDB } from '../database/db.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
@@ -33,6 +33,8 @@ adminRouter.get('/clients', async (_req: Request, res: Response) => {
         hasApiKeys: !!(cfg.bybit_api_key_enc),
         maskedApiKey: cfg.bybit_api_key_enc ? '****...****' : null,
         notificationPhone: cfg.notification_phone,
+        planType: cfg.plan_type || 'FREE_TRIAL',
+        planExpiresAt: cfg.plan_expires_at ? Number(cfg.plan_expires_at) : null
       } : null
     };
   });
@@ -43,63 +45,105 @@ adminRouter.get('/clients', async (_req: Request, res: Response) => {
 // POST /api/admin/clients/:clientId/balance — editar saldo
 adminRouter.post('/clients/:clientId/balance', async (req: Request, res: Response) => {
   const { clientId } = req.params;
-  const { balance, reason } = req.body;
+  const { newBalance, reason } = req.body;
 
-  if (typeof balance !== 'number' || balance < 0) {
-    return res.status(400).json({ error: 'Saldo inválido.' });
+  if (typeof newBalance !== 'number' || newBalance < 0) {
+    return res.status(400).json({ error: 'Saldo deve ser um número maior ou igual a zero.' });
   }
 
-  const config = await ClientConfigDB.findByClientId(clientId);
-  if (!config) return res.status(404).json({ error: 'Cliente não encontrado.' });
+  const current = await ClientConfigDB.findByClientId(clientId);
+  if (!current) return res.status(404).json({ error: 'Cliente não encontrado.' });
 
-  const oldBalance = Number(config.balance);
-  await ClientConfigDB.updateBalance(clientId, balance);
+  const oldBalance = Number(current.balance);
+  await ClientConfigDB.updateBalance(clientId, newBalance);
 
-  const editId = `edit-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
   await BalanceEditDB.insert({
-    id: editId,
+    id: `edit-${Date.now()}`,
     client_id: clientId,
     admin_id: req.user!.userId,
     old_balance: oldBalance,
-    new_balance: balance,
-    reason: reason || 'Edição manual pelo admin',
+    new_balance: newBalance,
+    reason: reason || 'Ajuste manual pelo administrador',
     action: 'EDIT'
   });
 
-  res.json({ success: true, clientId, oldBalance, newBalance: balance });
+  res.json({ success: true, clientId, oldBalance, newBalance });
 });
 
-// POST /api/admin/clients/:clientId/reset-balance — zerar banca
+// POST /api/admin/clients/:clientId/reset-balance — zerar saldo
 adminRouter.post('/clients/:clientId/reset-balance', async (req: Request, res: Response) => {
   const { clientId } = req.params;
   const { reason } = req.body;
 
-  const config = await ClientConfigDB.findByClientId(clientId);
-  if (!config) return res.status(404).json({ error: 'Cliente não encontrado.' });
+  const current = await ClientConfigDB.findByClientId(clientId);
+  if (!current) return res.status(404).json({ error: 'Cliente não encontrado.' });
 
-  const oldBalance = Number(config.balance);
+  const oldBalance = Number(current.balance);
   await ClientConfigDB.updateBalance(clientId, 0);
 
-  const editId = `reset-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
   await BalanceEditDB.insert({
-    id: editId,
+    id: `reset-${Date.now()}`,
     client_id: clientId,
     admin_id: req.user!.userId,
     old_balance: oldBalance,
     new_balance: 0,
-    reason: reason || 'Reset de banca pelo admin',
+    reason: reason || 'Saldo zerado pelo administrador',
     action: 'RESET'
   });
 
   res.json({ success: true, clientId, oldBalance, newBalance: 0 });
 });
 
-// POST /api/admin/clients/:clientId/kill-switch
+// POST /api/admin/clients/:clientId/plan — gerenciar plano e validade
+adminRouter.post('/clients/:clientId/plan', async (req: Request, res: Response) => {
+  const { clientId } = req.params;
+  const { planType, daysToAdd, customExpiry } = req.body;
+
+  const current = await ClientConfigDB.findByClientId(clientId);
+  if (!current) return res.status(404).json({ error: 'Cliente não encontrado.' });
+
+  let expiresAt = current.plan_expires_at ? Number(current.plan_expires_at) : Date.now();
+  if (daysToAdd) {
+    const base = expiresAt > Date.now() ? expiresAt : Date.now();
+    expiresAt = base + (daysToAdd * 24 * 60 * 60 * 1000);
+  } else if (customExpiry) {
+    expiresAt = Number(customExpiry);
+  }
+
+  await ClientConfigDB.updatePlan(clientId, planType || current.plan_type, expiresAt);
+  res.json({ success: true, clientId, planType: planType || current.plan_type, planExpiresAt: expiresAt });
+});
+
+// POST /api/admin/clients/:clientId/kill-switch — ativar/bloquear cliente
 adminRouter.post('/clients/:clientId/kill-switch', async (req: Request, res: Response) => {
   const { clientId } = req.params;
   const { active } = req.body;
   await ClientConfigDB.setActive(clientId, active !== false);
   res.json({ success: true, clientId, active: active !== false });
+});
+
+// GET /api/admin/announcements — listar anúncios do sistema
+adminRouter.get('/announcements', async (_req: Request, res: Response) => {
+  const list = await AnnouncementDB.listAll();
+  res.json(list);
+});
+
+// POST /api/admin/announcements — criar aviso em tela / banner
+adminRouter.post('/announcements', async (req: Request, res: Response) => {
+  const { title, message, type = 'INFO', actionUrl, actionLabel } = req.body;
+  if (!title || !message) {
+    return res.status(400).json({ error: 'Título e mensagem são obrigatórios.' });
+  }
+
+  const id = `ann-${Date.now()}`;
+  await AnnouncementDB.create({ id, title, message, type, actionUrl, actionLabel });
+  res.status(201).json({ success: true, id, title, message, type });
+});
+
+// DELETE /api/admin/announcements/:id — excluir aviso
+adminRouter.delete('/announcements/:id', async (req: Request, res: Response) => {
+  await AnnouncementDB.delete(req.params.id);
+  res.json({ success: true, id: req.params.id });
 });
 
 // GET /api/admin/balance-edits
@@ -144,9 +188,9 @@ adminRouter.get('/reports', async (req: Request, res: Response) => {
   });
 });
 
-// GET /api/admin/reports/download — download CSV
+// GET /api/admin/reports/download — download Planilha Excel (.xls) ou CSV
 adminRouter.get('/reports/download', async (req: Request, res: Response) => {
-  const { clientId, from, to, format = 'csv' } = req.query;
+  const { clientId, from, to, format = 'excel' } = req.query;
 
   const trades = await TradeHistoryDB.findAll({
     clientId: clientId as string | undefined,
@@ -155,10 +199,74 @@ adminRouter.get('/reports/download', async (req: Request, res: Response) => {
     limit: 10000
   });
 
+  const formatDate = (ts: number | null) => ts ? new Date(ts).toLocaleString('pt-BR') : '';
+
   if (format === 'json') {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="marketflow-report-${Date.now()}.json"`);
     return res.json(trades);
+  }
+
+  if (format === 'excel' || format === 'xlsx') {
+    const tableRows = trades.map(t => `
+      <tr>
+        <td style="text-align: left;">${t.client_id}</td>
+        <td style="text-align: left; font-weight: bold;">${t.symbol}</td>
+        <td style="text-align: center; color: ${t.side === 'BUY' ? '#10b981' : '#f43f5e'}; font-weight: bold;">${t.side}</td>
+        <td style="text-align: right;">$${Number(t.entry_price).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        <td style="text-align: right;">${t.close_price ? '$' + Number(t.close_price).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}</td>
+        <td style="text-align: right;">${t.qty}</td>
+        <td style="text-align: right;">$${Number(t.notional_usd).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        <td style="text-align: right; font-weight: bold; color: ${(t.pnl_usd ?? 0) >= 0 ? '#10b981' : '#f43f5e'};">${t.pnl_usd != null ? (t.pnl_usd >= 0 ? '+' : '') + '$' + Number(t.pnl_usd).toFixed(2) : '—'}</td>
+        <td style="text-align: center;">${t.leverage ? t.leverage + 'x' : '—'}</td>
+        <td style="text-align: center;">${t.status}</td>
+        <td style="text-align: left;">${t.signal_reason || 'Manual / Quant AI'}</td>
+        <td style="text-align: center;">${formatDate(t.entry_time)}</td>
+        <td style="text-align: center;">${formatDate(t.close_time)}</td>
+      </tr>
+    `).join('');
+
+    const excelHtml = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8">
+        <style>
+          th { background-color: #1e1b4b; color: #ffffff; font-family: Arial; font-size: 11pt; padding: 8px; }
+          td { font-family: Arial; font-size: 10pt; padding: 6px; border: 0.5pt solid #cbd5e1; }
+        </style>
+      </head>
+      <body>
+        <h2 style="font-family: Arial; color: #312e81;">MarketFlow Pro — Relatório Geral Administrativo</h2>
+        <p style="font-family: Arial; font-size: 10pt; color: #64748b;">Total de Operações: <b>${trades.length}</b> | Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+        <table border="1">
+          <thead>
+            <tr>
+              <th>ID Cliente</th>
+              <th>Par / Ativo</th>
+              <th>Lado</th>
+              <th>Preço Entrada</th>
+              <th>Preço Saída</th>
+              <th>Quantidade</th>
+              <th>Volume USD</th>
+              <th>Resultado P&L ($)</th>
+              <th>Alavancagem</th>
+              <th>Status</th>
+              <th>Motivo do Sinal</th>
+              <th>Data/Hora Entrada</th>
+              <th>Data/Hora Fechamento</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+      </body>
+      </html>
+    `;
+
+    res.setHeader('Content-Type', 'application/vnd.ms-excel; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="marketflow-admin-report-${Date.now()}.xls"`);
+    return res.send(excelHtml);
   }
 
   const headers = ['id', 'client_id', 'symbol', 'side', 'entry_price', 'close_price', 'qty', 'notional_usd', 'pnl_usd', 'leverage', 'status', 'signal_reason', 'entry_time', 'close_time'];
