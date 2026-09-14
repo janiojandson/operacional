@@ -90,8 +90,11 @@ export function useMarketData(activeSymbol: string) {
   // Fetch complete state whenever activeSymbol changes
   useEffect(() => {
     if (!activeSymbol) return;
+    const token = localStorage.getItem('mfp_token');
 
-    fetch(`/api/assets/${encodeURIComponent(activeSymbol)}/state`)
+    fetch(`/api/assets/${encodeURIComponent(activeSymbol)}/state`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
       .then(res => res.json())
       .then(data => {
         if (data.candles) setCandles(data.candles);
