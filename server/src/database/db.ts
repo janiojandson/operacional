@@ -42,7 +42,7 @@ export async function initDatabase(): Promise<void> {
   console.log('[DB] Conectando ao PostgreSQL Railway...');
 
   await query(`
-    CREATE TABLE IF NOT EXISTS users (
+    CREATE TABLE IF NOT EXISTS app_users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
@@ -75,7 +75,7 @@ export async function initDatabase(): Promise<void> {
       api_connected INTEGER NOT NULL DEFAULT 0,
       created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
       updated_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
-      FOREIGN KEY(user_id) REFERENCES users(id)
+      FOREIGN KEY(user_id) REFERENCES app_users(id)
     )
   `);
 
@@ -115,7 +115,7 @@ export async function initDatabase(): Promise<void> {
   `);
 
   // Índices para performance
-  await query(`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_trade_history_client ON trade_history(client_id, entry_time DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_balance_edits_client ON balance_edits(client_id, timestamp DESC)`);
 
@@ -125,12 +125,12 @@ export async function initDatabase(): Promise<void> {
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@marketflow.pro';
   const adminPassword = process.env.ADMIN_PASSWORD || 'MarketFlow@2026!';
 
-  const existingAdmin = await queryOne('SELECT id FROM users WHERE role = $1 LIMIT 1', ['ADMIN']);
+  const existingAdmin = await queryOne('SELECT id FROM app_users WHERE role = $1 LIMIT 1', ['ADMIN']);
   if (!existingAdmin) {
     const hash = await bcrypt.hash(adminPassword, 12);
     const adminId = `admin-${Date.now()}`;
     await query(
-      `INSERT INTO users (id, email, password_hash, role, name) VALUES ($1, $2, $3, 'ADMIN', 'Administrador Master')`,
+      `INSERT INTO app_users (id, email, password_hash, role, name) VALUES ($1, $2, $3, 'ADMIN', 'Administrador Master')`,
       [adminId, adminEmail, hash]
     );
     console.log(`[DB] ✅ Admin padrão criado: ${adminEmail}`);
@@ -203,23 +203,23 @@ export interface BalanceEditRow {
 
 export const UserDB = {
   findByEmail: (email: string) =>
-    queryOne<UserRow>('SELECT * FROM users WHERE email = $1 AND is_active = 1', [email]),
+    queryOne<UserRow>('SELECT * FROM app_users WHERE email = $1 AND is_active = 1', [email]),
 
   findById: (id: string) =>
-    queryOne<UserRow>('SELECT * FROM users WHERE id = $1', [id]),
+    queryOne<UserRow>('SELECT * FROM app_users WHERE id = $1', [id]),
 
   create: async (data: { id: string; email: string; passwordHash: string; role: 'ADMIN' | 'CLIENT'; clientId?: string; name?: string }) => {
     await query(
-      `INSERT INTO users (id, email, password_hash, role, client_id, name) VALUES ($1, $2, $3, $4, $5, $6)`,
+      `INSERT INTO app_users (id, email, password_hash, role, client_id, name) VALUES ($1, $2, $3, $4, $5, $6)`,
       [data.id, data.email, data.passwordHash, data.role, data.clientId || null, data.name || null]
     );
   },
 
   listClients: () =>
-    query<UserRow>("SELECT * FROM users WHERE role = 'CLIENT' ORDER BY created_at DESC"),
+    query<UserRow>("SELECT * FROM app_users WHERE role = 'CLIENT' ORDER BY created_at DESC"),
 
   deactivate: (id: string) =>
-    query('UPDATE users SET is_active = 0, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $1', [id])
+    query('UPDATE app_users SET is_active = 0, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $1', [id])
 };
 
 // ─── Funções de Acesso — ClientConfigDB ───────────────────────────────────

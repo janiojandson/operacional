@@ -132,7 +132,7 @@ authRouter.post('/change-password', requireAuth, async (req: Request, res: Respo
   if (!match) return res.status(401).json({ error: 'Senha atual incorreta.' });
 
   const hash = await bcrypt.hash(newPassword, 12);
-  await query('UPDATE users SET password_hash = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $2', [hash, user.id]);
+  await query('UPDATE app_users SET password_hash = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $2', [hash, user.id]);
 
   res.json({ success: true, message: 'Senha alterada com sucesso.' });
 });
