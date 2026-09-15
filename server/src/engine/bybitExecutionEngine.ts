@@ -323,11 +323,14 @@ export class BybitExecutionEngine {
       console.error(`[BybitEngine] Erro ao buscar histórico ${clientId}:`, err.message);
       return [];
     }
+  }
+
   /**
    * Pânico / Desconexão de Emergência:
    * Cancela todas as ordens abertas e encerra a mercado todas as posições ativas na Bybit
    */
   static async panicCloseAll(clientId: string): Promise<{ success: boolean; closedCount: number; cancelledCount: number; errors: string[] }> {
+
     const config = await ClientConfigDB.findByClientId(clientId);
     if (!config?.bybit_api_key_enc) {
       return { success: false, closedCount: 0, cancelledCount: 0, errors: ['Chaves de API da Bybit não configuradas'] };
