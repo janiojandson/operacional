@@ -45,40 +45,40 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
     const chart = createChart(chartContainerRef.current, {
       layout: {
-        background: { color: '#090d16' },
-        textColor: '#94a3b8',
+        background: { color: '#0B0E11' },
+        textColor: '#848E9C',
         fontSize: 12,
-        fontFamily: 'JetBrains Mono, Inter, sans-serif'
+        fontFamily: 'JetBrains Mono, Roboto Mono, monospace'
       },
       grid: {
-        vertLines: { color: 'rgba(30, 41, 59, 0.4)' },
-        horzLines: { color: 'rgba(30, 41, 59, 0.4)' },
+        vertLines: { color: 'rgba(43, 49, 57, 0.4)' },
+        horzLines: { color: 'rgba(43, 49, 57, 0.4)' },
       },
       crosshair: {
         vertLine: { color: '#6366f1', width: 1, style: 2 },
         horzLine: { color: '#6366f1', width: 1, style: 2 },
       },
       rightPriceScale: {
-        borderColor: '#1e293b',
+        borderColor: '#2B3139',
         autoScale: true,
       },
       timeScale: {
-        borderColor: '#1e293b',
+        borderColor: '#2B3139',
         timeVisible: true,
         secondsVisible: false,
       },
     });
 
     const candleSeries = chart.addCandlestickSeries({
-      upColor: '#10b981',
-      downColor: '#ef4444',
+      upColor: '#0ECB81',
+      downColor: '#F6465D',
       borderVisible: false,
-      wickUpColor: '#10b981',
-      wickDownColor: '#ef4444',
+      wickUpColor: '#0ECB81',
+      wickDownColor: '#F6465D',
     });
 
     const volumeSeries = chart.addHistogramSeries({
-      color: '#26a69a',
+      color: '#0ECB81',
       priceFormat: { type: 'volume' },
       priceScaleId: '',
     });
@@ -215,7 +215,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
       markers.push({
         time: timeSec as any,
         position: isBuy ? 'belowBar' : 'aboveBar',
-        color: isBuy ? '#10b981' : '#ef4444',
+        color: isBuy ? '#0ECB81' : '#F6465D',
         shape: isBuy ? 'arrowUp' : 'arrowDown',
         text: isBuy ? `ENTRADA COMPRA [${sig.type.split('_')[0]}]` : `ENTRADA VENDA [${sig.type.split('_')[0]}]`,
         size: 2
@@ -260,7 +260,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
       tpLineRef.current = candleSeriesRef.current.createPriceLine({
         price: openPosition.takeProfit,
-        color: '#10b981',
+        color: '#0ECB81',
         lineWidth: 1,
         lineStyle: 2, // Dashed
         axisLabelVisible: true,
@@ -269,7 +269,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
       slLineRef.current = candleSeriesRef.current.createPriceLine({
         price: openPosition.stopLoss,
-        color: '#ef4444',
+        color: '#F6465D',
         lineWidth: 1,
         lineStyle: 2, // Dashed
         axisLabelVisible: true,
@@ -279,16 +279,16 @@ export const ChartPro: React.FC<ChartProProps> = ({
   }, [openPosition, symbol]);
 
   return (
-    <div className="relative w-full h-full flex flex-col bg-background">
+    <div className="relative w-full h-full flex flex-col bg-bg-panel select-none">
       {/* Chart Top Bar with Pro Indicator Toggles, Timeframe & Flow Pressure */}
-      <div className="flex flex-col border-b border-border/70 bg-surface/60 backdrop-blur-sm select-none">
+      <div className="flex flex-col border-b border-border-panel bg-bg-panel">
         {/* Top Control Bar */}
-        <div className="flex items-center justify-between px-4 py-2">
-          <div className="flex items-center space-x-3">
-            <span className="font-mono font-bold text-base text-white tracking-wider">{symbol}</span>
+        <div className="flex items-center justify-between px-3 py-1.5">
+          <div className="flex items-center space-x-2.5">
+            <span className="font-mono font-bold text-sm text-text-primary tracking-wider">{symbol}</span>
             
             {/* Timeframe Selector */}
-            <div className="flex items-center bg-background/80 p-0.5 rounded-md border border-border/70 text-[11px] font-mono">
+            <div className="flex items-center bg-bg-app p-0.5 rounded border border-border-panel text-[11px] font-mono">
               {(['1m', '3m', '5m', '15m', '1h', '4h', '1D'] as const).map((tf) => (
                 <button
                   key={tf}
@@ -296,7 +296,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
                   className={`px-2 py-0.5 rounded transition-all ${
                     selectedTf === tf
                       ? 'bg-accent text-white font-bold shadow-sm'
-                      : 'text-slate-400 hover:text-white hover:bg-surface-hover'
+                      : 'text-text-muted hover:text-text-primary hover:bg-surface-hover'
                   }`}
                 >
                   {tf}
@@ -305,13 +305,13 @@ export const ChartPro: React.FC<ChartProProps> = ({
             </div>
 
             {/* Indicator Toggles */}
-            <div className="flex items-center space-x-2 ml-2">
+            <div className="flex items-center space-x-2 ml-1">
               <button
                 onClick={() => setShowFlowMarkers(!showFlowMarkers)}
                 className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-mono border transition-all ${
                   showFlowMarkers
-                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                    : 'bg-surface text-slate-400 border-border'
+                    ? 'bg-trade-green/15 text-trade-green border-trade-green/40'
+                    : 'bg-bg-app text-text-muted border-border-panel'
                 }`}
               >
                 {showFlowMarkers ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
@@ -323,8 +323,8 @@ export const ChartPro: React.FC<ChartProProps> = ({
           {/* Delta & CVD HUD */}
           <div className="flex items-center space-x-4 text-xs font-mono">
             <div className="flex items-center space-x-1.5">
-              <span className="text-slate-400">Delta CVD:</span>
-              <span className={`font-semibold ${activeCandle && activeCandle.cvd >= 0 ? 'text-buy' : 'text-sell'}`}>
+              <span className="text-text-muted">Delta CVD:</span>
+              <span className={`font-semibold ${activeCandle && activeCandle.cvd >= 0 ? 'text-trade-green' : 'text-trade-red'}`}>
                 {activeCandle ? (activeCandle.cvd >= 0 ? `+${activeCandle.cvd.toLocaleString()}` : activeCandle.cvd.toLocaleString()) : '0'}
               </span>
             </div>
@@ -332,69 +332,69 @@ export const ChartPro: React.FC<ChartProProps> = ({
         </div>
 
         {/* 📊 BARRA DE PRESSÃO DE FLUXO INSTITUCIONAL (Buy/Sell Pressure) */}
-        <div className="px-4 py-1.5 bg-background/40 border-t border-border/40 flex items-center space-x-3 text-[11px] font-mono">
-          <div className="flex items-center space-x-1.5 shrink-0 text-slate-300 font-semibold">
-            <Activity className="w-3.5 h-3.5 text-accent animate-pulse" />
+        <div className="px-3 py-1 bg-bg-app/60 border-t border-border-panel/60 flex items-center space-x-3 text-[11px] font-mono">
+          <div className="flex items-center space-x-1.5 shrink-0 text-text-primary font-semibold text-[10px]">
+            <Activity className="w-3 h-3 text-accent animate-pulse" />
             <span>PRESSÃO INSTITUCIONAL:</span>
           </div>
 
           {/* Visual Dual-Colored Pressure Bar */}
           <div className="flex-1 flex items-center space-x-2">
-            <span className="text-emerald-400 font-bold text-[10px] w-12 text-right">
+            <span className="text-trade-green font-bold text-[10px] w-12 text-right">
               {buyPressurePct}% BUY
             </span>
             
-            <div className="flex-1 h-2.5 bg-surface rounded-full overflow-hidden flex border border-border/60 p-0.5">
+            <div className="flex-1 h-2 bg-bg-app rounded-full overflow-hidden flex border border-border-panel p-0.5">
               <div 
-                className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-l-full transition-all duration-300 shadow-sm shadow-emerald-500/50"
+                className="h-full bg-trade-green rounded-l-full transition-all duration-300"
                 style={{ width: `${buyPressurePct}%` }}
               />
               <div 
-                className="h-full bg-gradient-to-r from-rose-500 to-rose-600 rounded-r-full transition-all duration-300 shadow-sm shadow-rose-500/50"
+                className="h-full bg-trade-red rounded-r-full transition-all duration-300"
                 style={{ width: `${sellPressurePct}%` }}
               />
             </div>
 
-            <span className="text-rose-400 font-bold text-[10px] w-12">
+            <span className="text-trade-red font-bold text-[10px] w-12">
               {sellPressurePct}% SELL
             </span>
           </div>
 
-          <div className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 border ${
+          <div className={`px-2 py-0.2 rounded text-[10px] font-bold shrink-0 border ${
             dominantSide === 'BUY'
-              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+              ? 'bg-trade-green/15 text-trade-green border-trade-green/40'
               : dominantSide === 'SELL'
-              ? 'bg-rose-500/20 text-rose-400 border-rose-500/40'
-              : 'bg-surface text-slate-400 border-border'
+              ? 'bg-trade-red/15 text-trade-red border-trade-red/40'
+              : 'bg-bg-app text-text-muted border-border-panel'
           }`}>
-            {dominantSide === 'BUY' ? '🔥 ABSORÇÃO / DOMÍNIO COMPRADOR' : dominantSide === 'SELL' ? '⚠️ PRESSÃO / DOMÍNIO VENDEDOR' : '⚖️ FLUXO EM EQUILÍBRIO'}
+            {dominantSide === 'BUY' ? '🔥 ABSORÇÃO / COMPRA' : dominantSide === 'SELL' ? '⚠️ PRESSÃO / VENDA' : '⚖️ EQUILÍBRIO'}
           </div>
         </div>
       </div>
 
       {/* Floating Active Trade Box if In Position */}
       {openPosition && openPosition.symbol === symbol && (
-        <div className="absolute top-20 left-4 z-20 bg-surface/90 border border-accent/50 rounded-lg p-2.5 backdrop-blur-md shadow-xl text-xs font-mono flex items-center space-x-4 animate-pulse">
+        <div className="absolute top-20 left-4 z-20 bg-bg-panel/95 border border-accent/50 rounded-md p-2.5 backdrop-blur-md shadow-xl text-xs font-mono flex items-center space-x-4 animate-pulse">
           <div className="flex items-center space-x-2">
-            <span className={`px-2 py-0.5 rounded font-bold ${openPosition.type === 'BUY' ? 'bg-buy text-black' : 'bg-sell text-white'}`}>
+            <span className={`px-2 py-0.5 rounded font-bold ${openPosition.type === 'BUY' ? 'bg-trade-green text-black' : 'bg-trade-red text-white'}`}>
               {openPosition.type}
             </span>
             <div>
-              <div className="text-[10px] text-slate-400">ENTRADA EM CURSO</div>
-              <div className="text-white font-bold">${openPosition.entryPrice.toLocaleString()}</div>
+              <div className="text-[10px] text-text-muted">ENTRADA EM CURSO</div>
+              <div className="text-text-primary font-bold">${openPosition.entryPrice.toLocaleString()}</div>
             </div>
           </div>
 
-          <div className="border-l border-border/80 pl-3">
-            <div className="text-[10px] text-slate-400">LUCRO / PREJUÍZO (P&L)</div>
-            <div className={`font-bold ${openPosition.pnlUsd >= 0 ? 'text-buy' : 'text-sell'}`}>
+          <div className="border-l border-border-panel pl-3">
+            <div className="text-[10px] text-text-muted">LUCRO / PREJUÍZO (P&L)</div>
+            <div className={`font-bold ${openPosition.pnlUsd >= 0 ? 'text-trade-green' : 'text-trade-red'}`}>
               {openPosition.pnlUsd >= 0 ? `+$${openPosition.pnlUsd}` : `-$${Math.abs(openPosition.pnlUsd)}`} ({openPosition.pnlPct}%)
             </div>
           </div>
 
-          <div className="border-l border-border/80 pl-3 text-[10px] text-slate-300">
-            <div>TP: <span className="text-buy">${openPosition.takeProfit.toLocaleString()}</span></div>
-            <div>SL: <span className="text-sell">${openPosition.stopLoss.toLocaleString()}</span></div>
+          <div className="border-l border-border-panel pl-3 text-[10px] text-text-muted">
+            <div>TP: <span className="text-trade-green font-semibold">${openPosition.takeProfit.toLocaleString()}</span></div>
+            <div>SL: <span className="text-trade-red font-semibold">${openPosition.stopLoss.toLocaleString()}</span></div>
           </div>
         </div>
       )}

@@ -79,7 +79,7 @@ export default function TradingTerminal() {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-background text-slate-100 font-sans overflow-hidden select-none">
+    <div className="flex flex-col h-screen w-screen bg-bg-app text-text-primary font-sans overflow-hidden select-none">
       {/* Top Asset Selector & Institutional Live Header */}
       <AssetSelector
         assets={assets}
@@ -94,16 +94,16 @@ export default function TradingTerminal() {
       />
 
       {/* Main Workspace Area (Desktop & Tablet Landscape) Redimensionável */}
-      <main className="flex-1 hidden lg:flex overflow-hidden relative">
+      <main className="flex-1 hidden lg:flex overflow-hidden relative p-1.5 gap-1.5 bg-bg-app">
         {/* Left Column: Gráfico (Superior) + Sinais & Boleta (Inferior) */}
         <section 
           style={{ width: `${leftColWidthPct}%` }}
-          className="flex flex-col h-full overflow-hidden"
+          className="flex flex-col h-full overflow-hidden gap-1.5"
         >
           {/* Top: Chart Pro */}
           <div 
             style={{ height: `${chartHeightPct}%` }}
-            className="w-full min-h-[150px] relative overflow-hidden"
+            className="w-full min-h-[150px] relative overflow-hidden bg-bg-panel border border-border-panel rounded-md shadow-sm"
           >
             <ChartPro
               symbol={activeSymbol}
@@ -117,7 +117,7 @@ export default function TradingTerminal() {
           {/* Horizontal Splitter (Arraste para ajustar altura entre Gráfico e Base) */}
           <div
             title="Arraste para ajustar a altura do Gráfico e dos Painéis Inferiores"
-            className="h-1.5 w-full bg-border/40 hover:bg-accent cursor-row-resize flex justify-center items-center group transition-colors select-none z-20 shrink-0"
+            className="h-1.5 w-full bg-border-panel/40 hover:bg-accent cursor-row-resize flex justify-center items-center group transition-colors select-none z-20 shrink-0 rounded-full"
             onMouseDown={(e) => {
               e.preventDefault();
               const startY = e.clientY;
@@ -143,12 +143,12 @@ export default function TradingTerminal() {
           {/* Bottom Split: Sinais Radar + Boleta de Operações Quantitativas */}
           <div 
             style={{ height: `${100 - chartHeightPct}%` }}
-            className="w-full min-h-[120px] flex overflow-hidden bg-background/50"
+            className="w-full min-h-[120px] flex overflow-hidden gap-1.5"
           >
             {/* Radar de Sinais */}
             <div 
               style={{ width: `${signalsWidthPct}%` }}
-              className="h-full overflow-hidden"
+              className="h-full overflow-hidden bg-bg-panel border border-border-panel rounded-md shadow-sm"
             >
               <SignalsFeed signals={signals} />
             </div>
@@ -156,7 +156,7 @@ export default function TradingTerminal() {
             {/* Splitter Vertical entre Sinais e Boleta */}
             <div
               title="Arraste para ajustar largura entre Radar de Sinais e Operações"
-              className="w-1.5 h-full bg-border/40 hover:bg-accent cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-10 shrink-0"
+              className="w-1.5 h-full bg-border-panel/40 hover:bg-accent cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-10 shrink-0 rounded-full"
               onMouseDown={(e) => {
                 e.preventDefault();
                 const startX = e.clientX;
@@ -182,7 +182,7 @@ export default function TradingTerminal() {
             {/* Boleta de Operações Quantitativas */}
             <div 
               style={{ width: `${100 - signalsWidthPct}%` }}
-              className="h-full overflow-hidden"
+              className="h-full overflow-hidden bg-bg-panel border border-border-panel rounded-md shadow-sm"
             >
               <PaperTradingPanel 
                 account={paperAccount} 
@@ -197,7 +197,7 @@ export default function TradingTerminal() {
         {/* Main Vertical Splitter Bar (Arraste para ajustar largura entre Gráfico e DOM/Tape) */}
         <div 
           title="Arraste para ajustar largura entre Gráfico e DOM/Tape"
-          className="w-1.5 h-full bg-border/40 hover:bg-accent cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-20 shrink-0"
+          className="w-1.5 h-full bg-border-panel/40 hover:bg-accent cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-20 shrink-0 rounded-full"
           onMouseDown={(e) => {
             e.preventDefault();
             const startX = e.clientX;
@@ -222,12 +222,12 @@ export default function TradingTerminal() {
         {/* Right Column: DOM L2 Book & Tape Reader */}
         <section 
           style={{ width: `${100 - leftColWidthPct}%` }}
-          className="flex h-full overflow-hidden"
+          className="flex h-full overflow-hidden gap-1.5"
         >
           {/* DOM Book */}
           <div 
             style={{ width: `${domWidthPct}%` }}
-            className="h-full overflow-hidden"
+            className="h-full overflow-hidden bg-bg-panel border border-border-panel rounded-md shadow-sm"
           >
             <DOMBook book={book} />
           </div>
@@ -235,7 +235,7 @@ export default function TradingTerminal() {
           {/* Splitter Vertical entre DOM Book e Tape Reader */}
           <div
             title="Arraste para ajustar largura entre Book DOM e Tape"
-            className="w-1.5 h-full bg-border/40 hover:bg-accent cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-10 shrink-0"
+            className="w-1.5 h-full bg-border-panel/40 hover:bg-accent cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-10 shrink-0 rounded-full"
             onMouseDown={(e) => {
               e.preventDefault();
               const startX = e.clientX;
@@ -261,7 +261,7 @@ export default function TradingTerminal() {
           {/* Tape Reader */}
           <div 
             style={{ width: `${100 - domWidthPct}%` }}
-            className="h-full overflow-hidden"
+            className="h-full overflow-hidden bg-bg-panel border border-border-panel rounded-md shadow-sm"
           >
             <TapeReader trades={trades} />
           </div>
