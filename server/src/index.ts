@@ -1,6 +1,7 @@
 import express from 'express';
 import http from 'http';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
@@ -335,6 +336,30 @@ app.get('/api/strategy/health-report', requireAuth, (req, res) => {
   const account = paperTrading.getAccountState();
   const report = QuantStrategyEngine.generateHealthReport(account);
   res.json(report);
+});
+
+// ─── Shadow Mode Auditoria Logs ──────────────────────────────────────────
+app.get('/api/audit-logs', async (req, res) => {
+  try {
+    const logPath1 = path.resolve(process.cwd(), 'audit_shadow_mode.log');
+    const logPath2 = path.resolve(rootDir, 'audit_shadow_mode.log');
+    const logPath = fs.existsSync(logPath1) ? logPath1 : (fs.existsSync(logPath2) ? logPath2 : null);
+
+    if (!logPath) {
+      return res.json({ logs: 'Log de auditoria ainda não foi gerado. Aguardando a primeira operação...' });
+    }
+
+    const data = await fs.promises.readFile(logPath, 'utf8');
+    if (!data.trim()) {
+      return res.json({ logs: 'Log de auditoria ainda não foi gerado. Aguardando a primeira operação...' });
+    }
+
+    const lines = data.trim().split('\n');
+    const lastLines = lines.slice(-1000).join('\n');
+    res.json({ logs: lastLines });
+  } catch (err: any) {
+    res.status(500).json({ logs: `Erro ao ler logs de auditoria: ${err.message}` });
+  }
 });
 
 app.post('/api/ai-advisor/audit', requireAuth, async (req, res) => {

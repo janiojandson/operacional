@@ -10,7 +10,8 @@ import {
   Edit3,
   X,
   Check,
-  Zap
+  Zap,
+  Activity
 } from 'lucide-react';
 import { TenantSelector } from './TenantSelector';
 
@@ -21,6 +22,7 @@ interface AssetSelectorProps {
   isConnected: boolean;
   onOpenAdvisor: () => void;
   onOpenQuantHealth: () => void;
+  onOpenShadowAudit: () => void;
   currentBalance: number;
   onUpdateBalance: (balance: number) => void;
   onResetData: () => void;
@@ -33,6 +35,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
   isConnected,
   onOpenAdvisor,
   onOpenQuantHealth,
+  onOpenShadowAudit,
   currentBalance,
   onUpdateBalance,
   onResetData
@@ -110,6 +113,16 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
 
       {/* Right Section: Action Buttons & Live Status */}
       <div className="flex items-center space-x-2 shrink-0">
+        {/* Botão Shadow Mode */}
+        <button
+          onClick={onOpenShadowAudit}
+          title="Monitor de Avaliação em Shadow Mode (Modo Fantasma)"
+          className="flex items-center space-x-1.5 px-3 py-1.5 rounded bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-400 border border-cyan-500/40 text-xs font-bold font-mono transition-all whitespace-nowrap shadow-sm shadow-cyan-500/10"
+        >
+          <Activity className="w-3.5 h-3.5 animate-pulse text-cyan-400" />
+          <span>📊 SHADOW MODE</span>
+        </button>
+
         {/* Botão 7 BLOCOS */}
         <button
           onClick={onOpenQuantHealth}

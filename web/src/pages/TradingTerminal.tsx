@@ -8,6 +8,7 @@ import { SignalsFeed } from '../components/Signals/SignalsFeed';
 import { PaperTradingPanel } from '../components/PaperTrading/PaperTradingPanel';
 import { AIAdvisorModal } from '../components/Advisor/AIAdvisorModal';
 import { QuantStrategyHealthModal } from '../components/Advisor/QuantStrategyHealthModal';
+import { ShadowAuditModal } from '../components/ShadowAuditModal';
 import { 
   BarChart2, 
   Zap, 
@@ -21,6 +22,7 @@ export default function TradingTerminal() {
   const [activeSymbol, setActiveSymbol] = useState<string>('BTC/USDT');
   const [isAdvisorOpen, setIsAdvisorOpen] = useState<boolean>(false);
   const [isQuantHealthOpen, setIsQuantHealthOpen] = useState<boolean>(false);
+  const [isShadowAuditOpen, setIsShadowAuditOpen] = useState<boolean>(false);
   
   // Painéis Redimensionáveis (Splitter States)
   const [leftColWidthPct, setLeftColWidthPct] = useState<number>(65); // 65% esquerda (Gráfico/Sinais/Boleta), 35% direita (DOM/Tape)
@@ -88,6 +90,7 @@ export default function TradingTerminal() {
         isConnected={isConnected}
         onOpenAdvisor={() => setIsAdvisorOpen(true)}
         onOpenQuantHealth={() => setIsQuantHealthOpen(true)}
+        onOpenShadowAudit={() => setIsShadowAuditOpen(true)}
         currentBalance={currentBalance}
         onUpdateBalance={handleUpdateBalance}
         onResetData={handleResetData}
@@ -378,6 +381,12 @@ export default function TradingTerminal() {
       <QuantStrategyHealthModal
         isOpen={isQuantHealthOpen}
         onClose={() => setIsQuantHealthOpen(false)}
+      />
+
+      {/* Shadow Mode Auditor Modal (Live Anti-USD & Spread L2) */}
+      <ShadowAuditModal
+        isOpen={isShadowAuditOpen}
+        onClose={() => setIsShadowAuditOpen(false)}
       />
     </div>
   );
