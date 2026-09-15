@@ -7,16 +7,23 @@ import { BybitExecutionEngine } from '../engine/bybitExecutionEngine.js';
 export const clientRouter = Router();
 clientRouter.use(requireClient);
 
-function getClientId(req: Request): string | null {
+async function resolveClientId(req: Request): Promise<string | null> {
   if (req.user?.role === 'ADMIN') {
     return (req.params.clientId || req.query.clientId) as string || null;
   }
-  return req.user?.clientId || null;
+  if (req.user?.clientId) return req.user.clientId;
+  if (req.user?.userId) {
+    const user = await UserDB.findById(req.user.userId);
+    if (user?.client_id) return user.client_id;
+    const cfg = await ClientConfigDB.findByUserId(req.user.userId);
+    if (cfg?.client_id) return cfg.client_id;
+  }
+  return null;
 }
 
 // POST /api/client/api-keys
 clientRouter.post('/api-keys', async (req: Request, res: Response) => {
-  const clientId = getClientId(req);
+  const clientId = await resolveClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado no token.' });
 
   const { apiKey, apiSecret, testnet = true } = req.body;
@@ -43,7 +50,7 @@ clientRouter.post('/api-keys', async (req: Request, res: Response) => {
 
 // POST /api/client/api-keys/test
 clientRouter.post('/api-keys/test', async (req: Request, res: Response) => {
-  const clientId = getClientId(req);
+  const clientId = await resolveClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
 
   const result = await BybitExecutionEngine.connectAndValidate(clientId);
@@ -65,7 +72,7 @@ clientRouter.post('/api-keys/test', async (req: Request, res: Response) => {
 
 // GET /api/client/account
 clientRouter.get('/account', async (req: Request, res: Response) => {
-  const clientId = getClientId(req);
+  const clientId = await resolveClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
 
   const config = await ClientConfigDB.findByClientId(clientId);
@@ -115,7 +122,7 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
 
 // POST /api/client/sync-toggle — Ligar ou Desligar Sincronização (com Pânico ao Desligar)
 clientRouter.post('/sync-toggle', async (req: Request, res: Response) => {
-  const clientId = getClientId(req);
+  const clientId = await resolveClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
 
   const { enabled } = req.body;
@@ -144,7 +151,7 @@ clientRouter.post('/sync-toggle', async (req: Request, res: Response) => {
 
 // POST /api/client/panic — Botão de Pânico explícito
 clientRouter.post('/panic', async (req: Request, res: Response) => {
-  const clientId = getClientId(req);
+  const clientId = await resolveClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
 
   // Desliga sincronização
@@ -162,7 +169,7 @@ clientRouter.post('/panic', async (req: Request, res: Response) => {
 
 // GET /api/client/positions
 clientRouter.get('/positions', async (req: Request, res: Response) => {
-  const clientId = getClientId(req);
+  const clientId = await resolveClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
   const positions = await BybitExecutionEngine.getOpenPositions(clientId);
   res.json(positions);
@@ -170,7 +177,7 @@ clientRouter.get('/positions', async (req: Request, res: Response) => {
 
 // GET /api/client/history
 clientRouter.get('/history', async (req: Request, res: Response) => {
-  const clientId = getClientId(req);
+  const clientId = await resolveClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
 
   const { limit = 100, source = 'local' } = req.query;
@@ -186,7 +193,7 @@ clientRouter.get('/history', async (req: Request, res: Response) => {
 
 // GET /api/client/history/download — Planilha Excel (.xls) ou CSV
 clientRouter.get('/history/download', async (req: Request, res: Response) => {
-  const clientId = getClientId(req);
+  const clientId = await resolveClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
 
   const { format = 'excel' } = req.query;
@@ -271,7 +278,7 @@ clientRouter.get('/history/download', async (req: Request, res: Response) => {
 
 // POST /api/client/risk
 clientRouter.post('/risk', async (req: Request, res: Response) => {
-  const clientId = getClientId(req);
+  const clientId = await resolveClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
 
   const { riskPct, leverage, maxDailyLossUsd, maxDailyProfitUsd, fixedLotUsd } = req.body;

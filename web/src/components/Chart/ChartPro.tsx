@@ -117,15 +117,17 @@ export const ChartPro: React.FC<ChartProProps> = ({
       if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
 
       try {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('mfp_token') || localStorage.getItem('token');
         const res = await fetch(`/api/assets/${encodeURIComponent(symbol)}/klines?tf=${selectedTf}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {}
         });
 
         if (res.ok) {
           const data = await res.json();
-          if (!isCancelled && Array.isArray(data) && data.length > 0) {
-            const chartCandles: CandlestickData[] = data.map((c: any) => ({
+          const rawCandles = Array.isArray(data) ? data : (Array.isArray(data.candles) ? data.candles : []);
+          
+          if (!isCancelled && rawCandles.length > 0) {
+            const chartCandles: CandlestickData[] = rawCandles.map((c: any) => ({
               time: c.time as any,
               open: c.open,
               high: c.high,
@@ -133,10 +135,10 @@ export const ChartPro: React.FC<ChartProProps> = ({
               close: c.close
             }));
 
-            const chartVolume: HistogramData[] = data.map((c: any) => ({
+            const chartVolume: HistogramData[] = rawCandles.map((c: any) => ({
               time: c.time as any,
               value: c.volume,
-              color: c.close >= c.open ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'
+              color: c.close >= c.open ? 'rgba(14, 203, 129, 0.4)' : 'rgba(246, 70, 93, 0.4)'
             }));
 
             candleSeriesRef.current.setData(chartCandles);
@@ -162,7 +164,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
         const chartVolume: HistogramData[] = candles.map(c => ({
           time: c.time as any,
           value: c.volume,
-          color: c.close >= c.open ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'
+          color: c.close >= c.open ? 'rgba(14, 203, 129, 0.4)' : 'rgba(246, 70, 93, 0.4)'
         }));
 
         candleSeriesRef.current.setData(chartCandles);
