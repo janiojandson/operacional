@@ -343,15 +343,23 @@ export const ClientConfigDB = {
     queryOne<ClientConfigRow>('SELECT * FROM client_configs WHERE user_id = $1', [userId]),
 
   create: async (data: { clientId: string; userId: string; name?: string; phone?: string; planType?: string; planActive?: boolean; planExpiresAt?: number | null }) => {
+    // Garantir que user_id seja o id real da tabela app_users
+    let realUserId = data.userId;
+    const user = await queryOne<{ id: string }>('SELECT id FROM app_users WHERE id = $1 OR client_id = $2 LIMIT 1', [data.userId, data.clientId]);
+    if (user) {
+      realUserId = user.id;
+    }
+
     await query(
       `INSERT INTO client_configs (client_id, user_id, notification_phone, sync_enabled, plan_type, plan_active, plan_expires_at) 
        VALUES ($1, $2, $3, 0, $4, $5, $6) 
        ON CONFLICT (client_id) DO UPDATE SET 
+         user_id = EXCLUDED.user_id,
          plan_type = EXCLUDED.plan_type, 
          plan_active = EXCLUDED.plan_active, 
          plan_expires_at = EXCLUDED.plan_expires_at, 
          updated_at = EXTRACT(EPOCH FROM NOW()) * 1000`,
-      [data.clientId, data.userId, data.phone || null, data.planType || 'ACTIVE', data.planActive !== false ? 1 : 0, data.planExpiresAt || null]
+      [data.clientId, realUserId, data.phone || null, data.planType || 'ACTIVE', data.planActive !== false ? 1 : 0, data.planExpiresAt || null]
     );
   },
 

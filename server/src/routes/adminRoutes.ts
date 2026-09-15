@@ -156,6 +156,10 @@ const handlePlanUpdate = async (req: Request, res: Response) => {
     if (user) {
       current = await ClientConfigDB.findByUserId(user.id);
       if (current) clientId = current.client_id;
+      if (!clientId && user.client_id) {
+        current = await ClientConfigDB.findByClientId(user.client_id);
+        if (current) clientId = user.client_id;
+      }
     }
 
     if (!current) {
@@ -163,10 +167,16 @@ const handlePlanUpdate = async (req: Request, res: Response) => {
       if (current) clientId = current.client_id;
     }
 
-    if (!clientId && user) {
+    // Se ainda não existir configuração mas tivermos o usuário, cria uma nova
+    if (!current && user) {
       clientId = user.client_id || `cli-${user.id.slice(-8)}`;
       await query('UPDATE app_users SET client_id = $1 WHERE id = $2', [clientId, user.id]);
-      await ClientConfigDB.create({ clientId, userId: user.id, planType: planType || 'ACTIVE', planActive: true });
+      await ClientConfigDB.create({ 
+        clientId, 
+        userId: user.id, 
+        planType: planType || 'ACTIVE', 
+        planActive: true 
+      });
       current = await ClientConfigDB.findByClientId(clientId);
     }
 
@@ -207,6 +217,8 @@ const handlePlanUpdate = async (req: Request, res: Response) => {
     
     if (user) {
       await UserDB.setPlanActive(user.id, newPlanActive);
+    } else if (current.user_id) {
+      await UserDB.setPlanActive(current.user_id, newPlanActive);
     }
 
     console.log(`[Admin] ✅ Plano atualizado com sucesso para cliente ${clientId}:`, { newPlanType, newPlanActive, expiresAt });

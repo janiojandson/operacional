@@ -312,7 +312,7 @@ export default function ClientDashboard() {
   const checkoutUrl = 'https://wa.me/?text=' + encodeURIComponent('Olá! Gostaria de ativar meu plano no Copy Trading Bybit.');
 
   return (
-    <div className="min-h-screen bg-background text-slate-100 font-sans flex flex-col">
+    <div className="h-screen w-screen bg-background text-slate-100 font-sans flex flex-col overflow-hidden">
 
       {/* Notification Toast */}
       {notification && (
@@ -325,7 +325,7 @@ export default function ClientDashboard() {
       )}
 
       {/* Header */}
-      <header className="h-auto md:h-14 bg-surface/95 border-b border-border/60 backdrop-blur-md flex flex-wrap items-center px-4 md:px-6 py-2 md:py-0 shrink-0 gap-2 md:gap-0">
+      <header className="h-auto md:h-14 bg-surface/95 border-b border-border/60 backdrop-blur-md flex flex-wrap items-center px-4 md:px-6 py-2 md:py-0 shrink-0 gap-2 md:gap-0 z-30">
         <div className="flex items-center space-x-3 flex-1">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-accent to-violet-500 flex items-center justify-center shadow-lg shadow-accent/30 shrink-0">
             <TrendingUp className="w-4 h-4 text-white" />
@@ -380,7 +380,7 @@ export default function ClientDashboard() {
 
       {/* Banner de Modo Vitrine (Inativos) */}
       {!isPlanActive && (
-        <div className="bg-gradient-to-r from-amber-950/80 via-surface to-amber-950/80 border-b border-amber-500/40 px-4 md:px-6 py-2.5 flex flex-col sm:flex-row items-center justify-between gap-2">
+        <div className="bg-gradient-to-r from-amber-950/80 via-surface to-amber-950/80 border-b border-amber-500/40 px-4 md:px-6 py-2.5 flex flex-col sm:flex-row items-center justify-between gap-2 shrink-0">
           <div className="flex items-center space-x-2 text-xs font-mono text-amber-300">
             <Lock className="w-4 h-4 text-amber-400 shrink-0" />
             <span><strong>Modo Vitrine Ativo:</strong> Seu painel está em modo Somente Leitura. O Simulador de Risco e a visualização de resultados estão liberados.</span>
@@ -397,7 +397,7 @@ export default function ClientDashboard() {
         </div>
       )}
 
-      <main className="flex-1 overflow-y-auto p-4 md:p-6 max-w-6xl mx-auto w-full pb-16">
+      <main className="flex-1 overflow-y-auto p-4 md:p-6 max-w-6xl mx-auto w-full pb-24">
 
         {/* 📢 Avisos em Tela / Banners do Administrador */}
         {announcements.length > 0 && (
