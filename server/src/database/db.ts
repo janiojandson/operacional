@@ -342,9 +342,15 @@ export const ClientConfigDB = {
   findByUserId: (userId: string) =>
     queryOne<ClientConfigRow>('SELECT * FROM client_configs WHERE user_id = $1', [userId]),
 
-  create: async (data: { clientId: string; userId: string; name?: string; phone?: string; planType?: string; planActive?: boolean; planExpiresAt?: number }) => {
+  create: async (data: { clientId: string; userId: string; name?: string; phone?: string; planType?: string; planActive?: boolean; planExpiresAt?: number | null }) => {
     await query(
-      `INSERT INTO client_configs (client_id, user_id, notification_phone, sync_enabled, plan_type, plan_active, plan_expires_at) VALUES ($1, $2, $3, 0, $4, $5, $6) ON CONFLICT (client_id) DO NOTHING`,
+      `INSERT INTO client_configs (client_id, user_id, notification_phone, sync_enabled, plan_type, plan_active, plan_expires_at) 
+       VALUES ($1, $2, $3, 0, $4, $5, $6) 
+       ON CONFLICT (client_id) DO UPDATE SET 
+         plan_type = EXCLUDED.plan_type, 
+         plan_active = EXCLUDED.plan_active, 
+         plan_expires_at = EXCLUDED.plan_expires_at, 
+         updated_at = EXTRACT(EPOCH FROM NOW()) * 1000`,
       [data.clientId, data.userId, data.phone || null, data.planType || 'ACTIVE', data.planActive !== false ? 1 : 0, data.planExpiresAt || null]
     );
   },
@@ -378,9 +384,12 @@ export const ClientConfigDB = {
   },
 
   updatePlan: async (clientId: string, planType: string, planActive: boolean, planExpiresAt: number | null) => {
+    const expiresVal = planExpiresAt !== null && planExpiresAt !== undefined && !isNaN(Number(planExpiresAt)) 
+      ? Math.round(Number(planExpiresAt)) 
+      : null;
     await query(
       'UPDATE client_configs SET plan_type = $1, plan_active = $2, plan_expires_at = $3, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $4',
-      [planType, planActive ? 1 : 0, planExpiresAt, clientId]
+      [planType, planActive ? 1 : 0, expiresVal, clientId]
     );
   },
 

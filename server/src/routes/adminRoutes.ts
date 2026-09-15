@@ -140,66 +140,93 @@ adminRouter.post('/clients/:id/force-disconnect', async (req: Request, res: Resp
   });
 });
 
-// POST /api/admin/clients/:id/plan — gerenciar plano, validade e modalidades (Vitalício, Vitrine, Ativo com dias)
-adminRouter.post('/clients/:id/plan', async (req: Request, res: Response) => {
-  const id = String(req.params.id);
-  const { planType, daysToAdd, customExpiry, planActive, isVitalicio } = req.body;
+// POST, PUT, PATCH /api/admin/clients/:id/plan — gerenciar plano, validade e modalidades (Vitalício, Vitrine, Ativo com dias)
+const handlePlanUpdate = async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const { planType, daysToAdd, customExpiry, planActive, isVitalicio } = req.body;
+    console.log(`[Admin] 📝 Recebida solicitação de plano para ID '${id}':`, JSON.stringify(req.body));
 
-  let clientId = id;
-  let user = await UserDB.findByClientId(id);
-  if (!user) {
-    user = await UserDB.findById(id);
-    if (user?.client_id) clientId = user.client_id;
-  }
+    let user = await UserDB.findById(id);
+    if (!user) user = await UserDB.findByClientId(id);
 
-  let current = await ClientConfigDB.findByClientId(clientId);
-  if (!current && user) {
-    // Cria config se ainda não existir
-    clientId = user.client_id || `cli-${user.id.slice(-8)}`;
-    await ClientConfigDB.create({ clientId, userId: user.id });
-    current = await ClientConfigDB.findByClientId(clientId);
-  }
+    let clientId: string | null = null;
+    let current: ClientConfigRow | undefined = undefined;
 
-  if (!current) return res.status(404).json({ error: 'Configuração do cliente não encontrada.' });
-
-  let newPlanType = planType || current.plan_type || 'ACTIVE';
-  let newPlanActive = planActive !== undefined ? Boolean(planActive) : Number(current.plan_active) === 1;
-  let expiresAt: number | null = current.plan_expires_at ? Number(current.plan_expires_at) : null;
-
-  if (isVitalicio || planType === 'VITALICIO') {
-    newPlanType = 'VITALICIO';
-    newPlanActive = true;
-    expiresAt = null; // null = sem expiração
-  } else if (planType === 'VITRINE') {
-    newPlanType = 'VITRINE';
-    newPlanActive = false;
-    await ClientConfigDB.setSyncEnabled(clientId, false);
-  } else if (planType === 'ACTIVE' || daysToAdd || customExpiry) {
-    newPlanType = 'ACTIVE';
-    newPlanActive = true;
-    if (daysToAdd !== undefined && daysToAdd !== null) {
-      const now = Date.now();
-      const base = (expiresAt && expiresAt > now) ? expiresAt : now;
-      expiresAt = base + (Number(daysToAdd) * 24 * 60 * 60 * 1000);
-    } else if (customExpiry) {
-      expiresAt = Number(customExpiry);
+    if (user) {
+      current = await ClientConfigDB.findByUserId(user.id);
+      if (current) clientId = current.client_id;
     }
-  }
 
-  await ClientConfigDB.updatePlan(clientId, newPlanType, newPlanActive, expiresAt);
-  
-  if (user) {
-    await UserDB.setPlanActive(user.id, newPlanActive);
-  }
+    if (!current) {
+      current = await ClientConfigDB.findByClientId(id);
+      if (current) clientId = current.client_id;
+    }
 
-  res.json({
-    success: true,
-    clientId,
-    planType: newPlanType,
-    planActive: newPlanActive,
-    planExpiresAt: expiresAt
-  });
-});
+    if (!clientId && user) {
+      clientId = user.client_id || `cli-${user.id.slice(-8)}`;
+      await query('UPDATE app_users SET client_id = $1 WHERE id = $2', [clientId, user.id]);
+      await ClientConfigDB.create({ clientId, userId: user.id, planType: planType || 'ACTIVE', planActive: true });
+      current = await ClientConfigDB.findByClientId(clientId);
+    }
+
+    if (!clientId || !current) {
+      console.warn(`[Admin] ⚠️ Cliente não encontrado para ID '${id}'`);
+      return res.status(404).json({ error: 'Configuração do cliente não encontrada.' });
+    }
+
+    let newPlanType = planType || current.plan_type || 'ACTIVE';
+    let newPlanActive = planActive !== undefined ? Boolean(planActive) : Number(current.plan_active) === 1;
+    let expiresAt: number | null = current.plan_expires_at ? Number(current.plan_expires_at) : null;
+
+    if (isVitalicio || planType === 'VITALICIO') {
+      newPlanType = 'VITALICIO';
+      newPlanActive = true;
+      expiresAt = null; // null = sem expiração
+    } else if (planType === 'VITRINE') {
+      newPlanType = 'VITRINE';
+      newPlanActive = false;
+      await ClientConfigDB.setSyncEnabled(clientId, false);
+    } else if (planType === 'INACTIVE') {
+      newPlanType = 'INACTIVE';
+      newPlanActive = false;
+      await ClientConfigDB.setSyncEnabled(clientId, false);
+    } else if (planType === 'ACTIVE' || daysToAdd !== undefined || customExpiry !== undefined) {
+      newPlanType = 'ACTIVE';
+      newPlanActive = true;
+      if (daysToAdd !== undefined && daysToAdd !== null && !isNaN(Number(daysToAdd))) {
+        const now = Date.now();
+        const base = (expiresAt && expiresAt > now) ? expiresAt : now;
+        expiresAt = base + (Number(daysToAdd) * 24 * 60 * 60 * 1000);
+      } else if (customExpiry) {
+        expiresAt = Number(customExpiry);
+      }
+    }
+
+    await ClientConfigDB.updatePlan(clientId, newPlanType, newPlanActive, expiresAt);
+    
+    if (user) {
+      await UserDB.setPlanActive(user.id, newPlanActive);
+    }
+
+    console.log(`[Admin] ✅ Plano atualizado com sucesso para cliente ${clientId}:`, { newPlanType, newPlanActive, expiresAt });
+
+    return res.json({
+      success: true,
+      clientId,
+      planType: newPlanType,
+      planActive: newPlanActive,
+      planExpiresAt: expiresAt
+    });
+  } catch (err: any) {
+    console.error('[Admin] ❌ Erro ao processar atualização de plano:', err);
+    return res.status(500).json({ error: `Erro no servidor ao salvar plano: ${err.message}` });
+  }
+};
+
+adminRouter.post('/clients/:id/plan', handlePlanUpdate);
+adminRouter.put('/clients/:id/plan', handlePlanUpdate);
+adminRouter.patch('/clients/:id/plan', handlePlanUpdate);
 
 // POST /api/admin/clients/:id/kill-switch — ativar/bloquear cliente (atualiza is_active e plan_active)
 adminRouter.post('/clients/:id/kill-switch', async (req: Request, res: Response) => {

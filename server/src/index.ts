@@ -396,6 +396,62 @@ app.get('/api/assets/:symbol/state', requireAuth, (req, res) => {
   });
 });
 
+app.get('/api/assets/:symbol/klines', requireAuth, (req, res) => {
+  const symbol = decodeURIComponent(req.params.symbol);
+  const tf = (req.query.tf as string) || '1m';
+  const state = marketManager.getSymbolState(symbol);
+  if (!state) {
+    return res.status(404).json({ error: 'Ativo não encontrado' });
+  }
+
+  const baseCandles = state.candles || [];
+  if (tf === '1m' || baseCandles.length === 0) {
+    return res.json({ symbol, tf, candles: baseCandles });
+  }
+
+  let minutes = 1;
+  if (tf === '3m') minutes = 3;
+  else if (tf === '5m') minutes = 5;
+  else if (tf === '15m') minutes = 15;
+  else if (tf === '1h') minutes = 60;
+  else if (tf === '4h') minutes = 240;
+  else if (tf === '1D') minutes = 1440;
+
+  const intervalSec = minutes * 60;
+  const aggregatedMap = new Map<number, CandleData>();
+
+  for (const c of baseCandles) {
+    const bucketTime = Math.floor(c.time / intervalSec) * intervalSec;
+    const existing = aggregatedMap.get(bucketTime);
+    if (!existing) {
+      aggregatedMap.set(bucketTime, {
+        time: bucketTime,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume,
+        buyVolume: c.buyVolume,
+        sellVolume: c.sellVolume,
+        delta: c.delta,
+        cvd: c.cvd
+      });
+    } else {
+      existing.high = Math.max(existing.high, c.high);
+      existing.low = Math.min(existing.low, c.low);
+      existing.close = c.close;
+      existing.volume = Number((existing.volume + c.volume).toFixed(2));
+      existing.buyVolume = Number((existing.buyVolume + c.buyVolume).toFixed(2));
+      existing.sellVolume = Number((existing.sellVolume + c.sellVolume).toFixed(2));
+      existing.delta = Number((existing.delta + c.delta).toFixed(2));
+      existing.cvd = c.cvd;
+    }
+  }
+
+  const aggregatedCandles = Array.from(aggregatedMap.values()).sort((a, b) => a.time - b.time);
+  res.json({ symbol, tf, candles: aggregatedCandles });
+});
+
 app.get('/api/signals', requireAuth, (req, res) => {
   res.json(flowEngine.getRecentSignals());
 });

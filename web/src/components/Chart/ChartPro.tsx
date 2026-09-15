@@ -109,27 +109,73 @@ export const ChartPro: React.FC<ChartProProps> = ({
     };
   }, []);
 
-  // Update Candles
+  // Update Candles and Timeframe fetch
   useEffect(() => {
-    if (!candleSeriesRef.current || !volumeSeriesRef.current || candles.length === 0) return;
+    let isCancelled = false;
 
-    const chartCandles: CandlestickData[] = candles.map(c => ({
-      time: c.time as any,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close
-    }));
+    const loadTimeframeData = async () => {
+      if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
 
-    const chartVolume: HistogramData[] = candles.map(c => ({
-      time: c.time as any,
-      value: c.volume,
-      color: c.close >= c.open ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'
-    }));
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`/api/assets/${encodeURIComponent(symbol)}/klines?tf=${selectedTf}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
 
-    candleSeriesRef.current.setData(chartCandles);
-    volumeSeriesRef.current.setData(chartVolume);
-  }, [candles]);
+        if (res.ok) {
+          const data = await res.json();
+          if (!isCancelled && Array.isArray(data) && data.length > 0) {
+            const chartCandles: CandlestickData[] = data.map((c: any) => ({
+              time: c.time as any,
+              open: c.open,
+              high: c.high,
+              low: c.low,
+              close: c.close
+            }));
+
+            const chartVolume: HistogramData[] = data.map((c: any) => ({
+              time: c.time as any,
+              value: c.volume,
+              color: c.close >= c.open ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'
+            }));
+
+            candleSeriesRef.current.setData(chartCandles);
+            volumeSeriesRef.current.setData(chartVolume);
+            chartRef.current?.timeScale().fitContent();
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao buscar klines para timeframe:', err);
+      }
+
+      // Fallback: usar candles recebidos via props
+      if (!isCancelled && candles && candles.length > 0) {
+        const chartCandles: CandlestickData[] = candles.map(c => ({
+          time: c.time as any,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close
+        }));
+
+        const chartVolume: HistogramData[] = candles.map(c => ({
+          time: c.time as any,
+          value: c.volume,
+          color: c.close >= c.open ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'
+        }));
+
+        candleSeriesRef.current.setData(chartCandles);
+        volumeSeriesRef.current.setData(chartVolume);
+      }
+    };
+
+    loadTimeframeData();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [symbol, selectedTf, candles]);
 
   // Update Live Candle
   useEffect(() => {
