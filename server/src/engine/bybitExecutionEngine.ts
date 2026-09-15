@@ -2,6 +2,7 @@ import ccxt from 'ccxt';
 import { decrypt } from '../utils/crypto.js';
 import { ClientConfigDB, TradeHistoryDB } from '../database/db.js';
 import { maskApiKey } from '../utils/crypto.js';
+import { runShadowAudit } from './shadowAuditor.js';
 
 export interface BybitAccountInfo {
   walletBalance: number;
@@ -255,6 +256,11 @@ export class BybitExecutionEngine {
 
       // Configurar alavancagem isolada ANTES de abrir a posição
       await exchange.setLeverage(Number(config.leverage), ccxtSymbol, { marginMode: 'isolated' }).catch(() => {});
+
+      // 🛡️ SHADOW AUDIT (MODO FANTASMA): Dispara em background sem bloquear ou atrasar a thread principal
+      runShadowAudit(exchange, ccxtSymbol, payload.side).catch((err) => {
+        console.error(`\x1b[31m[SHADOW FATAL ERROR] ${err?.message || err}\x1b[0m`);
+      });
 
       // Executar ordem Market com TP e SL embutidos
       const side = payload.side === 'BUY' ? 'buy' : 'sell';
