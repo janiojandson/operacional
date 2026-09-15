@@ -312,7 +312,7 @@ export default function ClientDashboard() {
   const checkoutUrl = 'https://wa.me/?text=' + encodeURIComponent('Olá! Gostaria de ativar meu plano no Copy Trading Bybit.');
 
   return (
-    <div className="h-screen w-screen bg-background text-slate-100 font-sans flex flex-col overflow-hidden">
+    <div className="min-h-screen w-full bg-background text-slate-100 font-sans flex flex-col">
 
       {/* Notification Toast */}
       {notification && (

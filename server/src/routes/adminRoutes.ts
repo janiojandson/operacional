@@ -230,9 +230,9 @@ const handlePlanUpdate = async (req: Request, res: Response) => {
       planActive: newPlanActive,
       planExpiresAt: expiresAt
     });
-  } catch (err: any) {
-    console.error('[Admin] ❌ Erro ao processar atualização de plano:', err);
-    return res.status(500).json({ error: `Erro no servidor ao salvar plano: ${err.message}` });
+  } catch (error: any) {
+    console.error("ERRO AO SALVAR CLIENTE:", error);
+    return res.status(500).json({ error: error.message || 'Erro interno ao salvar configurações do plano do cliente.' });
   }
 };
 

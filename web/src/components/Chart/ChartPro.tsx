@@ -116,6 +116,8 @@ export const ChartPro: React.FC<ChartProProps> = ({
     const loadTimeframeData = async () => {
       if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
 
+      console.log("Buscando TF:", selectedTf);
+
       try {
         const token = localStorage.getItem('mfp_token') || localStorage.getItem('token');
         const res = await fetch(`/api/assets/${encodeURIComponent(symbol)}/klines?tf=${selectedTf}`, {
@@ -127,18 +129,20 @@ export const ChartPro: React.FC<ChartProProps> = ({
           const rawCandles = Array.isArray(data) ? data : (Array.isArray(data.candles) ? data.candles : []);
           
           if (!isCancelled && rawCandles.length > 0) {
+            console.log("Candles renderizados:", rawCandles.length);
+
             const chartCandles: CandlestickData[] = rawCandles.map((c: any) => ({
               time: c.time as any,
-              open: c.open,
-              high: c.high,
-              low: c.low,
-              close: c.close
+              open: Number(c.open),
+              high: Number(c.high),
+              low: Number(c.low),
+              close: Number(c.close)
             }));
 
             const chartVolume: HistogramData[] = rawCandles.map((c: any) => ({
               time: c.time as any,
-              value: c.volume,
-              color: c.close >= c.open ? 'rgba(14, 203, 129, 0.4)' : 'rgba(246, 70, 93, 0.4)'
+              value: Number(c.volume || 0),
+              color: Number(c.close) >= Number(c.open) ? 'rgba(14, 203, 129, 0.4)' : 'rgba(246, 70, 93, 0.4)'
             }));
 
             candleSeriesRef.current.setData(chartCandles);
@@ -151,20 +155,21 @@ export const ChartPro: React.FC<ChartProProps> = ({
         console.warn('Erro ao buscar klines para timeframe:', err);
       }
 
-      // Fallback: usar candles recebidos via props
-      if (!isCancelled && candles && candles.length > 0) {
+      // Fallback: usar candles recebidos via props apenas se estiver no timeframe 1m
+      if (!isCancelled && selectedTf === '1m' && candles && candles.length > 0) {
+        console.log("Candles renderizados:", candles.length);
         const chartCandles: CandlestickData[] = candles.map(c => ({
           time: c.time as any,
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close
+          open: Number(c.open),
+          high: Number(c.high),
+          low: Number(c.low),
+          close: Number(c.close)
         }));
 
         const chartVolume: HistogramData[] = candles.map(c => ({
           time: c.time as any,
-          value: c.volume,
-          color: c.close >= c.open ? 'rgba(14, 203, 129, 0.4)' : 'rgba(246, 70, 93, 0.4)'
+          value: Number(c.volume || 0),
+          color: Number(c.close) >= Number(c.open) ? 'rgba(14, 203, 129, 0.4)' : 'rgba(246, 70, 93, 0.4)'
         }));
 
         candleSeriesRef.current.setData(chartCandles);
@@ -179,24 +184,26 @@ export const ChartPro: React.FC<ChartProProps> = ({
     };
   }, [symbol, selectedTf, candles]);
 
-  // Update Live Candle
+  // Update Live Candle (apenas no timeframe 1m para não distorcer candles agregados de tempos maiores)
   useEffect(() => {
     if (!activeCandle || !candleSeriesRef.current || !volumeSeriesRef.current) return;
 
-    candleSeriesRef.current.update({
-      time: activeCandle.time as any,
-      open: activeCandle.open,
-      high: activeCandle.high,
-      low: activeCandle.low,
-      close: activeCandle.close
-    });
+    if (selectedTf === '1m') {
+      candleSeriesRef.current.update({
+        time: activeCandle.time as any,
+        open: Number(activeCandle.open),
+        high: Number(activeCandle.high),
+        low: Number(activeCandle.low),
+        close: Number(activeCandle.close)
+      });
 
-    volumeSeriesRef.current.update({
-      time: activeCandle.time as any,
-      value: activeCandle.volume,
-      color: activeCandle.close >= activeCandle.open ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'
-    });
-  }, [activeCandle]);
+      volumeSeriesRef.current.update({
+        time: activeCandle.time as any,
+        value: Number(activeCandle.volume || 0),
+        color: Number(activeCandle.close) >= Number(activeCandle.open) ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'
+      });
+    }
+  }, [activeCandle, selectedTf]);
 
   // Non-Repainting Flow Signal Markers on Chart
   useEffect(() => {

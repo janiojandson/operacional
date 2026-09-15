@@ -226,8 +226,10 @@ export default function AdminDashboard() {
       } else {
         payload.planType = 'ACTIVE';
         payload.planActive = true;
-        payload.daysToAdd = editDaysToAdd;
+        payload.daysToAdd = Number(editDaysToAdd) || 30;
       }
+
+      console.error("Payload enviado:", payload);
 
       const res = await authFetch(`/api/admin/clients/${targetId}/plan`, {
         method: 'POST',
@@ -240,9 +242,11 @@ export default function AdminDashboard() {
         fetchClients();
         fetchOverview();
       } else {
+        console.error("Erro da API:", data);
         notify(data.error || 'Erro ao atualizar plano.', 'error');
       }
-    } catch {
+    } catch (error: any) {
+      console.error("Erro da API:", error);
       notify('Erro de comunicação com o servidor.', 'error');
     }
   };
