@@ -4,8 +4,8 @@ import {
   TrendingUp, Key, Wifi, WifiOff, DollarSign, BarChart2,
   AlertTriangle, CheckCircle, Loader2, RefreshCw, Download,
   Eye, EyeOff, LogOut, Shield, Activity, Clock,
-  TrendingDown, Zap, FileSpreadsheet, Sparkles, Check,
-  HelpCircle, Info, Bell, ExternalLink, Sliders
+  TrendingDown, Zap, FileSpreadsheet, Lock,
+  HelpCircle, Info, Bell, ExternalLink, Sliders, Power, AlertOctagon
 } from 'lucide-react';
 
 type ClientTab = 'overview' | 'api-keys' | 'risk' | 'history';
@@ -20,6 +20,7 @@ interface AccountInfo {
   maxDailyLossUsd: number;
   maxDailyProfitUsd: number;
   isActive: boolean;
+  syncEnabled: boolean;
   apiConnected: boolean;
   bybitTestnet: boolean;
   hasApiKeys: boolean;
@@ -71,6 +72,8 @@ export default function ClientDashboard() {
   const [history, setHistory] = useState<TradeRecord[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [panicLoading, setPanicLoading] = useState(false);
   const [notification, setNotification] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
   // API Keys form
@@ -81,12 +84,15 @@ export default function ClientDashboard() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message?: string; error?: string; hint?: string; accountInfo?: any } | null>(null);
 
-  // Risk form
+  // Risk form & Simulator
+  const [simulatedBank, setSimulatedBank] = useState<number>(1000);
   const [riskPct, setRiskPct] = useState(1.0);
   const [leverage, setLeverage] = useState(10);
   const [maxDailyLoss, setMaxDailyLoss] = useState(50);
   const [maxDailyProfit, setMaxDailyProfit] = useState(150);
   const [selectedPreset, setSelectedPreset] = useState<'conservative' | 'moderate' | 'aggressive' | 'custom'>('moderate');
+
+  const isPlanActive = user?.planActive !== false; // Lógica Freemium
 
   const notify = (msg: string, type: 'success' | 'error' = 'success') => {
     setNotification({ msg, type });
@@ -103,6 +109,9 @@ export default function ClientDashboard() {
         setLeverage(data.leverage);
         setMaxDailyLoss(data.maxDailyLossUsd);
         setMaxDailyProfit(data.maxDailyProfitUsd);
+        if (data.balance > 0 && simulatedBank === 1000) {
+          setSimulatedBank(data.balance);
+        }
       }
     } catch { }
   };
@@ -146,26 +155,79 @@ export default function ClientDashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Presets inteligentes baseados na banca real
+  // Presets inteligentes baseados no simulador de banca
   const applyPreset = (type: 'conservative' | 'moderate' | 'aggressive') => {
     setSelectedPreset(type);
-    const balance = account?.balance && account.balance > 0 ? account.balance : 100;
+    const bank = simulatedBank > 0 ? simulatedBank : 100;
 
     if (type === 'conservative') {
       setRiskPct(0.5);
       setLeverage(5);
-      setMaxDailyLoss(Number(Math.max(10, balance * 0.015).toFixed(2))); // 1.5% stop
-      setMaxDailyProfit(Number(Math.max(20, balance * 0.03).toFixed(2))); // 3% meta
+      setMaxDailyLoss(Number(Math.max(10, bank * 0.015).toFixed(2))); // 1.5% stop
+      setMaxDailyProfit(Number(Math.max(20, bank * 0.03).toFixed(2))); // 3% meta
     } else if (type === 'moderate') {
       setRiskPct(1.0);
       setLeverage(10);
-      setMaxDailyLoss(Number(Math.max(20, balance * 0.03).toFixed(2))); // 3% stop
-      setMaxDailyProfit(Number(Math.max(50, balance * 0.06).toFixed(2))); // 6% meta
+      setMaxDailyLoss(Number(Math.max(20, bank * 0.03).toFixed(2))); // 3% stop
+      setMaxDailyProfit(Number(Math.max(50, bank * 0.06).toFixed(2))); // 6% meta
     } else if (type === 'aggressive') {
       setRiskPct(2.0);
       setLeverage(15);
-      setMaxDailyLoss(Number(Math.max(30, balance * 0.05).toFixed(2))); // 5% stop
-      setMaxDailyProfit(Number(Math.max(80, balance * 0.10).toFixed(2))); // 10% meta
+      setMaxDailyLoss(Number(Math.max(30, bank * 0.05).toFixed(2))); // 5% stop
+      setMaxDailyProfit(Number(Math.max(80, bank * 0.10).toFixed(2))); // 10% meta
+    }
+  };
+
+  // Toggle Sincronização (Com Pânico ao desligar)
+  const handleToggleSync = async () => {
+    if (!isPlanActive) {
+      notify('Seu plano está inativo. Assine para ativar a sincronização automatizada.', 'error');
+      return;
+    }
+
+    setSyncLoading(true);
+    const targetState = !account?.syncEnabled;
+    try {
+      const res = await authFetch('/api/client/sync-toggle', {
+        method: 'POST',
+        body: JSON.stringify({ enabled: targetState })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        notify(data.message || (targetState ? 'Sincronização ativada!' : 'Sincronização desligada.'));
+        fetchAccount();
+        fetchPositions();
+      } else {
+        notify(data.error || 'Erro ao alterar sincronização.', 'error');
+      }
+    } catch {
+      notify('Erro de conexão com o servidor.', 'error');
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
+  // Botão de Pânico explícito
+  const handlePanicClose = async () => {
+    if (!window.confirm('⚠️ ATENÇÃO: Deseja realmente acionar o Protocolo de Pânico? Isso irá desligar a sincronização, cancelar todas as ordens e fechar a mercado todas as posições na Bybit.')) {
+      return;
+    }
+
+    setPanicLoading(true);
+    try {
+      const res = await authFetch('/api/client/panic', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        notify(data.message || 'Protocolo de pânico executado na Bybit!');
+        fetchAccount();
+        fetchPositions();
+      } else {
+        notify(data.error || 'Erro ao acionar pânico.', 'error');
+      }
+    } catch {
+      notify('Erro ao comunicar com a Bybit.', 'error');
+    } finally {
+      setPanicLoading(false);
     }
   };
 
@@ -226,17 +288,22 @@ export default function ClientDashboard() {
   const closed = history.filter(t => t.status === 'CLOSED').length;
   const winRate = closed > 0 ? ((wins / closed) * 100).toFixed(1) : '0';
 
-  // Projeção didática de risco em tempo real
-  const currentBalance = account?.balance && account.balance > 0 ? account.balance : 100;
-  const simulatedRiskUsd = (currentBalance * (riskPct / 100)).toFixed(2);
+  // Cálculos do Simulador de Risco Dinâmico
+  const activeBank = simulatedBank > 0 ? simulatedBank : 100;
+  const simulatedRiskUsd = (activeBank * (riskPct / 100)).toFixed(2);
   const simulatedStopDist = 1.0; // 1% stop hipotético
   const simulatedNotional = (Number(simulatedRiskUsd) / (simulatedStopDist / 100)).toFixed(2);
   const simulatedMargin = (Number(simulatedNotional) / leverage).toFixed(2);
 
-  // Dias restantes do plano
-  const daysRemaining = account?.planExpiresAt
-    ? Math.max(0, Math.ceil((account.planExpiresAt - Date.now()) / (1000 * 60 * 60 * 24)))
-    : 14;
+  // Tamanhos calculados para cada preset
+  const conservativeNotional = ((activeBank * 0.005) / 0.01).toFixed(2);
+  const conservativeMargin = (Number(conservativeNotional) / 5).toFixed(2);
+
+  const moderateNotional = ((activeBank * 0.01) / 0.01).toFixed(2);
+  const moderateMargin = (Number(moderateNotional) / 10).toFixed(2);
+
+  const aggressiveNotional = ((activeBank * 0.02) / 0.01).toFixed(2);
+  const aggressiveMargin = (Number(aggressiveNotional) / 15).toFixed(2);
 
   return (
     <div className="min-h-screen bg-background text-slate-100 font-sans flex flex-col">
@@ -262,8 +329,8 @@ export default function ClientDashboard() {
             <span className="ml-2 text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
               {account?.bybitTestnet ? 'TESTNET' : 'MAINNET'}
             </span>
-            <span className="ml-1.5 text-[10px] font-mono px-2 py-0.5 rounded bg-accent/20 text-accent border border-accent/30">
-              {account?.planType === 'FREE_TRIAL' ? `TRIAL: ${daysRemaining}d restantes` : account?.planType || 'PRO'}
+            <span className={`ml-1.5 text-[10px] font-mono px-2 py-0.5 rounded border ${isPlanActive ? 'bg-accent/20 text-accent border-accent/30' : 'bg-amber-500/20 text-amber-400 border-amber-500/30'}`}>
+              {isPlanActive ? 'PLANO ATIVO' : 'MODO VITRINE (LEITURA)'}
             </span>
           </div>
         </div>
@@ -272,7 +339,7 @@ export default function ClientDashboard() {
           {([
             { id: 'overview', icon: Activity, label: 'Visão Geral' },
             { id: 'api-keys', icon: Key, label: 'API Bybit' },
-            { id: 'risk', icon: Shield, label: 'Gerenciar Risco' },
+            { id: 'risk', icon: Shield, label: 'Simulador & Risco' },
             { id: 'history', icon: Clock, label: 'Histórico & Planilhas' }
           ] as const).map(tab => (
             <button
@@ -304,6 +371,25 @@ export default function ClientDashboard() {
           </button>
         </div>
       </header>
+
+      {/* Banner de Modo Vitrine (Inativos) */}
+      {!isPlanActive && (
+        <div className="bg-gradient-to-r from-amber-950/80 via-surface to-amber-950/80 border-b border-amber-500/40 px-6 py-2.5 flex items-center justify-between">
+          <div className="flex items-center space-x-2 text-xs font-mono text-amber-300">
+            <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+            <span><strong>Modo Vitrine Ativo:</strong> Seu painel está em modo Somente Leitura. O Simulador de Risco e a visualização de resultados estão liberados.</span>
+          </div>
+          <a
+            href="https://wa.me"
+            target="_blank"
+            rel="noreferrer"
+            className="px-3 py-1 rounded-lg bg-amber-500 text-slate-950 text-xs font-bold font-mono hover:bg-amber-400 transition-all flex items-center space-x-1"
+          >
+            <span>Assinar Plano</span>
+            <ExternalLink className="w-3 h-3" />
+          </a>
+        </div>
+      )}
 
       <main className="flex-1 overflow-auto p-6 max-w-6xl mx-auto w-full">
 
@@ -354,10 +440,50 @@ export default function ClientDashboard() {
                 <h2 className="text-xl font-bold text-white">Minha Conta — Bybit</h2>
                 <p className="text-xs text-slate-400 mt-0.5">Visão consolidada do saldo, posições abertas e réplica do Master Quant.</p>
               </div>
-              <button onClick={() => { fetchAccount(); fetchPositions(); }} className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white transition-colors bg-surface px-3 py-1.5 rounded-xl border border-border/60">
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>Atualizar Saldo</span>
-              </button>
+
+              {/* Botões de Controle: Sincronização & Pânico */}
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={handleToggleSync}
+                  disabled={syncLoading}
+                  className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
+                    !isPlanActive
+                      ? 'bg-surface text-slate-400 border-border/60 hover:border-amber-500/50 cursor-pointer'
+                      : account?.syncEnabled
+                      ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/40 hover:bg-emerald-600/30'
+                      : 'bg-rose-600/20 text-rose-400 border-rose-500/40 hover:bg-rose-600/30'
+                  }`}
+                >
+                  {!isPlanActive ? (
+                    <>
+                      <Lock className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Sincronização (Bloqueado)</span>
+                    </>
+                  ) : syncLoading ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <>
+                      <Power className="w-3.5 h-3.5" />
+                      <span>{account?.syncEnabled ? 'Sincronização LIGADA' : 'Sincronização DESLIGADA'}</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Botão de Pânico */}
+                <button
+                  onClick={handlePanicClose}
+                  disabled={panicLoading}
+                  className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-300 hover:bg-rose-900 font-bold text-xs transition-all"
+                  title="Cancela todas as ordens e fecha todas as posições abertas na Bybit a mercado"
+                >
+                  {panicLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <AlertOctagon className="w-3.5 h-3.5 text-rose-400" />}
+                  <span>Pânico (Zerar Bybit)</span>
+                </button>
+
+                <button onClick={() => { fetchAccount(); fetchPositions(); }} className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white transition-colors bg-surface px-3 py-2 rounded-xl border border-border/60">
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
             {!account?.hasApiKeys && (
@@ -409,11 +535,13 @@ export default function ClientDashboard() {
 
               <div className="bg-surface border border-border/60 rounded-2xl p-5 shadow-lg shadow-black/20">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-slate-400 font-mono uppercase">Risco & Alavancagem</span>
+                  <span className="text-xs text-slate-400 font-mono uppercase">Sincronização Copy</span>
                   <Zap className="w-4 h-4 text-accent" />
                 </div>
-                <div className="text-2xl font-black text-accent">{account?.riskPct ?? '—'}% / {account?.leverage ?? '—'}x</div>
-                <div className="text-xs text-slate-500 mt-1">Margem Isolada ativa</div>
+                <div className={`text-xl font-black ${account?.syncEnabled ? 'text-emerald-400' : 'text-slate-400'}`}>
+                  {account?.syncEnabled ? 'SINCRONIZADO' : 'DESLIGADO'}
+                </div>
+                <div className="text-xs text-slate-500 mt-1">{account?.riskPct ?? '1.0'}% / {account?.leverage ?? '10'}x Isolada</div>
               </div>
             </div>
 
@@ -440,9 +568,9 @@ export default function ClientDashboard() {
                     <span className="text-emerald-400 font-bold">+${account?.maxDailyProfitUsd?.toFixed(2) ?? '—'}</span>
                   </div>
                   <div className="flex justify-between items-center py-2">
-                    <span className="text-slate-400">Status do Robô Copy AI</span>
-                    <span className={`font-bold ${account?.isActive ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {account?.isActive ? '● ATIVO & SINCRONIZADO' : '⛔ PAUSADO'}
+                    <span className="text-slate-400">Status da Sincronização Bybit</span>
+                    <span className={`font-bold ${account?.syncEnabled ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {account?.syncEnabled ? '● LIGADA & SINCRONIZADA' : '⛔ DESLIGADA'}
                     </span>
                   </div>
                 </div>
@@ -599,15 +727,38 @@ export default function ClientDashboard() {
           </div>
         )}
 
-        {/* ── GERENCIAR RISCO ── */}
+        {/* ── GERENCIAR RISCO & SIMULADOR ── */}
         {activeTab === 'risk' && (
           <div className="max-w-3xl mx-auto space-y-6">
-            <div>
-              <h2 className="text-xl font-bold text-white">Gerenciamento de Risco & Alavancagem</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Escolha um perfil quant pronto ou personalize seus limites de perda e ganho.</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-white">Simulador de Risco & Alavancagem</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Calcule o peso das operações e dimensione o tamanho exato dos lotes na Bybit.</p>
+              </div>
             </div>
 
-            {/* Presets Inteligentes de 1-Clique */}
+            {/* Input do Simulador de Banca */}
+            <div className="p-5 rounded-2xl bg-gradient-to-r from-surface to-accent/10 border border-accent/30 flex items-center justify-between">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-accent uppercase tracking-wider block">
+                  Simulador de Banca (Valor em USD)
+                </label>
+                <p className="text-xs text-slate-400">Insira o saldo hipotético ou real para calcular o peso das ordens:</p>
+              </div>
+              <div className="relative w-48">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
+                <input
+                  type="number"
+                  min={10}
+                  step={50}
+                  value={simulatedBank}
+                  onChange={e => setSimulatedBank(Number(e.target.value) || 0)}
+                  className="w-full bg-background border border-accent/50 rounded-xl pl-8 pr-4 py-2.5 text-white font-mono font-bold text-base focus:outline-none focus:border-accent"
+                />
+              </div>
+            </div>
+
+            {/* Presets Inteligentes com Cálculo Dinâmico de Peso/Lote */}
             <div className="grid grid-cols-3 gap-4">
               <button
                 type="button"
@@ -620,9 +771,12 @@ export default function ClientDashboard() {
               >
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">🟢 Conservador</span>
-                  {selectedPreset === 'conservative' && <Check className="w-4 h-4 text-emerald-400" />}
+                  {selectedPreset === 'conservative' && <CheckCircle className="w-4 h-4 text-emerald-400" />}
                 </div>
                 <div className="text-lg font-black text-white">0.5% / 5x</div>
+                <div className="text-xs font-mono text-emerald-300 mt-1 font-bold">
+                  Margem: ${conservativeMargin} | Vol: ${conservativeNotional}
+                </div>
                 <p className="text-[11px] text-slate-400 mt-1 font-mono">Foco em preservação de capital. Stop diário em 1.5%.</p>
               </button>
 
@@ -638,9 +792,12 @@ export default function ClientDashboard() {
                 <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-accent text-[9px] font-black text-white">RECOMENDADO</div>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-bold text-accent uppercase tracking-wider">🟡 Moderado</span>
-                  {selectedPreset === 'moderate' && <Check className="w-4 h-4 text-accent" />}
+                  {selectedPreset === 'moderate' && <CheckCircle className="w-4 h-4 text-accent" />}
                 </div>
                 <div className="text-lg font-black text-white">1.0% / 10x</div>
+                <div className="text-xs font-mono text-accent mt-1 font-bold">
+                  Margem: ${moderateMargin} | Vol: ${moderateNotional}
+                </div>
                 <p className="text-[11px] text-slate-400 mt-1 font-mono">Equilíbrio quant ideal. Stop diário em 3.0%.</p>
               </button>
 
@@ -655,9 +812,12 @@ export default function ClientDashboard() {
               >
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-bold text-purple-400 uppercase tracking-wider">🔴 Arrojado</span>
-                  {selectedPreset === 'aggressive' && <Check className="w-4 h-4 text-purple-400" />}
+                  {selectedPreset === 'aggressive' && <CheckCircle className="w-4 h-4 text-purple-400" />}
                 </div>
                 <div className="text-lg font-black text-white">2.0% / 15x</div>
+                <div className="text-xs font-mono text-purple-300 mt-1 font-bold">
+                  Margem: ${aggressiveMargin} | Vol: ${aggressiveNotional}
+                </div>
                 <p className="text-[11px] text-slate-400 mt-1 font-mono">Trader Pro experiente. Stop diário em 5.0%.</p>
               </button>
             </div>
@@ -682,9 +842,9 @@ export default function ClientDashboard() {
               {/* Simulação em tempo real */}
               <div className="p-3 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-between">
                 <div>
-                  <span className="text-slate-400">Exemplo com sua banca atual (${currentBalance.toFixed(2)}):</span>
+                  <span className="text-slate-400">Simulação para Banca de ${activeBank.toFixed(2)}:</span>
                   <div className="text-white font-bold mt-0.5">
-                    Risco Máximo por Trade = <span className="text-emerald-400">${simulatedRiskUsd}</span> | Volume = ${simulatedNotional} | Margem Usada = <span className="text-amber-400">${simulatedMargin}</span>
+                    Risco Máximo por Trade = <span className="text-emerald-400">${simulatedRiskUsd}</span> | Volume da Posição = ${simulatedNotional} | Margem Usada = <span className="text-amber-400">${simulatedMargin}</span>
                   </div>
                 </div>
                 <span className="px-2 py-1 rounded bg-accent/20 text-accent font-bold text-[10px]">CÁLCULO ATIVO</span>
@@ -844,3 +1004,4 @@ export default function ClientDashboard() {
     </div>
   );
 }
+

@@ -323,5 +323,71 @@ export class BybitExecutionEngine {
       console.error(`[BybitEngine] Erro ao buscar histórico ${clientId}:`, err.message);
       return [];
     }
+  /**
+   * Pânico / Desconexão de Emergência:
+   * Cancela todas as ordens abertas e encerra a mercado todas as posições ativas na Bybit
+   */
+  static async panicCloseAll(clientId: string): Promise<{ success: boolean; closedCount: number; cancelledCount: number; errors: string[] }> {
+    const config = await ClientConfigDB.findByClientId(clientId);
+    if (!config?.bybit_api_key_enc) {
+      return { success: false, closedCount: 0, cancelledCount: 0, errors: ['Chaves de API da Bybit não configuradas'] };
+    }
+
+    const errors: string[] = [];
+    let closedCount = 0;
+    let cancelledCount = 0;
+
+    try {
+      const apiKey = decrypt(config.bybit_api_key_enc);
+      const apiSecret = decrypt(config.bybit_api_secret_enc!);
+      const exchange = createBybitClient(apiKey, apiSecret, config.bybit_testnet === 1);
+
+      // 1. Cancelar todas as ordens ativas
+      try {
+        const cancelled = await exchange.cancelAllOrders();
+        cancelledCount = Array.isArray(cancelled) ? cancelled.length : 1;
+      } catch (err: any) {
+        console.warn(`[PanicClose] Erro ao cancelar ordens para ${clientId}:`, err.message);
+        errors.push(`Erro ao cancelar ordens: ${err.message}`);
+      }
+
+      // 2. Buscar posições ativas e fechar a mercado
+      try {
+        const positions = await exchange.fetchPositions();
+        for (const pos of positions) {
+          const contracts = Number(pos.contracts || pos.info?.size || 0);
+          if (contracts > 0) {
+            const side = pos.side?.toLowerCase() === 'long' || pos.info?.side?.toLowerCase() === 'buy' ? 'sell' : 'buy';
+            try {
+              await exchange.createOrder(pos.symbol, 'market', side, contracts, undefined, {
+                reduceOnly: true
+              });
+              closedCount++;
+            } catch (err: any) {
+              console.error(`[PanicClose] Erro ao fechar posição ${pos.symbol} para ${clientId}:`, err.message);
+              errors.push(`Erro ao fechar ${pos.symbol}: ${err.message}`);
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[PanicClose] Erro ao buscar posições para ${clientId}:`, err.message);
+        errors.push(`Erro ao buscar posições: ${err.message}`);
+      }
+
+      return {
+        success: errors.length === 0,
+        closedCount,
+        cancelledCount,
+        errors
+      };
+    } catch (err: any) {
+      console.error(`[PanicClose] Erro crítico para ${clientId}:`, err.message);
+      return {
+        success: false,
+        closedCount,
+        cancelledCount,
+        errors: [err.message]
+      };
+    }
   }
 }

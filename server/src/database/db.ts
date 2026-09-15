@@ -49,6 +49,8 @@ export async function initDatabase(): Promise<void> {
       role TEXT NOT NULL CHECK(role IN ('ADMIN', 'CLIENT')),
       client_id TEXT,
       name TEXT,
+      whatsapp TEXT,
+      whatsapp_validado INTEGER NOT NULL DEFAULT 0,
       created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
       updated_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
       is_active INTEGER NOT NULL DEFAULT 1
@@ -73,11 +75,25 @@ export async function initDatabase(): Promise<void> {
       balance NUMERIC NOT NULL DEFAULT 0.0,
       is_active INTEGER NOT NULL DEFAULT 1,
       api_connected INTEGER NOT NULL DEFAULT 0,
-      plan_type TEXT NOT NULL DEFAULT 'FREE_TRIAL',
+      sync_enabled INTEGER NOT NULL DEFAULT 0,
+      plan_type TEXT NOT NULL DEFAULT 'INACTIVE',
+      plan_active INTEGER NOT NULL DEFAULT 1,
       plan_expires_at BIGINT,
       created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
       updated_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
       FOREIGN KEY(user_id) REFERENCES app_users(id)
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS password_reset_otps (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      otp_code TEXT NOT NULL,
+      expires_at BIGINT NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0,
+      created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
     )
   `);
 
@@ -103,20 +119,6 @@ export async function initDatabase(): Promise<void> {
   `);
 
   await query(`
-    CREATE TABLE IF NOT EXISTS balance_edits (
-      id TEXT PRIMARY KEY,
-      client_id TEXT NOT NULL,
-      admin_id TEXT NOT NULL,
-      old_balance NUMERIC NOT NULL,
-      new_balance NUMERIC NOT NULL,
-      reason TEXT,
-      action TEXT NOT NULL DEFAULT 'EDIT',
-      timestamp BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
-      FOREIGN KEY(client_id) REFERENCES client_configs(client_id)
-    )
-  `);
-
-  await query(`
     CREATE TABLE IF NOT EXISTS announcements (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -130,13 +132,18 @@ export async function initDatabase(): Promise<void> {
   `);
 
   // Migrações seguras (adicionar colunas se tabela já existia)
-  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_type TEXT NOT NULL DEFAULT 'FREE_TRIAL'`).catch(() => {});
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS whatsapp TEXT`).catch(() => {});
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS whatsapp_validado INTEGER NOT NULL DEFAULT 0`).catch(() => {});
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS sync_enabled INTEGER NOT NULL DEFAULT 0`).catch(() => {});
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_active INTEGER NOT NULL DEFAULT 1`).catch(() => {});
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_type TEXT NOT NULL DEFAULT 'ACTIVE'`).catch(() => {});
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_expires_at BIGINT`).catch(() => {});
 
   // Índices para performance
   await query(`CREATE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_app_users_whatsapp ON app_users(whatsapp)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_password_reset_otps ON password_reset_otps(email, otp_code, expires_at)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_trade_history_client ON trade_history(client_id, entry_time DESC)`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_balance_edits_client ON balance_edits(client_id, timestamp DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_announcements_active ON announcements(is_active, created_at DESC)`);
 
   console.log('[DB] ✅ Tabelas PostgreSQL inicializadas com sucesso.');
@@ -164,6 +171,12 @@ export async function initDatabase(): Promise<void> {
       ['ann-welcome', '🚀 Bem-vindo ao MarketFlow Pro!', 'Conecte sua API da Bybit e configure seu perfil de risco na aba "Gerenciar Risco" para começar a operar.', 'INFO']
     );
   }
+  if (!existingAnnouncements) {
+    await query(
+      `INSERT INTO announcements (id, title, message, type, is_active) VALUES ($1, $2, $3, $4, 1)`,
+      ['ann-welcome', '🚀 Bem-vindo ao MarketFlow Pro!', 'Conecte sua API da Bybit e configure seu perfil de risco na aba "Gerenciar Risco" para começar a operar.', 'INFO']
+    );
+  }
 }
 
 // ─── Tipos e Interfaces ────────────────────────────────────────────────────
@@ -175,6 +188,8 @@ export interface UserRow {
   role: 'ADMIN' | 'CLIENT';
   client_id: string | null;
   name: string | null;
+  whatsapp: string | null;
+  whatsapp_validado: number;
   created_at: number;
   is_active: number;
 }
@@ -196,8 +211,20 @@ export interface ClientConfigRow {
   balance: number;
   is_active: number;
   api_connected: number;
-  plan_type: 'FREE_TRIAL' | 'MONTHLY' | 'QUARTERLY' | 'ANNUAL' | 'LIFETIME';
+  sync_enabled: number;
+  plan_type: string;
+  plan_active: number;
   plan_expires_at: number | null;
+  created_at: number;
+}
+
+export interface OtpRow {
+  id: string;
+  email: string;
+  phone: string;
+  otp_code: string;
+  expires_at: number;
+  used: number;
   created_at: number;
 }
 
@@ -230,17 +257,6 @@ export interface TradeHistoryRow {
   close_time: number | null;
 }
 
-export interface BalanceEditRow {
-  id: string;
-  client_id: string;
-  admin_id: string;
-  old_balance: number;
-  new_balance: number;
-  reason: string | null;
-  action: string;
-  timestamp: number;
-}
-
 // ─── Funções de Acesso — UserDB ────────────────────────────────────────────
 
 export const UserDB = {
@@ -250,11 +266,24 @@ export const UserDB = {
   findById: (id: string) =>
     queryOne<UserRow>('SELECT * FROM app_users WHERE id = $1', [id]),
 
-  create: async (data: { id: string; email: string; passwordHash: string; role: 'ADMIN' | 'CLIENT'; clientId?: string; name?: string }) => {
+  findByWhatsApp: (phone: string) => {
+    const clean = phone.replace(/\D/g, '');
+    return queryOne<UserRow>(`SELECT * FROM app_users WHERE REPLACE(REPLACE(REPLACE(REPLACE(whatsapp, '+', ''), ' ', ''), '-', ''), '(', '') LIKE $1`, [`%${clean.slice(-8)}%`]);
+  },
+
+  create: async (data: { id: string; email: string; passwordHash: string; role: 'ADMIN' | 'CLIENT'; clientId?: string; name?: string; whatsapp?: string }) => {
     await query(
-      `INSERT INTO app_users (id, email, password_hash, role, client_id, name) VALUES ($1, $2, $3, $4, $5, $6)`,
-      [data.id, data.email, data.passwordHash, data.role, data.clientId || null, data.name || null]
+      `INSERT INTO app_users (id, email, password_hash, role, client_id, name, whatsapp, whatsapp_validado) VALUES ($1, $2, $3, $4, $5, $6, $7, 0)`,
+      [data.id, data.email, data.passwordHash, data.role, data.clientId || null, data.name || null, data.whatsapp || null]
     );
+  },
+
+  validateWhatsApp: async (userId: string) => {
+    await query('UPDATE app_users SET whatsapp_validado = 1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $1', [userId]);
+  },
+
+  updatePassword: async (userId: string, passwordHash: string) => {
+    await query('UPDATE app_users SET password_hash = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $2', [passwordHash, userId]);
   },
 
   listClients: () =>
@@ -262,6 +291,26 @@ export const UserDB = {
 
   deactivate: (id: string) =>
     query('UPDATE app_users SET is_active = 0, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $1', [id])
+};
+
+// ─── Funções de Acesso — OtpDB ────────────────────────────────────────────
+
+export const OtpDB = {
+  create: async (data: { id: string; email: string; phone: string; otpCode: string; expiresAt: number }) => {
+    await query(
+      `INSERT INTO password_reset_otps (id, email, phone, otp_code, expires_at, used) VALUES ($1, $2, $3, $4, $5, 0)`,
+      [data.id, data.email, data.phone, data.otpCode, data.expiresAt]
+    );
+  },
+
+  findValid: (email: string, otpCode: string) =>
+    queryOne<OtpRow>(
+      `SELECT * FROM password_reset_otps WHERE email = $1 AND otp_code = $2 AND used = 0 AND expires_at > EXTRACT(EPOCH FROM NOW()) * 1000 ORDER BY created_at DESC LIMIT 1`,
+      [email, otpCode]
+    ),
+
+  markUsed: (id: string) =>
+    query(`UPDATE password_reset_otps SET used = 1 WHERE id = $1`, [id])
 };
 
 // ─── Funções de Acesso — ClientConfigDB ───────────────────────────────────
@@ -273,11 +322,10 @@ export const ClientConfigDB = {
   findByUserId: (userId: string) =>
     queryOne<ClientConfigRow>('SELECT * FROM client_configs WHERE user_id = $1', [userId]),
 
-  create: async (data: { clientId: string; userId: string; name?: string; planType?: string; planExpiresAt?: number }) => {
-    const expires = data.planExpiresAt || (Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 dias grátis padrão
+  create: async (data: { clientId: string; userId: string; name?: string; phone?: string; planType?: string; planActive?: boolean; planExpiresAt?: number }) => {
     await query(
-      `INSERT INTO client_configs (client_id, user_id, plan_type, plan_expires_at) VALUES ($1, $2, $3, $4) ON CONFLICT (client_id) DO NOTHING`,
-      [data.clientId, data.userId, data.planType || 'FREE_TRIAL', expires]
+      `INSERT INTO client_configs (client_id, user_id, notification_phone, sync_enabled, plan_type, plan_active, plan_expires_at) VALUES ($1, $2, $3, 0, $4, $5, $6) ON CONFLICT (client_id) DO NOTHING`,
+      [data.clientId, data.userId, data.phone || null, data.planType || 'ACTIVE', data.planActive !== false ? 1 : 0, data.planExpiresAt || null]
     );
   },
 
@@ -295,6 +343,13 @@ export const ClientConfigDB = {
     );
   },
 
+  setSyncEnabled: async (clientId: string, syncEnabled: boolean) => {
+    await query(
+      'UPDATE client_configs SET sync_enabled = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $2',
+      [syncEnabled ? 1 : 0, clientId]
+    );
+  },
+
   updateBalance: async (clientId: string, balance: number) => {
     await query(
       'UPDATE client_configs SET balance = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $2',
@@ -302,10 +357,10 @@ export const ClientConfigDB = {
     );
   },
 
-  updatePlan: async (clientId: string, planType: string, planExpiresAt: number) => {
+  updatePlan: async (clientId: string, planType: string, planActive: boolean, planExpiresAt: number | null) => {
     await query(
-      'UPDATE client_configs SET plan_type = $1, plan_expires_at = $2, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $3',
-      [planType, planExpiresAt, clientId]
+      'UPDATE client_configs SET plan_type = $1, plan_active = $2, plan_expires_at = $3, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $4',
+      [planType, planActive ? 1 : 0, planExpiresAt, clientId]
     );
   },
 
@@ -393,22 +448,6 @@ export const TradeHistoryDB = {
   }
 };
 
-// ─── Funções de Acesso — BalanceEditDB ────────────────────────────────────
-
-export const BalanceEditDB = {
-  insert: async (edit: Omit<BalanceEditRow, 'timestamp'>) => {
-    await query(
-      `INSERT INTO balance_edits (id, client_id, admin_id, old_balance, new_balance, reason, action) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [edit.id, edit.client_id, edit.admin_id, edit.old_balance, edit.new_balance, edit.reason || null, edit.action]
-    );
-  },
-
-  findByClientId: (clientId: string) =>
-    query<BalanceEditRow>('SELECT * FROM balance_edits WHERE client_id = $1 ORDER BY timestamp DESC', [clientId]),
-
-  findAll: () =>
-    query<BalanceEditRow>('SELECT * FROM balance_edits ORDER BY timestamp DESC LIMIT 200')
-};
-
 export default pool;
+
 

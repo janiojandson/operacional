@@ -1,11 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { requireAdmin } from '../auth/authMiddleware.js';
-import { UserDB, ClientConfigDB, TradeHistoryDB, BalanceEditDB, AnnouncementDB } from '../database/db.js';
+import { UserDB, ClientConfigDB, TradeHistoryDB, AnnouncementDB } from '../database/db.js';
+import { BybitExecutionEngine } from '../engine/bybitExecutionEngine.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
 
-// GET /api/admin/clients — listar todos os clientes com status
+// GET /api/admin/clients — listar todos os clientes com status de sincronização e API
 adminRouter.get('/clients', async (_req: Request, res: Response) => {
   const users = await UserDB.listClients();
   const configs = await ClientConfigDB.listAll();
@@ -17,8 +18,11 @@ adminRouter.get('/clients', async (_req: Request, res: Response) => {
       userId: u.id,
       email: u.email,
       name: u.name,
+      whatsapp: u.whatsapp,
+      whatsappValidado: Number(u.whatsapp_validado) === 1,
       clientId: u.client_id,
       isActive: Number(u.is_active) === 1,
+      planActive: Number(u.plan_active) === 1,
       createdAt: u.created_at,
       config: cfg ? {
         riskPct: Number(cfg.risk_pct),
@@ -28,12 +32,13 @@ adminRouter.get('/clients', async (_req: Request, res: Response) => {
         maxOpenPositions: Number(cfg.max_open_positions),
         balance: Number(cfg.balance),
         isActive: Number(cfg.is_active) === 1,
+        syncEnabled: Number(cfg.sync_enabled) === 1,
         apiConnected: Number(cfg.api_connected) === 1,
         bybitTestnet: Number(cfg.bybit_testnet) === 1,
         hasApiKeys: !!(cfg.bybit_api_key_enc),
         maskedApiKey: cfg.bybit_api_key_enc ? '****...****' : null,
         notificationPhone: cfg.notification_phone,
-        planType: cfg.plan_type || 'FREE_TRIAL',
+        planType: cfg.plan_type || 'STANDARD',
         planExpiresAt: cfg.plan_expires_at ? Number(cfg.plan_expires_at) : null
       } : null
     };
@@ -42,62 +47,79 @@ adminRouter.get('/clients', async (_req: Request, res: Response) => {
   res.json(clients);
 });
 
-// POST /api/admin/clients/:clientId/balance — editar saldo
-adminRouter.post('/clients/:clientId/balance', async (req: Request, res: Response) => {
-  const { clientId } = req.params;
-  const { newBalance, reason } = req.body;
+// GET /api/admin/overview — Métricas consolidadas do SaaS (Clientes Ativos vs Inativos, Bybit Health, Performance do Dia)
+adminRouter.get('/overview', async (_req: Request, res: Response) => {
+  const users = await UserDB.listClients();
+  const configs = await ClientConfigDB.listAll();
+  
+  const totalClients = users.length;
+  const activePlanClients = users.filter(u => Number(u.plan_active) === 1 && Number(u.is_active) === 1).length;
+  const inactivePlanClients = totalClients - activePlanClients;
 
-  if (typeof newBalance !== 'number' || newBalance < 0) {
-    return res.status(400).json({ error: 'Saldo deve ser um número maior ou igual a zero.' });
-  }
+  const connectedApis = configs.filter(c => Number(c.api_connected) === 1).length;
+  const syncActiveCount = configs.filter(c => Number(c.sync_enabled) === 1 && Number(c.api_connected) === 1).length;
 
-  const current = await ClientConfigDB.findByClientId(clientId);
-  if (!current) return res.status(404).json({ error: 'Cliente não encontrado.' });
+  // Performance Global do Dia
+  const todayMidnight = new Date();
+  todayMidnight.setHours(0, 0, 0, 0);
+  const todayTimestamp = todayMidnight.getTime();
 
-  const oldBalance = Number(current.balance);
-  await ClientConfigDB.updateBalance(clientId, newBalance);
-
-  await BalanceEditDB.insert({
-    id: `edit-${Date.now()}`,
-    client_id: clientId,
-    admin_id: req.user!.userId,
-    old_balance: oldBalance,
-    new_balance: newBalance,
-    reason: reason || 'Ajuste manual pelo administrador',
-    action: 'EDIT'
+  const todayTrades = await TradeHistoryDB.findAll({
+    from: todayTimestamp,
+    limit: 5000
   });
 
-  res.json({ success: true, clientId, oldBalance, newBalance });
+  const closedToday = todayTrades.filter(t => t.status === 'CLOSED' && t.pnl_usd !== null);
+  const totalPnlToday = closedToday.reduce((sum, t) => sum + Number(t.pnl_usd ?? 0), 0);
+  const winsToday = closedToday.filter(t => Number(t.pnl_usd ?? 0) > 0).length;
+  const winRateToday = closedToday.length > 0 ? (winsToday / closedToday.length * 100).toFixed(1) : '0';
+
+  res.json({
+    totalClients,
+    activePlanClients,
+    inactivePlanClients,
+    connectedApis,
+    syncActiveCount,
+    bybitHealth: {
+      status: 'OPERATIONAL',
+      connectedClients: connectedApis,
+      totalConfigs: configs.length
+    },
+    performanceToday: {
+      totalTrades: todayTrades.length,
+      closedTrades: closedToday.length,
+      openTrades: todayTrades.filter(t => t.status === 'OPEN').length,
+      totalPnlUsd: Number(totalPnlToday.toFixed(2)),
+      winRate: Number(winRateToday),
+      wins: winsToday,
+      losses: closedToday.length - winsToday
+    }
+  });
 });
 
-// POST /api/admin/clients/:clientId/reset-balance — zerar saldo
-adminRouter.post('/clients/:clientId/reset-balance', async (req: Request, res: Response) => {
+// POST /api/admin/clients/:clientId/force-disconnect — Força desconexão e zera posições a mercado na Bybit (Pânico)
+adminRouter.post('/clients/:clientId/force-disconnect', async (req: Request, res: Response) => {
   const { clientId } = req.params;
-  const { reason } = req.body;
-
   const current = await ClientConfigDB.findByClientId(clientId);
   if (!current) return res.status(404).json({ error: 'Cliente não encontrado.' });
 
-  const oldBalance = Number(current.balance);
-  await ClientConfigDB.updateBalance(clientId, 0);
+  // 1. Desliga sincronização imediatamente
+  await ClientConfigDB.setSyncEnabled(clientId, false);
 
-  await BalanceEditDB.insert({
-    id: `reset-${Date.now()}`,
-    client_id: clientId,
-    admin_id: req.user!.userId,
-    old_balance: oldBalance,
-    new_balance: 0,
-    reason: reason || 'Saldo zerado pelo administrador',
-    action: 'RESET'
+  // 2. Executa Pânico na Bybit
+  const result = await BybitExecutionEngine.panicCloseAll(clientId);
+
+  res.json({
+    success: result.success,
+    message: `Forçada a desconexão do cliente ${clientId}. ${result.closedCount} posições encerradas e ${result.cancelledCount} ordens canceladas.`,
+    details: result
   });
-
-  res.json({ success: true, clientId, oldBalance, newBalance: 0 });
 });
 
 // POST /api/admin/clients/:clientId/plan — gerenciar plano e validade
 adminRouter.post('/clients/:clientId/plan', async (req: Request, res: Response) => {
   const { clientId } = req.params;
-  const { planType, daysToAdd, customExpiry } = req.body;
+  const { planType, daysToAdd, customExpiry, planActive } = req.body;
 
   const current = await ClientConfigDB.findByClientId(clientId);
   if (!current) return res.status(404).json({ error: 'Cliente não encontrado.' });
@@ -111,6 +133,14 @@ adminRouter.post('/clients/:clientId/plan', async (req: Request, res: Response) 
   }
 
   await ClientConfigDB.updatePlan(clientId, planType || current.plan_type, expiresAt);
+  
+  if (typeof planActive === 'boolean') {
+    const user = await UserDB.findByClientId(clientId);
+    if (user) {
+      await UserDB.setPlanActive(user.id, planActive);
+    }
+  }
+
   res.json({ success: true, clientId, planType: planType || current.plan_type, planExpiresAt: expiresAt });
 });
 
@@ -144,18 +174,6 @@ adminRouter.post('/announcements', async (req: Request, res: Response) => {
 adminRouter.delete('/announcements/:id', async (req: Request, res: Response) => {
   await AnnouncementDB.delete(req.params.id);
   res.json({ success: true, id: req.params.id });
-});
-
-// GET /api/admin/balance-edits
-adminRouter.get('/balance-edits', async (_req: Request, res: Response) => {
-  const edits = await BalanceEditDB.findAll();
-  res.json(edits);
-});
-
-// GET /api/admin/balance-edits/:clientId
-adminRouter.get('/balance-edits/:clientId', async (req: Request, res: Response) => {
-  const edits = await BalanceEditDB.findByClientId(req.params.clientId);
-  res.json(edits);
 });
 
 // GET /api/admin/reports
@@ -291,3 +309,4 @@ adminRouter.delete('/clients/:userId', async (req: Request, res: Response) => {
   await UserDB.deactivate(userId);
   res.json({ success: true, userId });
 });
+

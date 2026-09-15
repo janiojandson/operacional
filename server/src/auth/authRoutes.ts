@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import { UserDB, ClientConfigDB, query } from '../database/db.js';
+import { UserDB, ClientConfigDB, OtpDB, query } from '../database/db.js';
 import { signToken, requireAdmin, requireAuth } from './authMiddleware.js';
+import { ComunicacaoService } from '../services/comunicacaoService.js';
 
 export const authRouter = Router();
 
@@ -38,7 +39,10 @@ authRouter.post('/login', async (req: Request, res: Response) => {
       email: user.email,
       role: user.role,
       clientId: user.client_id,
-      name: user.name
+      name: user.name,
+      whatsapp: user.whatsapp,
+      whatsappValidado: Number(user.whatsapp_validado) === 1,
+      planActive: Number(user.plan_active) === 1
     }
   });
 });
@@ -62,11 +66,12 @@ authRouter.get('/me', requireAuth, async (req: Request, res: Response) => {
         maxDailyProfitUsd: cfg.max_daily_profit_usd,
         balance: cfg.balance,
         isActive: Number(cfg.is_active) === 1,
+        syncEnabled: Number(cfg.sync_enabled) === 1,
         apiConnected: Number(cfg.api_connected) === 1,
         bybitTestnet: Number(cfg.bybit_testnet) === 1,
         hasApiKeys: !!(cfg.bybit_api_key_enc),
         notificationPhone: cfg.notification_phone,
-        planType: cfg.plan_type || 'FREE_TRIAL',
+        planType: cfg.plan_type || 'STANDARD',
         planExpiresAt: cfg.plan_expires_at ? Number(cfg.plan_expires_at) : null
       };
     }
@@ -77,16 +82,25 @@ authRouter.get('/me', requireAuth, async (req: Request, res: Response) => {
     email: user.email,
     role: user.role,
     name: user.name,
+    whatsapp: user.whatsapp,
+    whatsappValidado: Number(user.whatsapp_validado) === 1,
+    planActive: Number(user.plan_active) === 1,
     clientConfig
   });
 });
 
-// POST /api/auth/signup — Cadastro público gratuito para clientes
+// POST /api/auth/signup — Cadastro obrigatório com Nome, Email, Senha e WhatsApp
 authRouter.post('/signup', async (req: Request, res: Response) => {
-  const { email, password, name } = req.body;
-  if (!email || !password || !name) {
-    return res.status(400).json({ error: 'Nome, email e senha são obrigatórios.' });
+  const { email, password, name, whatsapp } = req.body;
+  if (!email || !password || !name || !whatsapp) {
+    return res.status(400).json({ error: 'Nome, WhatsApp, email e senha são obrigatórios.' });
   }
+
+  const cleanPhone = String(whatsapp).replace(/\D/g, '');
+  if (cleanPhone.length < 10 || cleanPhone.length > 15) {
+    return res.status(400).json({ error: 'Número de WhatsApp inválido. Informe com DDD.' });
+  }
+
   if (password.length < 6) {
     return res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres.' });
   }
@@ -100,27 +114,34 @@ authRouter.post('/signup', async (req: Request, res: Response) => {
   const userId = `usr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const clientId = `cli-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-  // 14 dias de teste grátis por padrão
-  const planExpiresAt = Date.now() + 14 * 24 * 60 * 60 * 1000;
-
   await UserDB.create({
     id: userId,
     email: email.toLowerCase().trim(),
     passwordHash: hash,
     role: 'CLIENT',
     clientId,
-    name: name.trim()
+    name: name.trim(),
+    whatsapp: cleanPhone,
+    whatsappValidado: false,
+    planActive: true
   });
 
   await ClientConfigDB.create({
     clientId,
     userId,
     name: name.trim(),
-    planType: 'FREE_TRIAL',
-    planExpiresAt
+    notificationPhone: cleanPhone,
+    planType: 'STANDARD',
+    syncEnabled: true
   });
 
-  // Gerar token de acesso imediatamente após o cadastro
+  // Disparar mensagem de Onboarding Anti-Spam via Railway Comunicação
+  try {
+    await ComunicacaoService.sendOnboardingMessage(cleanPhone, name.trim());
+  } catch (err: any) {
+    console.error('[Signup] Erro ao disparar mensagem de onboarding WhatsApp:', err.message);
+  }
+
   const token = signToken({
     userId,
     email: email.toLowerCase().trim(),
@@ -138,15 +159,91 @@ authRouter.post('/signup', async (req: Request, res: Response) => {
       role: 'CLIENT',
       clientId,
       name: name.trim(),
-      planType: 'FREE_TRIAL',
-      planExpiresAt
+      whatsapp: cleanPhone,
+      whatsappValidado: false,
+      planActive: true
     }
+  });
+});
+
+// POST /api/auth/forgot-password — Gera OTP numérico de 6 dígitos e envia por WhatsApp
+authRouter.post('/forgot-password', async (req: Request, res: Response) => {
+  const { identifier } = req.body; // pode ser email ou whatsapp
+  if (!identifier) {
+    return res.status(400).json({ error: 'Informe seu e-mail ou WhatsApp cadastrado.' });
+  }
+
+  const cleanIdent = String(identifier).trim().toLowerCase();
+  let user = await UserDB.findByEmail(cleanIdent);
+
+  if (!user) {
+    const cleanPhone = cleanIdent.replace(/\D/g, '');
+    if (cleanPhone.length >= 8) {
+      user = await UserDB.findByWhatsApp(cleanPhone);
+    }
+  }
+
+  if (!user || !user.whatsapp) {
+    // Por segurança e UX, se não encontrar o usuário com WhatsApp cadastrado
+    return res.status(404).json({ error: 'Usuário com este WhatsApp/e-mail não localizado ou sem número cadastrado.' });
+  }
+
+  // Gerar OTP de 6 dígitos (100000 - 999999)
+  const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutos
+
+  await OtpDB.create(user.id, otpCode, expiresAt);
+
+  // Enviar código OTP via WhatsApp
+  const sent = await ComunicacaoService.sendOtpMessage(user.whatsapp, otpCode);
+
+  if (!sent) {
+    return res.status(502).json({ error: 'Falha ao enviar mensagem de WhatsApp pelo serviço de comunicação. Tente novamente em instantes.' });
+  }
+
+  // Mascarar telefone para exibição: (XX) *****-1234
+  const phone = user.whatsapp;
+  const maskedPhone = phone.length >= 4 
+    ? phone.slice(0, 2) + ' •••••-' + phone.slice(-4) 
+    : phone;
+
+  res.json({
+    success: true,
+    message: `Código de 6 dígitos enviado para o WhatsApp com final ${maskedPhone}.`,
+    maskedPhone
+  });
+});
+
+// POST /api/auth/reset-password-otp — Valida OTP e redefine a nova senha
+authRouter.post('/reset-password-otp', async (req: Request, res: Response) => {
+  const { otp, newPassword, identifier } = req.body;
+  if (!otp || !newPassword) {
+    return res.status(400).json({ error: 'Código OTP e nova senha são obrigatórios.' });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: 'A nova senha deve ter no mínimo 6 caracteres.' });
+  }
+
+  const cleanOtp = String(otp).trim();
+  const validOtp = await OtpDB.verify(cleanOtp);
+
+  if (!validOtp) {
+    return res.status(400).json({ error: 'Código de verificação inválido ou expirado (válido por 10 min).' });
+  }
+
+  const hash = await bcrypt.hash(newPassword, 12);
+  await query('UPDATE app_users SET password_hash = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $2', [hash, validOtp.user_id]);
+  await OtpDB.markUsed(validOtp.id);
+
+  res.json({
+    success: true,
+    message: 'Senha redefinida com sucesso! Você já pode fazer login.'
   });
 });
 
 // POST /api/auth/register — Cadastro criado por Admin
 authRouter.post('/register', requireAdmin, async (req: Request, res: Response) => {
-  const { email, password, name, role = 'CLIENT' } = req.body;
+  const { email, password, name, whatsapp, role = 'CLIENT' } = req.body;
   if (!email || !password || !name) {
     return res.status(400).json({ error: 'Email, senha e nome são obrigatórios.' });
   }
@@ -156,6 +253,7 @@ authRouter.post('/register', requireAdmin, async (req: Request, res: Response) =
     return res.status(409).json({ error: 'Email já cadastrado.' });
   }
 
+  const cleanPhone = whatsapp ? String(whatsapp).replace(/\D/g, '') : null;
   const hash = await bcrypt.hash(password, 12);
   const userId = `usr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const clientId = role === 'CLIENT' ? `cli-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` : undefined;
@@ -166,11 +264,20 @@ authRouter.post('/register', requireAdmin, async (req: Request, res: Response) =
     passwordHash: hash,
     role,
     clientId,
-    name: name.trim()
+    name: name.trim(),
+    whatsapp: cleanPhone || undefined,
+    whatsappValidado: false,
+    planActive: true
   });
 
   if (role === 'CLIENT' && clientId) {
-    await ClientConfigDB.create({ clientId, userId, name: name.trim() });
+    await ClientConfigDB.create({ 
+      clientId, 
+      userId, 
+      name: name.trim(),
+      notificationPhone: cleanPhone || undefined,
+      syncEnabled: true 
+    });
   }
 
   res.status(201).json({
@@ -201,3 +308,4 @@ authRouter.post('/change-password', requireAuth, async (req: Request, res: Respo
 
   res.json({ success: true, message: 'Senha alterada com sucesso.' });
 });
+

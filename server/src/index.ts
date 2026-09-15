@@ -98,10 +98,34 @@ app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/client', clientRouter);
 
+// ─── Webhook do Projeto Comunicação (WhatsApp Railway) ─────────────────────
+app.post('/api/webhooks/whatsapp', async (req, res) => {
+  try {
+    const payload = req.body;
+    console.log('[Webhook WhatsApp] Mensagem recebida:', JSON.stringify(payload));
+    
+    // Extrai o número do remetente (cliente que respondeu)
+    const sender = payload.sender || payload.from || payload.phone || payload.data?.from || payload.data?.key?.remoteJid;
+    if (sender) {
+      const cleanPhone = String(sender).replace(/\D/g, '');
+      if (cleanPhone.length >= 8) {
+        await UserDB.validateWhatsApp(cleanPhone);
+        console.log(`[Webhook WhatsApp] ✅ WhatsApp validado com sucesso para o telefone: ${cleanPhone}`);
+      }
+    }
+
+    res.json({ success: true, received: true });
+  } catch (err: any) {
+    console.error('[Webhook WhatsApp] Erro ao processar:', err.message);
+    res.status(500).json({ error: 'Erro ao processar webhook' });
+  }
+});
+
 // ─── Broadcast Helper ─────────────────────────────────────────────────────
 const broadcast = (event: string, data: any) => {
   io.emit(event, data);
 };
+
 
 // ─── Engines de Trading ───────────────────────────────────────────────────
 

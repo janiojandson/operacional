@@ -91,19 +91,61 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
     maxDailyProfitUsd: Number(config.max_daily_profit_usd),
     maxOpenPositions: Number(config.max_open_positions),
     isActive: Number(config.is_active) === 1,
+    syncEnabled: Number(config.sync_enabled) === 1,
     apiConnected: Number(config.api_connected) === 1,
     bybitTestnet: Number(config.bybit_testnet) === 1,
     hasApiKeys: !!(config.bybit_api_key_enc),
     notificationPhone: config.notification_phone,
-    planType: config.plan_type || 'FREE_TRIAL',
+    planType: config.plan_type || 'STANDARD',
     planExpiresAt: config.plan_expires_at ? Number(config.plan_expires_at) : null
   });
 });
 
-// GET /api/client/announcements
-clientRouter.get('/announcements', async (req: Request, res: Response) => {
-  const announcements = await AnnouncementDB.listActive();
-  res.json(announcements);
+// POST /api/client/sync-toggle — Ligar ou Desligar Sincronização (com Pânico ao Desligar)
+clientRouter.post('/sync-toggle', async (req: Request, res: Response) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
+
+  const { enabled } = req.body;
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'Campo enabled (boolean) é obrigatório.' });
+  }
+
+  // Atualizar estado de sincronização no banco
+  await ClientConfigDB.setSyncEnabled(clientId, enabled);
+
+  // Se estiver DESLIGANDO, aciona automaticamente o Pânico Bybit (cancela ordens e encerra posições)
+  let panicResult = null;
+  if (!enabled) {
+    panicResult = await BybitExecutionEngine.panicCloseAll(clientId);
+  }
+
+  res.json({
+    success: true,
+    syncEnabled: enabled,
+    message: enabled 
+      ? '✅ Sincronização com o Copy Trading ativada com sucesso!' 
+      : '🛑 Sincronização desativada. Protocolo de segurança acionado na Bybit.',
+    panicResult
+  });
+});
+
+// POST /api/client/panic — Botão de Pânico explícito
+clientRouter.post('/panic', async (req: Request, res: Response) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
+
+  // Desliga sincronização
+  await ClientConfigDB.setSyncEnabled(clientId, false);
+
+  // Encerra posições e ordens
+  const result = await BybitExecutionEngine.panicCloseAll(clientId);
+
+  res.json({
+    success: result.success,
+    message: `Protocolo de pânico executado: ${result.closedCount} posições encerradas e ${result.cancelledCount} ordens canceladas.`,
+    details: result
+  });
 });
 
 // GET /api/client/positions
@@ -242,3 +284,4 @@ clientRouter.post('/risk', async (req: Request, res: Response) => {
     }
   });
 });
+

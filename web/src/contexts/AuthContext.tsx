@@ -6,6 +6,9 @@ export interface AuthUser {
   role: 'ADMIN' | 'CLIENT';
   clientId?: string;
   name?: string;
+  whatsapp?: string;
+  whatsappValidado?: boolean;
+  planActive?: boolean;
   planType?: string;
   planExpiresAt?: number | null;
 }
@@ -15,7 +18,7 @@ interface AuthContextValue {
   token: string | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  signup: (name: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  signup: (name: string, email: string, password: string, whatsapp: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   isAdmin: boolean;
   isClient: boolean;
@@ -66,12 +69,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signup = async (name: string, email: string, password: string): Promise<{ success: boolean; error?: string }> => {
+  const signup = async (name: string, email: string, password: string, whatsapp: string): Promise<{ success: boolean; error?: string }> => {
     try {
       const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password })
+        body: JSON.stringify({ name, email, password, whatsapp })
       });
 
       const data = await res.json();
@@ -101,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       token,
       isLoading,
       login,
+      signup,
       logout,
       isAdmin: user?.role === 'ADMIN',
       isClient: user?.role === 'CLIENT'
@@ -128,3 +132,4 @@ export function authFetch(url: string, options: RequestInit = {}): Promise<Respo
     }
   });
 }
+
