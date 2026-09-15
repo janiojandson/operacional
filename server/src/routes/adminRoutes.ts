@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { requireAdmin } from '../auth/authMiddleware.js';
-import { UserDB, ClientConfigDB, TradeHistoryDB, AnnouncementDB, query } from '../database/db.js';
+import { UserDB, ClientConfigDB, TradeHistoryDB, AnnouncementDB, query, queryOne, UserRow, ClientConfigRow } from '../database/db.js';
 import { BybitExecutionEngine } from '../engine/bybitExecutionEngine.js';
 
 
@@ -11,15 +11,16 @@ adminRouter.use(requireAdmin);
 adminRouter.get('/clients', async (_req: Request, res: Response) => {
   const users = await UserDB.listClients();
   const configs = await ClientConfigDB.listAll();
-  const configMap = new Map(configs.map(c => [c.client_id, c]));
+  const configByClientId = new Map(configs.map(c => [c.client_id, c]));
+  const configByUserId = new Map(configs.map(c => [c.user_id, c]));
 
   const clients = users.map(u => {
-    const cfg = u.client_id ? configMap.get(u.client_id) : undefined;
+    const cfg = (u.client_id ? configByClientId.get(u.client_id) : undefined) || configByUserId.get(u.id);
     const now = Date.now();
     const expiresAt = cfg?.plan_expires_at ? Number(cfg.plan_expires_at) : null;
     const isExpired = expiresAt !== null && expiresAt < now;
     const isVitalicio = cfg?.plan_type === 'VITALICIO';
-    const isVitrine = cfg?.plan_type === 'VITRINE' || Number(cfg?.plan_active) === 0;
+    const isVitrine = (cfg?.plan_type === 'VITRINE') || Number(cfg?.plan_active) === 0;
 
     return {
       userId: u.id,
@@ -29,7 +30,7 @@ adminRouter.get('/clients', async (_req: Request, res: Response) => {
       whatsappValidado: Number(u.whatsapp_validado) === 1,
       clientId: u.client_id || cfg?.client_id || null,
       isActive: Number(u.is_active) === 1,
-      planActive: Number(cfg?.plan_active ?? 1) === 1 && !isExpired,
+      planActive: Number(cfg?.plan_active ?? 0) === 1 && !isExpired && !isVitrine,
       isExpired,
       isVitalicio,
       isVitrine,
@@ -48,7 +49,7 @@ adminRouter.get('/clients', async (_req: Request, res: Response) => {
         hasApiKeys: !!(cfg.bybit_api_key_enc),
         maskedApiKey: cfg.bybit_api_key_enc ? '****...****' : null,
         notificationPhone: cfg.notification_phone,
-        planType: cfg.plan_type || 'ACTIVE',
+        planType: cfg.plan_type || 'VITRINE',
         planExpiresAt: expiresAt,
         planActive: Number(cfg.plan_active) === 1
       } : null
@@ -143,51 +144,59 @@ adminRouter.post('/clients/:id/force-disconnect', async (req: Request, res: Resp
 // POST, PUT, PATCH /api/admin/clients/:id/plan — gerenciar plano, validade e modalidades (Vitalício, Vitrine, Ativo com dias)
 const handlePlanUpdate = async (req: Request, res: Response) => {
   try {
-    const id = String(req.params.id);
+    const id = String(req.params.id).trim();
     const { planType, daysToAdd, customExpiry, planActive, isVitalicio } = req.body;
     console.log(`[Admin] 📝 Recebida solicitação de plano para ID '${id}':`, JSON.stringify(req.body));
 
-    let user = await UserDB.findById(id);
-    if (!user) user = await UserDB.findByClientId(id);
+    // 1. Localizar o usuário em app_users por id, client_id ou email
+    let user = await queryOne<UserRow>(
+      'SELECT * FROM app_users WHERE id = $1 OR client_id = $1 OR email = $1 LIMIT 1',
+      [id]
+    );
 
-    let clientId: string | null = null;
-    let current: ClientConfigRow | undefined = undefined;
+    // 2. Localizar a configuração existente em client_configs por client_id ou user_id
+    let current = await queryOne<ClientConfigRow>(
+      'SELECT * FROM client_configs WHERE client_id = $1 OR user_id = $1 LIMIT 1',
+      [id]
+    );
 
-    if (user) {
-      current = await ClientConfigDB.findByUserId(user.id);
-      if (current) clientId = current.client_id;
-      if (!clientId && user.client_id) {
-        current = await ClientConfigDB.findByClientId(user.client_id);
-        if (current) clientId = user.client_id;
+    // Se encontramos a config mas não o user, buscar user pelo current.user_id
+    if (!user && current?.user_id) {
+      user = await queryOne<UserRow>('SELECT * FROM app_users WHERE id = $1 LIMIT 1', [current.user_id]);
+    }
+
+    if (!user) {
+      console.warn(`[Admin] ⚠️ Usuário não encontrado no banco para ID '${id}'`);
+      return res.status(404).json({ error: `Cliente não encontrado no sistema (ID: ${id}).` });
+    }
+
+    // 3. Garantir client_id consistente no app_users
+    let clientId = user.client_id || current?.client_id || `cli-${user.id.replace(/^usr-/, '')}`;
+    if (user.client_id !== clientId) {
+      await query('UPDATE app_users SET client_id = $1 WHERE id = $2', [clientId, user.id]);
+      user.client_id = clientId;
+    }
+
+    // 4. Se não existe client_configs para este client_id, criar agora com o user.id garantido
+    if (!current) {
+      current = await ClientConfigDB.findByClientId(clientId);
+      if (!current) {
+        await ClientConfigDB.create({ 
+          clientId, 
+          userId: user.id, 
+          name: user.name || undefined,
+          phone: user.whatsapp || undefined,
+          planType: planType || 'VITRINE', 
+          planActive: false,
+          syncEnabled: false
+        });
+        current = await ClientConfigDB.findByClientId(clientId);
       }
     }
 
-    if (!current) {
-      current = await ClientConfigDB.findByClientId(id);
-      if (current) clientId = current.client_id;
-    }
-
-    // Se ainda não existir configuração mas tivermos o usuário, cria uma nova
-    if (!current && user) {
-      clientId = user.client_id || `cli-${user.id.slice(-8)}`;
-      await query('UPDATE app_users SET client_id = $1 WHERE id = $2', [clientId, user.id]);
-      await ClientConfigDB.create({ 
-        clientId, 
-        userId: user.id, 
-        planType: planType || 'ACTIVE', 
-        planActive: true 
-      });
-      current = await ClientConfigDB.findByClientId(clientId);
-    }
-
-    if (!clientId || !current) {
-      console.warn(`[Admin] ⚠️ Cliente não encontrado para ID '${id}'`);
-      return res.status(404).json({ error: 'Configuração do cliente não encontrada.' });
-    }
-
-    let newPlanType = planType || current.plan_type || 'ACTIVE';
-    let newPlanActive = planActive !== undefined ? Boolean(planActive) : Number(current.plan_active) === 1;
-    let expiresAt: number | null = current.plan_expires_at ? Number(current.plan_expires_at) : null;
+    let newPlanType = planType || current?.plan_type || 'VITRINE';
+    let newPlanActive = planActive !== undefined ? Boolean(planActive) : Number(current?.plan_active) === 1;
+    let expiresAt: number | null = current?.plan_expires_at ? Number(current.plan_expires_at) : null;
 
     if (isVitalicio || planType === 'VITALICIO') {
       newPlanType = 'VITALICIO';
@@ -196,6 +205,7 @@ const handlePlanUpdate = async (req: Request, res: Response) => {
     } else if (planType === 'VITRINE') {
       newPlanType = 'VITRINE';
       newPlanActive = false;
+      expiresAt = null;
       await ClientConfigDB.setSyncEnabled(clientId, false);
     } else if (planType === 'INACTIVE') {
       newPlanType = 'INACTIVE';
@@ -214,18 +224,19 @@ const handlePlanUpdate = async (req: Request, res: Response) => {
     }
 
     await ClientConfigDB.updatePlan(clientId, newPlanType, newPlanActive, expiresAt);
-    
-    if (user) {
-      await UserDB.setPlanActive(user.id, newPlanActive);
-    } else if (current.user_id) {
-      await UserDB.setPlanActive(current.user_id, newPlanActive);
-    }
+    await ClientConfigDB.setActive(clientId, newPlanType !== 'INACTIVE');
+    await UserDB.setPlanActive(user.id, newPlanType !== 'INACTIVE');
 
-    console.log(`[Admin] ✅ Plano atualizado com sucesso para cliente ${clientId}:`, { newPlanType, newPlanActive, expiresAt });
+    console.log(`[Admin] ✅ Plano atualizado com sucesso para cliente ${clientId} (user: ${user.id}):`, { 
+      newPlanType, 
+      newPlanActive, 
+      expiresAt 
+    });
 
     return res.json({
       success: true,
       clientId,
+      userId: user.id,
       planType: newPlanType,
       planActive: newPlanActive,
       planExpiresAt: expiresAt

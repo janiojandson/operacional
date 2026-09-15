@@ -271,10 +271,21 @@ export const UserDB = {
     return queryOne<UserRow>(`SELECT * FROM app_users WHERE REPLACE(REPLACE(REPLACE(REPLACE(whatsapp, '+', ''), ' ', ''), '-', ''), '(', '') LIKE $1`, [`%${clean.slice(-8)}%`]);
   },
 
-  create: async (data: { id: string; email: string; passwordHash: string; role: 'ADMIN' | 'CLIENT'; clientId?: string; name?: string; whatsapp?: string }) => {
+  create: async (data: { id: string; email: string; passwordHash: string; role: 'ADMIN' | 'CLIENT'; clientId?: string; name?: string; whatsapp?: string; planActive?: boolean; whatsappValidado?: boolean }) => {
     await query(
-      `INSERT INTO app_users (id, email, password_hash, role, client_id, name, whatsapp, whatsapp_validado) VALUES ($1, $2, $3, $4, $5, $6, $7, 0)`,
-      [data.id, data.email, data.passwordHash, data.role, data.clientId || null, data.name || null, data.whatsapp || null]
+      `INSERT INTO app_users (id, email, password_hash, role, client_id, name, whatsapp, whatsapp_validado, is_active) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        data.id, 
+        data.email, 
+        data.passwordHash, 
+        data.role, 
+        data.clientId || null, 
+        data.name || null, 
+        data.whatsapp || null, 
+        data.whatsappValidado ? 1 : 0, 
+        data.planActive === false ? 0 : 1
+      ]
     );
   },
 
@@ -342,24 +353,49 @@ export const ClientConfigDB = {
   findByUserId: (userId: string) =>
     queryOne<ClientConfigRow>('SELECT * FROM client_configs WHERE user_id = $1', [userId]),
 
-  create: async (data: { clientId: string; userId: string; name?: string; phone?: string; planType?: string; planActive?: boolean; planExpiresAt?: number | null }) => {
-    // Garantir que user_id seja o id real da tabela app_users
+  create: async (data: { 
+    clientId: string; 
+    userId: string; 
+    name?: string; 
+    phone?: string; 
+    notificationPhone?: string; 
+    planType?: string; 
+    planActive?: boolean; 
+    planExpiresAt?: number | null; 
+    syncEnabled?: boolean 
+  }) => {
+    // Garantir que user_id seja o id real e existente da tabela app_users
     let realUserId = data.userId;
-    const user = await queryOne<{ id: string }>('SELECT id FROM app_users WHERE id = $1 OR client_id = $2 LIMIT 1', [data.userId, data.clientId]);
+    const user = await queryOne<{ id: string }>('SELECT id FROM app_users WHERE id = $1 OR client_id = $2 OR email = $1 LIMIT 1', [data.userId, data.clientId]);
     if (user) {
       realUserId = user.id;
+    } else {
+      const userCheck = await queryOne<{ id: string }>('SELECT id FROM app_users WHERE id = $1 LIMIT 1', [data.userId]);
+      if (!userCheck) {
+        throw new Error(`Não é possível vincular configuração: Usuário ${data.userId} não existe na tabela app_users.`);
+      }
     }
+
+    const phoneNum = data.notificationPhone || data.phone || null;
+    const pType = data.planType || 'VITRINE';
+    const pActive = data.planActive !== undefined ? (data.planActive ? 1 : 0) : (pType === 'VITRINE' ? 0 : 1);
+    const syncVal = data.syncEnabled ? 1 : 0;
+    const expiresVal = data.planExpiresAt !== null && data.planExpiresAt !== undefined && !isNaN(Number(data.planExpiresAt))
+      ? Math.round(Number(data.planExpiresAt))
+      : null;
 
     await query(
       `INSERT INTO client_configs (client_id, user_id, notification_phone, sync_enabled, plan_type, plan_active, plan_expires_at) 
-       VALUES ($1, $2, $3, 0, $4, $5, $6) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7) 
        ON CONFLICT (client_id) DO UPDATE SET 
          user_id = EXCLUDED.user_id,
+         notification_phone = COALESCE(EXCLUDED.notification_phone, client_configs.notification_phone),
+         sync_enabled = EXCLUDED.sync_enabled,
          plan_type = EXCLUDED.plan_type, 
          plan_active = EXCLUDED.plan_active, 
          plan_expires_at = EXCLUDED.plan_expires_at, 
          updated_at = EXTRACT(EPOCH FROM NOW()) * 1000`,
-      [data.clientId, realUserId, data.phone || null, data.planType || 'ACTIVE', data.planActive !== false ? 1 : 0, data.planExpiresAt || null]
+      [data.clientId, realUserId, phoneNum, syncVal, pType, pActive, expiresVal]
     );
   },
 

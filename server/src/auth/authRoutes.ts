@@ -55,26 +55,36 @@ authRouter.get('/me', requireAuth, async (req: Request, res: Response) => {
   if (!user) return res.status(404).json({ error: 'Usuário não encontrado.' });
 
   let clientConfig = null;
-  if (user.client_id) {
-    const cfg = await ClientConfigDB.findByClientId(user.client_id);
-    if (cfg) {
-      clientConfig = {
-        clientId: cfg.client_id,
-        riskPct: cfg.risk_pct,
-        leverage: cfg.leverage,
-        maxDailyLossUsd: cfg.max_daily_loss_usd,
-        maxDailyProfitUsd: cfg.max_daily_profit_usd,
-        balance: cfg.balance,
-        isActive: Number(cfg.is_active) === 1,
-        syncEnabled: Number(cfg.sync_enabled) === 1,
-        apiConnected: Number(cfg.api_connected) === 1,
-        bybitTestnet: Number(cfg.bybit_testnet) === 1,
-        hasApiKeys: !!(cfg.bybit_api_key_enc),
-        notificationPhone: cfg.notification_phone,
-        planType: cfg.plan_type || 'STANDARD',
-        planExpiresAt: cfg.plan_expires_at ? Number(cfg.plan_expires_at) : null
-      };
-    }
+  const cfg = (user.client_id ? await ClientConfigDB.findByClientId(user.client_id) : null)
+    || await ClientConfigDB.findByUserId(user.id);
+
+  if (cfg) {
+    const isVitrine = cfg.plan_type === 'VITRINE';
+    const now = Date.now();
+    const expiresAt = cfg.plan_expires_at ? Number(cfg.plan_expires_at) : null;
+    const isExpired = expiresAt !== null && expiresAt < now;
+    const isPlanActive = Number(cfg.plan_active) === 1 && Number(cfg.is_active) === 1 && !isExpired && !isVitrine;
+
+    clientConfig = {
+      clientId: cfg.client_id,
+      riskPct: Number(cfg.risk_pct),
+      leverage: Number(cfg.leverage),
+      maxDailyLossUsd: Number(cfg.max_daily_loss_usd),
+      maxDailyProfitUsd: Number(cfg.max_daily_profit_usd),
+      balance: Number(cfg.balance),
+      isActive: Number(cfg.is_active) === 1,
+      syncEnabled: Number(cfg.sync_enabled) === 1,
+      apiConnected: Number(cfg.api_connected) === 1,
+      bybitTestnet: Number(cfg.bybit_testnet) === 1,
+      hasApiKeys: !!(cfg.bybit_api_key_enc),
+      notificationPhone: cfg.notification_phone,
+      planType: cfg.plan_type || 'VITRINE',
+      planExpiresAt: expiresAt,
+      planActive: isPlanActive,
+      isVitrine,
+      isVitalicio: cfg.plan_type === 'VITALICIO',
+      isExpired
+    };
   }
 
   res.json({
@@ -84,86 +94,94 @@ authRouter.get('/me', requireAuth, async (req: Request, res: Response) => {
     name: user.name,
     whatsapp: user.whatsapp,
     whatsappValidado: Number(user.whatsapp_validado) === 1,
-    planActive: Number(user.plan_active) === 1,
+    planActive: clientConfig ? clientConfig.planActive : false,
+    planType: clientConfig?.planType || 'VITRINE',
     clientConfig
   });
 });
 
-// POST /api/auth/signup — Cadastro obrigatório com Nome, Email, Senha e WhatsApp
+// POST /api/auth/signup — Cadastro obrigatório com Nome, Email, Senha e WhatsApp (inicia no Modo Vitrine)
 authRouter.post('/signup', async (req: Request, res: Response) => {
-  const { email, password, name, whatsapp } = req.body;
-  if (!email || !password || !name || !whatsapp) {
-    return res.status(400).json({ error: 'Nome, WhatsApp, email e senha são obrigatórios.' });
-  }
-
-  const cleanPhone = String(whatsapp).replace(/\D/g, '');
-  if (cleanPhone.length < 10 || cleanPhone.length > 15) {
-    return res.status(400).json({ error: 'Número de WhatsApp inválido. Informe com DDD.' });
-  }
-
-  if (password.length < 6) {
-    return res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres.' });
-  }
-
-  const existing = await UserDB.findByEmail(email.toLowerCase().trim());
-  if (existing) {
-    return res.status(409).json({ error: 'Este email já está cadastrado. Faça login.' });
-  }
-
-  const hash = await bcrypt.hash(password, 12);
-  const userId = `usr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  const clientId = `cli-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-
-  await UserDB.create({
-    id: userId,
-    email: email.toLowerCase().trim(),
-    passwordHash: hash,
-    role: 'CLIENT',
-    clientId,
-    name: name.trim(),
-    whatsapp: cleanPhone,
-    whatsappValidado: false,
-    planActive: true
-  });
-
-  await ClientConfigDB.create({
-    clientId,
-    userId,
-    name: name.trim(),
-    notificationPhone: cleanPhone,
-    planType: 'STANDARD',
-    syncEnabled: true
-  });
-
-  // Disparar mensagem de Onboarding Anti-Spam via Railway Comunicação
   try {
-    await ComunicacaoService.sendOnboardingMessage(cleanPhone, name.trim());
-  } catch (err: any) {
-    console.error('[Signup] Erro ao disparar mensagem de onboarding WhatsApp:', err.message);
-  }
+    const { email, password, name, whatsapp } = req.body;
+    if (!email || !password || !name || !whatsapp) {
+      return res.status(400).json({ error: 'Nome, WhatsApp, email e senha são obrigatórios.' });
+    }
 
-  const token = signToken({
-    userId,
-    email: email.toLowerCase().trim(),
-    role: 'CLIENT',
-    clientId,
-    name: name.trim()
-  });
+    const cleanPhone = String(whatsapp).replace(/\D/g, '');
+    if (cleanPhone.length < 10 || cleanPhone.length > 15) {
+      return res.status(400).json({ error: 'Número de WhatsApp inválido. Informe com DDD.' });
+    }
 
-  res.status(201).json({
-    success: true,
-    token,
-    user: {
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres.' });
+    }
+
+    const existing = await UserDB.findByEmail(email.toLowerCase().trim());
+    if (existing) {
+      return res.status(409).json({ error: 'Este email já está cadastrado. Faça login.' });
+    }
+
+    const hash = await bcrypt.hash(password, 12);
+    const userId = `usr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const clientId = `cli-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    await UserDB.create({
       id: userId,
       email: email.toLowerCase().trim(),
+      passwordHash: hash,
       role: 'CLIENT',
       clientId,
       name: name.trim(),
       whatsapp: cleanPhone,
       whatsappValidado: false,
       planActive: true
+    });
+
+    await ClientConfigDB.create({
+      clientId,
+      userId,
+      name: name.trim(),
+      notificationPhone: cleanPhone,
+      planType: 'VITRINE',
+      planActive: false,
+      syncEnabled: false
+    });
+
+    // Disparar mensagem de Onboarding Anti-Spam via Railway Comunicação
+    try {
+      await ComunicacaoService.sendOnboardingMessage(cleanPhone, name.trim());
+    } catch (err: any) {
+      console.error('[Signup] Erro ao disparar mensagem de onboarding WhatsApp:', err.message);
     }
-  });
+
+    const token = signToken({
+      userId,
+      email: email.toLowerCase().trim(),
+      role: 'CLIENT',
+      clientId,
+      name: name.trim()
+    });
+
+    return res.status(201).json({
+      success: true,
+      token,
+      user: {
+        id: userId,
+        email: email.toLowerCase().trim(),
+        role: 'CLIENT',
+        clientId,
+        name: name.trim(),
+        whatsapp: cleanPhone,
+        whatsappValidado: false,
+        planActive: false,
+        planType: 'VITRINE'
+      }
+    });
+  } catch (error: any) {
+    console.error('[Signup] Erro geral ao cadastrar:', error);
+    return res.status(500).json({ error: error.message || 'Erro ao cadastrar conta.' });
+  }
 });
 
 // POST /api/auth/forgot-password — Gera OTP numérico de 6 dígitos e envia por WhatsApp

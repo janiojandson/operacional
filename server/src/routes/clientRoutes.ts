@@ -130,6 +130,20 @@ clientRouter.post('/sync-toggle', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Campo enabled (boolean) é obrigatório.' });
   }
 
+  const config = await ClientConfigDB.findByClientId(clientId);
+  if (!config) return res.status(404).json({ error: 'Configuração do cliente não encontrada.' });
+
+  if (enabled) {
+    const isVitrine = config.plan_type === 'VITRINE' || Number(config.plan_active) === 0;
+    const now = Date.now();
+    const isExpired = config.plan_expires_at ? Number(config.plan_expires_at) < now : false;
+    if (isVitrine || isExpired || Number(config.is_active) === 0) {
+      return res.status(403).json({ 
+        error: 'Sua conta está em Modo Vitrine ou com plano inativo. Entre em contato com o administrador para ativar seu plano e liberar a sincronização de ordens.' 
+      });
+    }
+  }
+
   // Atualizar estado de sincronização no banco
   await ClientConfigDB.setSyncEnabled(clientId, enabled);
 
