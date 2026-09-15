@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { requireClient } from '../auth/authMiddleware.js';
-import { ClientConfigDB, TradeHistoryDB } from '../database/db.js';
+import { UserDB, ClientConfigDB, TradeHistoryDB } from '../database/db.js';
 import { encrypt } from '../utils/crypto.js';
 import { BybitExecutionEngine } from '../engine/bybitExecutionEngine.js';
 
@@ -79,11 +79,12 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
     }
   }
 
-  let userPlanActive = true;
-  if (config.user_id) {
-    const u = await UserDB.findById(config.user_id);
-    if (u) userPlanActive = Number(u.plan_active) === 1 && Number(u.is_active) === 1;
-  }
+  const now = Date.now();
+  const expiresAt = config.plan_expires_at ? Number(config.plan_expires_at) : null;
+  const isExpired = expiresAt !== null && expiresAt < now;
+  const isVitalicio = config.plan_type === 'VITALICIO';
+  const isVitrine = config.plan_type === 'VITRINE';
+  const isPlanActive = Number(config.plan_active) === 1 && Number(config.is_active) === 1 && !isExpired && !isVitrine;
 
   res.json({
     clientId,
@@ -97,14 +98,17 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
     maxDailyProfitUsd: Number(config.max_daily_profit_usd),
     maxOpenPositions: Number(config.max_open_positions),
     isActive: Number(config.is_active) === 1,
-    planActive: userPlanActive,
+    planActive: isPlanActive,
+    isVitalicio,
+    isVitrine,
+    isExpired,
     syncEnabled: Number(config.sync_enabled) === 1,
     apiConnected: Number(config.api_connected) === 1,
     bybitTestnet: Number(config.bybit_testnet) === 1,
     hasApiKeys: !!(config.bybit_api_key_enc),
     notificationPhone: config.notification_phone,
-    planType: config.plan_type || 'STANDARD',
-    planExpiresAt: config.plan_expires_at ? Number(config.plan_expires_at) : null
+    planType: config.plan_type || 'ACTIVE',
+    planExpiresAt: expiresAt
   });
 });
 

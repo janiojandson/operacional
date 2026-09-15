@@ -15,15 +15,24 @@ adminRouter.get('/clients', async (_req: Request, res: Response) => {
 
   const clients = users.map(u => {
     const cfg = u.client_id ? configMap.get(u.client_id) : undefined;
+    const now = Date.now();
+    const expiresAt = cfg?.plan_expires_at ? Number(cfg.plan_expires_at) : null;
+    const isExpired = expiresAt !== null && expiresAt < now;
+    const isVitalicio = cfg?.plan_type === 'VITALICIO';
+    const isVitrine = cfg?.plan_type === 'VITRINE' || Number(cfg?.plan_active) === 0;
+
     return {
       userId: u.id,
       email: u.email,
       name: u.name,
       whatsapp: u.whatsapp,
       whatsappValidado: Number(u.whatsapp_validado) === 1,
-      clientId: u.client_id,
+      clientId: u.client_id || cfg?.client_id || null,
       isActive: Number(u.is_active) === 1,
-      planActive: Number(u.plan_active) === 1,
+      planActive: Number(cfg?.plan_active ?? 1) === 1 && !isExpired,
+      isExpired,
+      isVitalicio,
+      isVitrine,
       createdAt: u.created_at,
       config: cfg ? {
         riskPct: Number(cfg.risk_pct),
@@ -39,8 +48,9 @@ adminRouter.get('/clients', async (_req: Request, res: Response) => {
         hasApiKeys: !!(cfg.bybit_api_key_enc),
         maskedApiKey: cfg.bybit_api_key_enc ? '****...****' : null,
         notificationPhone: cfg.notification_phone,
-        planType: cfg.plan_type || 'STANDARD',
-        planExpiresAt: cfg.plan_expires_at ? Number(cfg.plan_expires_at) : null
+        planType: cfg.plan_type || 'ACTIVE',
+        planExpiresAt: expiresAt,
+        planActive: Number(cfg.plan_active) === 1
       } : null
     };
   });
@@ -52,9 +62,13 @@ adminRouter.get('/clients', async (_req: Request, res: Response) => {
 adminRouter.get('/overview', async (_req: Request, res: Response) => {
   const users = await UserDB.listClients();
   const configs = await ClientConfigDB.listAll();
+  const now = Date.now();
   
   const totalClients = users.length;
-  const activePlanClients = users.filter(u => Number(u.plan_active) === 1 && Number(u.is_active) === 1).length;
+  const activePlanClients = configs.filter(c => {
+    const isExp = c.plan_expires_at ? Number(c.plan_expires_at) < now : false;
+    return Number(c.is_active) === 1 && Number(c.plan_active) === 1 && !isExp;
+  }).length;
   const inactivePlanClients = totalClients - activePlanClients;
 
   const connectedApis = configs.filter(c => Number(c.api_connected) === 1).length;
@@ -98,10 +112,19 @@ adminRouter.get('/overview', async (_req: Request, res: Response) => {
   });
 });
 
-// POST /api/admin/clients/:clientId/force-disconnect — Força desconexão e zera posições a mercado na Bybit (Pânico)
-adminRouter.post('/clients/:clientId/force-disconnect', async (req: Request, res: Response) => {
-  const { clientId } = req.params;
-  const current = await ClientConfigDB.findByClientId(clientId);
+// POST /api/admin/clients/:id/force-disconnect — Força desconexão e zera posições a mercado na Bybit (Pânico)
+adminRouter.post('/clients/:id/force-disconnect', async (req: Request, res: Response) => {
+  const id = String(req.params.id);
+  let clientId = id;
+  
+  let current = await ClientConfigDB.findByClientId(id);
+  if (!current) {
+    const user = await UserDB.findById(id);
+    if (user?.client_id) {
+      clientId = user.client_id;
+      current = await ClientConfigDB.findByClientId(clientId);
+    }
+  }
   if (!current) return res.status(404).json({ error: 'Cliente não encontrado.' });
 
   // 1. Desliga sincronização imediatamente
@@ -117,43 +140,87 @@ adminRouter.post('/clients/:clientId/force-disconnect', async (req: Request, res
   });
 });
 
-// POST /api/admin/clients/:clientId/plan — gerenciar plano e validade
-adminRouter.post('/clients/:clientId/plan', async (req: Request, res: Response) => {
-  const { clientId } = req.params;
-  const { planType, daysToAdd, customExpiry, planActive } = req.body;
+// POST /api/admin/clients/:id/plan — gerenciar plano, validade e modalidades (Vitalício, Vitrine, Ativo com dias)
+adminRouter.post('/clients/:id/plan', async (req: Request, res: Response) => {
+  const id = String(req.params.id);
+  const { planType, daysToAdd, customExpiry, planActive, isVitalicio } = req.body;
 
-  const current = await ClientConfigDB.findByClientId(clientId);
-  if (!current) return res.status(404).json({ error: 'Cliente não encontrado.' });
-
-  let expiresAt = current.plan_expires_at ? Number(current.plan_expires_at) : Date.now();
-  if (daysToAdd) {
-    const base = expiresAt > Date.now() ? expiresAt : Date.now();
-    expiresAt = base + (daysToAdd * 24 * 60 * 60 * 1000);
-  } else if (customExpiry) {
-    expiresAt = Number(customExpiry);
+  let clientId = id;
+  let user = await UserDB.findByClientId(id);
+  if (!user) {
+    user = await UserDB.findById(id);
+    if (user?.client_id) clientId = user.client_id;
   }
 
-  await ClientConfigDB.updatePlan(clientId, planType || current.plan_type, expiresAt);
-  
-  if (typeof planActive === 'boolean') {
-    const user = await UserDB.findByClientId(clientId);
-    if (user) {
-      await UserDB.setPlanActive(user.id, planActive);
+  let current = await ClientConfigDB.findByClientId(clientId);
+  if (!current && user) {
+    // Cria config se ainda não existir
+    clientId = user.client_id || `cli-${user.id.slice(-8)}`;
+    await ClientConfigDB.create({ clientId, userId: user.id });
+    current = await ClientConfigDB.findByClientId(clientId);
+  }
+
+  if (!current) return res.status(404).json({ error: 'Configuração do cliente não encontrada.' });
+
+  let newPlanType = planType || current.plan_type || 'ACTIVE';
+  let newPlanActive = planActive !== undefined ? Boolean(planActive) : Number(current.plan_active) === 1;
+  let expiresAt: number | null = current.plan_expires_at ? Number(current.plan_expires_at) : null;
+
+  if (isVitalicio || planType === 'VITALICIO') {
+    newPlanType = 'VITALICIO';
+    newPlanActive = true;
+    expiresAt = null; // null = sem expiração
+  } else if (planType === 'VITRINE') {
+    newPlanType = 'VITRINE';
+    newPlanActive = false;
+    await ClientConfigDB.setSyncEnabled(clientId, false);
+  } else if (planType === 'ACTIVE' || daysToAdd || customExpiry) {
+    newPlanType = 'ACTIVE';
+    newPlanActive = true;
+    if (daysToAdd !== undefined && daysToAdd !== null) {
+      const now = Date.now();
+      const base = (expiresAt && expiresAt > now) ? expiresAt : now;
+      expiresAt = base + (Number(daysToAdd) * 24 * 60 * 60 * 1000);
+    } else if (customExpiry) {
+      expiresAt = Number(customExpiry);
     }
   }
 
-  res.json({ success: true, clientId, planType: planType || current.plan_type, planExpiresAt: expiresAt });
+  await ClientConfigDB.updatePlan(clientId, newPlanType, newPlanActive, expiresAt);
+  
+  if (user) {
+    await UserDB.setPlanActive(user.id, newPlanActive);
+  }
+
+  res.json({
+    success: true,
+    clientId,
+    planType: newPlanType,
+    planActive: newPlanActive,
+    planExpiresAt: expiresAt
+  });
 });
 
-// POST /api/admin/clients/:clientId/kill-switch — ativar/bloquear cliente (atualiza is_active e plan_active)
-adminRouter.post('/clients/:clientId/kill-switch', async (req: Request, res: Response) => {
-  const { clientId } = req.params;
+// POST /api/admin/clients/:id/kill-switch — ativar/bloquear cliente (atualiza is_active e plan_active)
+adminRouter.post('/clients/:id/kill-switch', async (req: Request, res: Response) => {
+  const id = String(req.params.id);
   const { active } = req.body;
   const isActive = active !== false;
 
-  await ClientConfigDB.setActive(clientId, isActive);
+  let clientId = id;
+  let user = await UserDB.findByClientId(id);
+  if (!user) {
+    user = await UserDB.findById(id);
+    if (user?.client_id) clientId = user.client_id;
+  }
 
-  const user = await UserDB.findByClientId(clientId);
+  if (clientId) {
+    await ClientConfigDB.setActive(clientId, isActive);
+    if (!isActive) {
+      await ClientConfigDB.setSyncEnabled(clientId, false);
+    }
+  }
+
   if (user) {
     await UserDB.setPlanActive(user.id, isActive);
     await query('UPDATE app_users SET is_active = $1 WHERE id = $2', [isActive ? 1 : 0, user.id]);
@@ -183,7 +250,7 @@ adminRouter.post('/announcements', async (req: Request, res: Response) => {
 
 // DELETE /api/admin/announcements/:id — excluir aviso
 adminRouter.delete('/announcements/:id', async (req: Request, res: Response) => {
-  await AnnouncementDB.delete(req.params.id);
+  await AnnouncementDB.delete(String(req.params.id));
   res.json({ success: true, id: req.params.id });
 });
 
@@ -314,10 +381,21 @@ adminRouter.get('/reports/download', async (req: Request, res: Response) => {
   res.send('\uFEFF' + csvRows.join('\n'));
 });
 
-// DELETE /api/admin/clients/:userId
-adminRouter.delete('/clients/:userId', async (req: Request, res: Response) => {
-  const { userId } = req.params;
-  await UserDB.deactivate(userId);
-  res.json({ success: true, userId });
+// DELETE /api/admin/clients/:id — excluir cliente e seus dados permanentemente
+adminRouter.delete('/clients/:id', async (req: Request, res: Response) => {
+  const id = String(req.params.id);
+  
+  let user = await UserDB.findById(id);
+  if (!user) {
+    user = await UserDB.findByClientId(id);
+  }
+
+  if (!user) {
+    return res.status(404).json({ error: 'Cliente não encontrado.' });
+  }
+
+  await UserDB.deleteClient(user.id, user.client_id);
+  res.json({ success: true, message: `Cliente ${user.name || user.email} excluído com sucesso.` });
 });
+
 

@@ -20,6 +20,10 @@ interface AccountInfo {
   maxDailyLossUsd: number;
   maxDailyProfitUsd: number;
   isActive: boolean;
+  planActive?: boolean;
+  isVitalicio?: boolean;
+  isVitrine?: boolean;
+  isExpired?: boolean;
   syncEnabled: boolean;
   apiConnected: boolean;
   bybitTestnet: boolean;

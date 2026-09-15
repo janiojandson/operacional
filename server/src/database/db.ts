@@ -286,6 +286,26 @@ export const UserDB = {
     await query('UPDATE app_users SET password_hash = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $2', [passwordHash, userId]);
   },
 
+  findByClientId: (clientId: string) =>
+    queryOne<UserRow>('SELECT * FROM app_users WHERE client_id = $1', [clientId]),
+
+  setPlanActive: async (userId: string, active: boolean) => {
+    await query('UPDATE app_users SET is_active = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $2', [active ? 1 : 0, userId]);
+  },
+
+  deleteClient: async (userId: string, clientId?: string | null) => {
+    if (clientId) {
+      await query('DELETE FROM trade_history WHERE client_id = $1', [clientId]);
+      await query('DELETE FROM client_configs WHERE client_id = $1', [clientId]);
+    }
+    await query('DELETE FROM client_configs WHERE user_id = $1', [userId]);
+    const user = await queryOne<UserRow>('SELECT email, whatsapp FROM app_users WHERE id = $1', [userId]);
+    if (user) {
+      if (user.email) await query('DELETE FROM password_reset_otps WHERE email = $1', [user.email]);
+    }
+    await query('DELETE FROM app_users WHERE id = $1', [userId]);
+  },
+
   listClients: () =>
     query<UserRow>("SELECT * FROM app_users WHERE role = 'CLIENT' ORDER BY created_at DESC"),
 
