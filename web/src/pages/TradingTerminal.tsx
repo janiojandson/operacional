@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useMarketData } from '../hooks/useMarketData';
 import { AssetSelector } from '../components/Header/AssetSelector';
 import { ChartPro } from '../components/Chart/ChartPro';
@@ -8,26 +8,26 @@ import { SignalsFeed } from '../components/Signals/SignalsFeed';
 import { PaperTradingPanel } from '../components/PaperTrading/PaperTradingPanel';
 import { AIAdvisorModal } from '../components/Advisor/AIAdvisorModal';
 import { QuantStrategyHealthModal } from '../components/Advisor/QuantStrategyHealthModal';
-import { ClientProtectionModal } from '../components/Clients/ClientProtectionModal';
 import { 
   BarChart2, 
   Zap, 
   Briefcase, 
   BookOpen, 
   Clock, 
-  Maximize2,
-  ChevronRight
+  Maximize2
 } from 'lucide-react';
 
 export default function TradingTerminal() {
   const [activeSymbol, setActiveSymbol] = useState<string>('BTC/USDT');
   const [isAdvisorOpen, setIsAdvisorOpen] = useState<boolean>(false);
   const [isQuantHealthOpen, setIsQuantHealthOpen] = useState<boolean>(false);
-  const [isClientsOpen, setIsClientsOpen] = useState<boolean>(false);
-  const [density, setDensity] = useState<'compact' | 'normal' | 'spacious'>('normal');
-  const [isSidePanelOpen, setIsSidePanelOpen] = useState<boolean>(true);
-  const [isBottomPanelOpen, setIsBottomPanelOpen] = useState<boolean>(true);
-  const [leftColWidthPct, setLeftColWidthPct] = useState<number>(68); // 68% left, 32% right
+  
+  // Painéis Redimensionáveis (Splitter States)
+  const [leftColWidthPct, setLeftColWidthPct] = useState<number>(65); // 65% esquerda (Gráfico/Sinais/Boleta), 35% direita (DOM/Tape)
+  const [chartHeightPct, setChartHeightPct] = useState<number>(58); // 58% Gráfico, 42% Base (Sinais/Boleta)
+  const [signalsWidthPct, setSignalsWidthPct] = useState<number>(48); // 48% Sinais, 52% Boleta
+  const [domWidthPct, setDomWidthPct] = useState<number>(50); // 50% DOM, 50% Tape
+
   const [activeMobileTab, setActiveMobileTab] = useState<'chart' | 'signals' | 'paper' | 'dom' | 'tape'>('chart');
 
   const {
@@ -52,7 +52,10 @@ export default function TradingTerminal() {
     try {
       await fetch('/api/paper-trading/balance', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('mfp_token')}`
+        },
         body: JSON.stringify({ balance: newBalance })
       });
     } catch (e) {
@@ -64,7 +67,10 @@ export default function TradingTerminal() {
     try {
       await fetch('/api/paper-trading/reset', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('mfp_token')}`
+        },
         body: JSON.stringify({ initialBalance: currentBalance })
       });
     } catch (e) {
@@ -72,16 +78,9 @@ export default function TradingTerminal() {
     }
   };
 
-  // Density spacing helpers
-  const getGapClass = () => {
-    if (density === 'compact') return 'gap-1';
-    if (density === 'spacious') return 'gap-3';
-    return 'gap-2';
-  };
-
   return (
-    <div className="flex flex-col h-screen w-screen bg-background text-slate-100 font-sans overflow-hidden">
-      {/* Top Asset Selector & Status Header */}
+    <div className="flex flex-col h-screen w-screen bg-background text-slate-100 font-sans overflow-hidden select-none">
+      {/* Top Asset Selector & Institutional Live Header */}
       <AssetSelector
         assets={assets}
         activeSymbol={activeSymbol}
@@ -89,27 +88,23 @@ export default function TradingTerminal() {
         isConnected={isConnected}
         onOpenAdvisor={() => setIsAdvisorOpen(true)}
         onOpenQuantHealth={() => setIsQuantHealthOpen(true)}
-        onOpenClients={() => setIsClientsOpen(true)}
         currentBalance={currentBalance}
         onUpdateBalance={handleUpdateBalance}
         onResetData={handleResetData}
-        density={density}
-        onChangeDensity={setDensity}
-        isSidePanelOpen={isSidePanelOpen}
-        onToggleSidePanel={() => setIsSidePanelOpen(!isSidePanelOpen)}
-        isBottomPanelOpen={isBottomPanelOpen}
-        onToggleBottomPanel={() => setIsBottomPanelOpen(!isBottomPanelOpen)}
       />
 
-      {/* Main Workspace Area (Desktop & Tablet Landscape) */}
+      {/* Main Workspace Area (Desktop & Tablet Landscape) Redimensionável */}
       <main className="flex-1 hidden lg:flex overflow-hidden relative">
-        {/* Left / Center Area: Chart, Signals Feed & Paper Trading Simulator */}
+        {/* Left Column: Gráfico (Superior) + Sinais & Boleta (Inferior) */}
         <section 
-          style={{ width: isSidePanelOpen ? `${leftColWidthPct}%` : '100%' }}
-          className={`flex flex-col h-full overflow-hidden ${isSidePanelOpen ? 'border-r border-border/80' : ''} transition-all duration-150`}
+          style={{ width: `${leftColWidthPct}%` }}
+          className="flex flex-col h-full overflow-hidden"
         >
-          {/* Top: Chart Pro with on-chart signals, position lines and flow pressure */}
-          <div className={`${isBottomPanelOpen ? 'h-[58%]' : 'h-full'} min-h-0 transition-all duration-150 relative`}>
+          {/* Top: Chart Pro */}
+          <div 
+            style={{ height: `${chartHeightPct}%` }}
+            className="w-full min-h-[150px] relative overflow-hidden"
+          >
             <ChartPro
               symbol={activeSymbol}
               candles={candles}
@@ -117,52 +112,140 @@ export default function TradingTerminal() {
               signals={signals}
               openPosition={activePosition}
             />
-
-            {!isBottomPanelOpen && (
-              <button
-                onClick={() => setIsBottomPanelOpen(true)}
-                title="Expandir Painel Inferior de Sinais e Paper Trading"
-                className="absolute bottom-3 right-3 z-20 px-3 py-1.5 rounded-lg bg-surface/90 hover:bg-surface border border-border/80 text-xs font-mono font-bold text-accent shadow-xl backdrop-blur-md flex items-center space-x-1.5 transition-all"
-              >
-                <Maximize2 className="w-3.5 h-3.5" />
-                <span>Restaurar Painéis</span>
-              </button>
-            )}
           </div>
 
-          {/* Bottom Split: Signals Radar + Paper Trading Real-time Simulator */}
-          {isBottomPanelOpen && (
-            <div className={`h-[42%] min-h-0 grid grid-cols-2 ${getGapClass()} border-t border-border/70 bg-background/50`}>
-              <div className="h-full overflow-hidden border-r border-border/70">
-                <SignalsFeed signals={signals} />
-              </div>
-              <div className="h-full overflow-hidden">
-                <PaperTradingPanel 
-                  account={paperAccount} 
-                  activeSymbol={activeSymbol}
-                  pairStats={pairStats}
-                  dynamicPairs={dynamicPairs}
-                  clients={clients}
-                  clientLogs={clientLogs}
-                />
-              </div>
+          {/* Horizontal Splitter (Arraste para ajustar altura entre Gráfico e Base) */}
+          <div
+            title="Arraste para ajustar a altura do Gráfico e dos Painéis Inferiores"
+            className="h-1.5 w-full bg-border/40 hover:bg-accent cursor-row-resize flex justify-center items-center group transition-colors select-none z-20 shrink-0"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const startY = e.clientY;
+              const startHeight = chartHeightPct;
+              const containerHeight = window.innerHeight - 56; // menos header
+              const handleMouseMove = (moveEvent: MouseEvent) => {
+                const deltaY = moveEvent.clientY - startY;
+                const deltaPct = (deltaY / containerHeight) * 100;
+                const newPct = Math.min(82, Math.max(25, startHeight + deltaPct));
+                setChartHeightPct(newPct);
+              };
+              const handleMouseUp = () => {
+                window.removeEventListener('mousemove', handleMouseMove);
+                window.removeEventListener('mouseup', handleMouseUp);
+              };
+              window.addEventListener('mousemove', handleMouseMove);
+              window.addEventListener('mouseup', handleMouseUp);
+            }}
+          >
+            <div className="h-0.5 w-10 bg-slate-600 group-hover:bg-white rounded-full"></div>
+          </div>
+
+          {/* Bottom Split: Sinais Radar + Boleta de Operações Quantitativas */}
+          <div 
+            style={{ height: `${100 - chartHeightPct}%` }}
+            className="w-full min-h-[120px] flex overflow-hidden bg-background/50"
+          >
+            {/* Radar de Sinais */}
+            <div 
+              style={{ width: `${signalsWidthPct}%` }}
+              className="h-full overflow-hidden"
+            >
+              <SignalsFeed signals={signals} />
             </div>
-          )}
+
+            {/* Splitter Vertical entre Sinais e Boleta */}
+            <div
+              title="Arraste para ajustar largura entre Radar de Sinais e Operações"
+              className="w-1.5 h-full bg-border/40 hover:bg-accent cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-10 shrink-0"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const startX = e.clientX;
+                const startWidth = signalsWidthPct;
+                const leftContainerWidth = (window.innerWidth * leftColWidthPct) / 100;
+                const handleMouseMove = (moveEvent: MouseEvent) => {
+                  const deltaX = moveEvent.clientX - startX;
+                  const deltaPct = (deltaX / leftContainerWidth) * 100;
+                  const newPct = Math.min(75, Math.max(25, startWidth + deltaPct));
+                  setSignalsWidthPct(newPct);
+                };
+                const handleMouseUp = () => {
+                  window.removeEventListener('mousemove', handleMouseMove);
+                  window.removeEventListener('mouseup', handleMouseUp);
+                };
+                window.addEventListener('mousemove', handleMouseMove);
+                window.addEventListener('mouseup', handleMouseUp);
+              }}
+            >
+              <div className="w-0.5 h-6 bg-slate-600 group-hover:bg-white rounded-full"></div>
+            </div>
+
+            {/* Boleta de Operações Quantitativas */}
+            <div 
+              style={{ width: `${100 - signalsWidthPct}%` }}
+              className="h-full overflow-hidden"
+            >
+              <PaperTradingPanel 
+                account={paperAccount} 
+                activeSymbol={activeSymbol}
+                pairStats={pairStats}
+                dynamicPairs={dynamicPairs}
+              />
+            </div>
+          </div>
         </section>
 
-        {/* Column Width Splitter Bar (Only visible when side panel is open) */}
-        {isSidePanelOpen && (
+        {/* Main Vertical Splitter Bar (Arraste para ajustar largura entre Gráfico e DOM/Tape) */}
+        <div 
+          title="Arraste para ajustar largura entre Gráfico e DOM/Tape"
+          className="w-1.5 h-full bg-border/40 hover:bg-accent cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-20 shrink-0"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const startX = e.clientX;
+            const startWidth = leftColWidthPct;
+            const handleMouseMove = (moveEvent: MouseEvent) => {
+              const deltaX = moveEvent.clientX - startX;
+              const deltaPct = (deltaX / window.innerWidth) * 100;
+              const newPct = Math.min(82, Math.max(35, startWidth + deltaPct));
+              setLeftColWidthPct(newPct);
+            };
+            const handleMouseUp = () => {
+              window.removeEventListener('mousemove', handleMouseMove);
+              window.removeEventListener('mouseup', handleMouseUp);
+            };
+            window.addEventListener('mousemove', handleMouseMove);
+            window.addEventListener('mouseup', handleMouseUp);
+          }}
+        >
+          <div className="w-0.5 h-8 bg-slate-600 group-hover:bg-white rounded-full"></div>
+        </div>
+
+        {/* Right Column: DOM L2 Book & Tape Reader */}
+        <section 
+          style={{ width: `${100 - leftColWidthPct}%` }}
+          className="flex h-full overflow-hidden"
+        >
+          {/* DOM Book */}
           <div 
-            title="Arraste para ajustar largura do DOM e Tape"
-            className="w-1.5 bg-border/40 hover:bg-accent cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-10"
+            style={{ width: `${domWidthPct}%` }}
+            className="h-full overflow-hidden"
+          >
+            <DOMBook book={book} />
+          </div>
+
+          {/* Splitter Vertical entre DOM Book e Tape Reader */}
+          <div
+            title="Arraste para ajustar largura entre Book DOM e Tape"
+            className="w-1.5 h-full bg-border/40 hover:bg-accent cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-10 shrink-0"
             onMouseDown={(e) => {
+              e.preventDefault();
               const startX = e.clientX;
-              const startWidth = leftColWidthPct;
+              const startWidth = domWidthPct;
+              const rightContainerWidth = (window.innerWidth * (100 - leftColWidthPct)) / 100;
               const handleMouseMove = (moveEvent: MouseEvent) => {
                 const deltaX = moveEvent.clientX - startX;
-                const deltaPct = (deltaX / window.innerWidth) * 100;
-                const newPct = Math.min(85, Math.max(45, startWidth + deltaPct));
-                setLeftColWidthPct(newPct);
+                const deltaPct = (deltaX / rightContainerWidth) * 100;
+                const newPct = Math.min(75, Math.max(25, startWidth + deltaPct));
+                setDomWidthPct(newPct);
               };
               const handleMouseUp = () => {
                 window.removeEventListener('mousemove', handleMouseMove);
@@ -174,37 +257,18 @@ export default function TradingTerminal() {
           >
             <div className="w-0.5 h-6 bg-slate-600 group-hover:bg-white rounded-full"></div>
           </div>
-        )}
 
-        {/* Right Area: DOM L2 Book & Tape Reader */}
-        {isSidePanelOpen && (
-          <section 
-            style={{ width: `${100 - leftColWidthPct}%` }}
-            className={`grid grid-cols-2 h-full overflow-hidden transition-all duration-150 ${getGapClass()}`}
+          {/* Tape Reader */}
+          <div 
+            style={{ width: `${100 - domWidthPct}%` }}
+            className="h-full overflow-hidden"
           >
-            <div className="h-full overflow-hidden border-r border-border/60">
-              <DOMBook book={book} />
-            </div>
-            <div className="h-full overflow-hidden">
-              <TapeReader trades={trades} />
-            </div>
-          </section>
-        )}
-
-        {/* Closed Side Panel Quick Restore Button */}
-        {!isSidePanelOpen && (
-          <button
-            onClick={() => setIsSidePanelOpen(true)}
-            title="Expandir Painel Lateral (DOM e Tape)"
-            className="absolute top-4 right-4 z-20 px-3 py-1.5 rounded-lg bg-surface/90 hover:bg-surface border border-border/80 text-xs font-mono font-bold text-accent shadow-xl backdrop-blur-md flex items-center space-x-1.5 transition-all"
-          >
-            <ChevronRight className="w-3.5 h-3.5" />
-            <span>Abrir DOM / Tape</span>
-          </button>
-        )}
+            <TapeReader trades={trades} />
+          </div>
+        </section>
       </main>
 
-      {/* Mobile & Tablet Portrait View (Tab-based Ergonomic Layout) */}
+      {/* Mobile & Tablet Portrait View */}
       <div className="flex-1 flex flex-col lg:hidden overflow-hidden">
         <div className="flex-1 overflow-hidden relative">
           {activeMobileTab === 'chart' && (
@@ -232,8 +296,6 @@ export default function TradingTerminal() {
                 activeSymbol={activeSymbol}
                 pairStats={pairStats}
                 dynamicPairs={dynamicPairs}
-                clients={clients}
-                clientLogs={clientLogs}
               />
             </div>
           )}
@@ -280,7 +342,7 @@ export default function TradingTerminal() {
             }`}
           >
             <Briefcase className="w-4 h-4" />
-            <span className="text-[10px] mt-0.5 font-mono">Robô</span>
+            <span className="text-[10px] mt-0.5 font-mono">Operações</span>
           </button>
 
           <button
@@ -305,7 +367,7 @@ export default function TradingTerminal() {
         </nav>
       </div>
 
-      {/* AI Advisor Modal (Chat + 7 Blocks + Copy 1-Click) */}
+      {/* AI Advisor Modal (Chat + Consultor) */}
       <AIAdvisorModal
         isOpen={isAdvisorOpen}
         onClose={() => setIsAdvisorOpen(false)}
@@ -316,12 +378,6 @@ export default function TradingTerminal() {
       <QuantStrategyHealthModal
         isOpen={isQuantHealthOpen}
         onClose={() => setIsQuantHealthOpen(false)}
-      />
-
-      {/* Client Protection & Account Management Modal */}
-      <ClientProtectionModal
-        isOpen={isClientsOpen}
-        onClose={() => setIsClientsOpen(false)}
       />
     </div>
   );

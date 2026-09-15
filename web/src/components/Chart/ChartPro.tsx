@@ -209,7 +209,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
         lineWidth: 2,
         lineStyle: 0, // Solid
         axisLabelVisible: true,
-        title: `POSIÇÃO SIMULADA (${openPosition.type})`,
+        title: `POSIÇÃO (${openPosition.type === 'BUY' ? 'COMPRA' : 'VENDA'})`,
       });
 
       tpLineRef.current = candleSeriesRef.current.createPriceLine({
@@ -227,7 +227,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
         lineWidth: 1,
         lineStyle: 2, // Dashed
         axisLabelVisible: true,
-        title: `STOP LOSS (RISCO)`,
+        title: `STOP LOSS (PROTEÇÃO)`,
       });
     }
   }, [openPosition, symbol]);

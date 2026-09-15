@@ -58,9 +58,13 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
   const handleRunAudit = async (selectedProvider = provider) => {
     setLoading(true);
     try {
+      const token = localStorage.getItem('mfp_token');
       const res = await fetch('/api/ai-advisor/audit', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ provider: selectedProvider })
       });
       const data = await res.json();
@@ -87,6 +91,7 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
     setChatLoading(true);
 
     try {
+      const token = localStorage.getItem('mfp_token');
       const historyPayload = messages
         .filter((m, idx) => !(idx === 0 && m.role === 'assistant' && m.content.startsWith('Olá, Trader!')))
         .map((m) => ({
@@ -96,7 +101,10 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose,
 
       const res = await fetch('/api/ai-advisor/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           message: userMsg.content,
           history: historyPayload,

@@ -5,13 +5,12 @@ import {
   TrendingDown, 
   Radio, 
   Brain, 
-  LayoutGrid, 
-  SlidersHorizontal,
-  Shield,
-  Menu,
-  X,
+  Settings,
   RefreshCw,
-  Edit3
+  Edit3,
+  X,
+  Check,
+  Zap
 } from 'lucide-react';
 import { TenantSelector } from './TenantSelector';
 
@@ -22,16 +21,9 @@ interface AssetSelectorProps {
   isConnected: boolean;
   onOpenAdvisor: () => void;
   onOpenQuantHealth: () => void;
-  onOpenClients: () => void;
   currentBalance: number;
   onUpdateBalance: (balance: number) => void;
   onResetData: () => void;
-  density: 'compact' | 'normal' | 'spacious';
-  onChangeDensity: (density: 'compact' | 'normal' | 'spacious') => void;
-  isSidePanelOpen: boolean;
-  onToggleSidePanel: () => void;
-  isBottomPanelOpen: boolean;
-  onToggleBottomPanel: () => void;
 }
 
 export const AssetSelector: React.FC<AssetSelectorProps> = ({
@@ -41,27 +33,19 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
   isConnected,
   onOpenAdvisor,
   onOpenQuantHealth,
-  onOpenClients,
   currentBalance,
   onUpdateBalance,
-  onResetData,
-  density,
-  onChangeDensity,
-  isSidePanelOpen,
-  onToggleSidePanel,
-  isBottomPanelOpen,
-  onToggleBottomPanel
+  onResetData
 }) => {
-  const [isEditingBalance, setIsEditingBalance] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [customBalanceInput, setCustomBalanceInput] = useState(currentBalance.toString());
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const handleSaveBalance = (e: React.FormEvent) => {
     e.preventDefault();
     const val = parseFloat(customBalanceInput);
     if (!isNaN(val) && val > 0) {
       onUpdateBalance(val);
-      setIsEditingBalance(false);
+      setIsSettingsOpen(false);
     }
   };
 
@@ -69,7 +53,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
     <header className="flex items-center justify-between px-3 md:px-4 py-2 bg-surface/95 border-b border-border/80 backdrop-blur-md select-none font-sans z-30 relative gap-3">
       {/* Left Section: Logo, Tenant & Asset Badges */}
       <div className="flex items-center space-x-3 md:space-x-4 min-w-0 flex-1">
-        {/* Logo */}
+        {/* Logo Institucional */}
         <div className="flex items-center space-x-2 shrink-0">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-accent to-purple-600 flex items-center justify-center font-bold text-white shadow-lg shadow-accent-glow text-sm">
             MF
@@ -80,7 +64,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
             </span>
             <div className="text-[9px] md:text-[10px] text-slate-400 font-mono flex items-center space-x-1">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>24/7 AUTONOMOUS</span>
+              <span>24/7 INSTITUCIONAL</span>
             </div>
           </div>
         </div>
@@ -90,47 +74,10 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
           <TenantSelector />
         </div>
 
-        {/* Dynamic Balance Control */}
-        <div className="flex items-center space-x-1.5 bg-background/80 px-2 py-1 rounded-lg border border-border/70 text-xs font-mono shrink-0">
+        {/* Saldo / Banca (Visual Limpo de Terminal Institucional) */}
+        <div className="flex items-center space-x-1.5 bg-background/80 px-2.5 py-1 rounded-lg border border-border/70 text-xs font-mono shrink-0">
           <span className="text-slate-400 text-[11px] hidden sm:inline">Banca:</span>
-          {isEditingBalance ? (
-            <form onSubmit={handleSaveBalance} className="flex items-center space-x-1">
-              <input
-                type="number"
-                value={customBalanceInput}
-                onChange={(e) => setCustomBalanceInput(e.target.value)}
-                className="w-16 sm:w-20 bg-surface border border-accent rounded px-1.5 py-0.5 text-white font-bold text-xs focus:outline-none"
-                autoFocus
-              />
-              <button type="submit" className="px-1.5 py-0.5 rounded bg-accent text-white font-bold text-[10px]">OK</button>
-              <button type="button" onClick={() => setIsEditingBalance(false)} className="px-1.5 py-0.5 rounded bg-surface text-slate-400 text-[10px]">X</button>
-            </form>
-          ) : (
-            <button
-              onClick={() => {
-                setCustomBalanceInput(currentBalance.toString());
-                setIsEditingBalance(true);
-              }}
-              title="Clique para editar a banca inicial"
-              className="font-bold text-white hover:text-accent transition-colors flex items-center space-x-1 text-xs"
-            >
-              <span>${currentBalance.toLocaleString()}</span>
-              <Edit3 className="w-2.5 h-2.5 text-slate-400" />
-            </button>
-          )}
-
-          <button
-            onClick={() => {
-              if (window.confirm('Deseja realmente zerar todo o histórico e reiniciar as métricas?')) {
-                onResetData();
-              }
-            }}
-            title="Zerar / Reiniciar dados de entrada"
-            className="text-[10px] text-slate-400 hover:text-rose-400 px-1 py-0.5 rounded hover:bg-surface border border-transparent hover:border-border transition-all flex items-center space-x-0.5"
-          >
-            <RefreshCw className="w-2.5 h-2.5 inline" />
-            <span className="hidden md:inline">Zerar</span>
-          </button>
+          <span className="font-bold text-white tracking-wide">${currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         </div>
 
         {/* Asset Badges (Scrollable Bar) */}
@@ -143,7 +90,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
               <button
                 key={asset.symbol}
                 onClick={() => onSelect(asset.symbol)}
-                className={`flex items-center space-x-1.5 px-2 py-1 rounded-md border text-[11px] font-mono whitespace-nowrap transition-all duration-150 shrink-0 ${
+                className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md border text-[11px] font-mono whitespace-nowrap transition-all duration-150 shrink-0 ${
                   isActive
                     ? 'bg-accent/20 border-accent text-white shadow-sm'
                     : 'bg-surface/50 border-border hover:bg-surface-hover text-slate-300'
@@ -161,150 +108,106 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
         </div>
       </div>
 
-      {/* Right Section: Workspace Toggles & Institutional Action Buttons */}
-      <div className="flex items-center space-x-1.5 md:space-x-2 shrink-0">
-        {/* Workspace Density Controls (Desktop) */}
-        <div className="hidden xl:flex items-center bg-background/80 p-0.5 rounded-lg border border-border/70 text-[10px] font-mono">
-          <button
-            onClick={() => onChangeDensity('compact')}
-            title="Densidade Compacta"
-            className={`px-2 py-0.5 rounded transition-all ${density === 'compact' ? 'bg-accent text-white font-bold' : 'text-slate-400 hover:text-white'}`}
-          >
-            Compacto
-          </button>
-          <button
-            onClick={() => onChangeDensity('normal')}
-            title="Densidade Normal"
-            className={`px-2 py-0.5 rounded transition-all ${density === 'normal' ? 'bg-accent text-white font-bold' : 'text-slate-400 hover:text-white'}`}
-          >
-            Normal
-          </button>
-          <button
-            onClick={() => onChangeDensity('spacious')}
-            title="Densidade Espaçosa"
-            className={`px-2 py-0.5 rounded transition-all ${density === 'spacious' ? 'bg-accent text-white font-bold' : 'text-slate-400 hover:text-white'}`}
-          >
-            Amplo
-          </button>
-        </div>
-
-        {/* Panel Collapse Toggles (Desktop) */}
-        <div className="hidden lg:flex items-center space-x-1 bg-background/80 p-1 rounded-lg border border-border/70 text-xs">
-          <button
-            onClick={onToggleBottomPanel}
-            title={isBottomPanelOpen ? "Recolher Painel Inferior (Sinais & Paper Trading)" : "Expandir Painel Inferior"}
-            className={`px-2 py-0.5 rounded text-[10px] font-mono transition-all flex items-center space-x-1 ${
-              isBottomPanelOpen ? 'bg-surface text-slate-300 hover:text-white' : 'bg-accent/20 text-accent border border-accent/40 font-bold'
-            }`}
-          >
-            <LayoutGrid className="w-3 h-3" />
-            <span>{isBottomPanelOpen ? 'Painel Inf.' : '+ Sinais/Paper'}</span>
-          </button>
-
-          <button
-            onClick={onToggleSidePanel}
-            title={isSidePanelOpen ? "Recolher Painel Lateral (DOM & Tape)" : "Expandir Painel Lateral"}
-            className={`px-2 py-0.5 rounded text-[10px] font-mono transition-all flex items-center space-x-1 ${
-              isSidePanelOpen ? 'bg-surface text-slate-300 hover:text-white' : 'bg-accent/20 text-accent border border-accent/40 font-bold'
-            }`}
-          >
-            <SlidersHorizontal className="w-3 h-3" />
-            <span>{isSidePanelOpen ? 'DOM/Tape' : '+ DOM/Tape'}</span>
-          </button>
-        </div>
-
-        {/* Action Buttons */}
-        <button
-          onClick={onOpenClients}
-          title="Gestão de Subcontas de Clientes com Trava TG e TL"
-          className="hidden md:flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 border border-teal-500/40 text-xs font-bold font-mono transition-all whitespace-nowrap"
-        >
-          <Shield className="w-3.5 h-3.5" />
-          <span>CLIENTES</span>
-        </button>
-
+      {/* Right Section: Action Buttons & Live Status */}
+      <div className="flex items-center space-x-2 shrink-0">
+        {/* Botão 7 BLOCOS */}
         <button
           onClick={onOpenQuantHealth}
-          title="Auditoria Matemática e Risco dos 7 Blocos"
-          className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/40 text-xs font-bold font-mono transition-all whitespace-nowrap"
+          title="Auditoria Quantitativa dos 7 Blocos de Risco"
+          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/40 text-xs font-bold font-mono transition-all whitespace-nowrap shadow-sm"
         >
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
           <span>7 BLOCOS</span>
         </button>
 
+        {/* Botão Consultor IA */}
         <button
           onClick={onOpenAdvisor}
-          title="Diálogo Estratégico com Consultor IA"
-          className="flex items-center space-x-1.5 px-3 py-1 rounded-lg bg-gradient-to-r from-accent to-purple-600 hover:from-accent/90 hover:to-purple-500 text-white text-xs font-bold font-mono shadow-md shadow-accent-glow transition-all whitespace-nowrap"
+          title="Consultor e Auditoria Estratégica IA"
+          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-accent to-purple-600 hover:from-accent/90 hover:to-purple-500 text-white text-xs font-bold font-mono shadow-md shadow-accent-glow transition-all whitespace-nowrap"
         >
           <Brain className="w-3.5 h-3.5" />
-          <span>CONSULTOR IA</span>
+          <span className="hidden sm:inline">CONSULTOR IA</span>
         </button>
 
         {/* Live WS Status */}
-        <div className="flex items-center space-x-1 px-2 py-1 rounded bg-surface border border-border text-[11px] font-mono shrink-0">
-          <Radio className={`w-3 h-3 ${isConnected ? 'text-emerald-400 animate-pulse' : 'text-rose-500'}`} />
-          <span className={`hidden sm:inline ${isConnected ? 'text-emerald-400' : 'text-rose-500'}`}>
-            {isConnected ? 'LIVE' : 'OFF'}
+        <div className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-surface border border-border text-[11px] font-mono shrink-0">
+          <Radio className={`w-3.5 h-3.5 ${isConnected ? 'text-emerald-400 animate-pulse' : 'text-rose-500'}`} />
+          <span className={`font-bold ${isConnected ? 'text-emerald-400' : 'text-rose-500'}`}>
+            {isConnected ? 'LIVE' : 'OFFLINE'}
           </span>
         </div>
 
-        {/* Mobile Menu Toggle Button */}
+        {/* Botão Discreto de Configurações Administrativas (⚙️) */}
         <button
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="p-1 rounded-lg bg-surface border border-border text-slate-300 md:hidden"
+          onClick={() => {
+            setCustomBalanceInput(currentBalance.toString());
+            setIsSettingsOpen(!isSettingsOpen);
+          }}
+          title="Configurações da Sessão do Terminal (Oculto na Live)"
+          className="p-1.5 rounded-lg bg-surface border border-border/80 text-slate-400 hover:text-white hover:bg-surface-hover transition-all"
         >
-          {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+          <Settings className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Mobile Drawer Menu */}
-      {mobileMenuOpen && (
-        <div className="absolute top-full left-0 right-0 bg-surface/95 border-b border-border/80 backdrop-blur-xl p-3 flex flex-col space-y-2.5 md:hidden shadow-2xl animate-fadeIn">
-          <div className="flex items-center justify-between pb-2 border-b border-border/50">
-            <TenantSelector />
-            <div className="flex items-center space-x-1 bg-background/80 p-0.5 rounded border border-border text-[10px]">
-              <button
-                onClick={() => onChangeDensity('compact')}
-                className={`px-2 py-0.5 rounded ${density === 'compact' ? 'bg-accent text-white font-bold' : 'text-slate-400'}`}
+      {/* Modal de Configurações Administrativas (Menu Oculto para Lives) */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-surface border border-border/80 rounded-2xl p-5 max-w-sm w-full space-y-4 shadow-2xl animate-in zoom-in-95 duration-150 font-mono">
+            <div className="flex items-center justify-between pb-3 border-b border-border/60">
+              <div className="flex items-center space-x-2 text-white">
+                <Settings className="w-4 h-4 text-accent" />
+                <span className="text-xs font-bold uppercase tracking-wider">Configurações da Sessão</span>
+              </div>
+              <button 
+                onClick={() => setIsSettingsOpen(false)}
+                className="text-slate-400 hover:text-white p-1"
               >
-                Compacto
-              </button>
-              <button
-                onClick={() => onChangeDensity('normal')}
-                className={`px-2 py-0.5 rounded ${density === 'normal' ? 'bg-accent text-white font-bold' : 'text-slate-400'}`}
-              >
-                Normal
+                <X className="w-4 h-4" />
               </button>
             </div>
-          </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => {
-                onOpenClients();
-                setMobileMenuOpen(false);
-              }}
-              className="flex items-center justify-center space-x-1.5 p-2 rounded-lg bg-teal-600/20 text-teal-300 border border-teal-500/40 text-xs font-bold font-mono"
-            >
-              <Shield className="w-3.5 h-3.5" />
-              <span>Clientes & Proteção</span>
-            </button>
+            {/* Ajuste de Banca */}
+            <form onSubmit={handleSaveBalance} className="space-y-2">
+              <label className="text-[11px] text-slate-300 font-bold block">Ajustar Saldo da Banca ($)</label>
+              <div className="flex space-x-2">
+                <input
+                  type="number"
+                  step="any"
+                  value={customBalanceInput}
+                  onChange={(e) => setCustomBalanceInput(e.target.value)}
+                  className="flex-1 bg-background border border-border rounded-xl px-3 py-2 text-white text-xs font-mono focus:outline-none focus:border-accent"
+                />
+                <button
+                  type="submit"
+                  className="px-3 py-2 rounded-xl bg-accent hover:bg-accent/80 text-white text-xs font-bold transition-all flex items-center space-x-1"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Salvar</span>
+                </button>
+              </div>
+            </form>
 
-            <button
-              onClick={() => {
-                onOpenQuantHealth();
-                setMobileMenuOpen(false);
-              }}
-              className="flex items-center justify-center space-x-1.5 p-2 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 text-xs font-bold font-mono"
-            >
-              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              <span>Saúde (7 Blocos)</span>
-            </button>
+            {/* Ação de Zerar / Resetar */}
+            <div className="pt-2 border-t border-border/50">
+              <label className="text-[11px] text-slate-400 block mb-1.5">Reiniciar Métricas e Histórico</label>
+              <button
+                onClick={() => {
+                  if (window.confirm('Deseja realmente zerar todo o histórico e reiniciar as métricas da sessão?')) {
+                    onResetData();
+                    setIsSettingsOpen(false);
+                  }
+                }}
+                className="w-full py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30 text-xs font-bold transition-all flex items-center justify-center space-x-1.5"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Zerar Histórico da Sessão</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
     </header>
   );
 };
-

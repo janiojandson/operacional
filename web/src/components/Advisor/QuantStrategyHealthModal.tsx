@@ -33,9 +33,18 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
   const fetchHealthReport = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/strategy/health-report');
-      const data = await res.json();
-      setReport(data);
+      const token = localStorage.getItem('mfp_token');
+      const res = await fetch('/api/strategy/health-report', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setReport(data);
+      } else {
+        console.error('Failed to fetch quant report, status:', res.status);
+      }
     } catch (e) {
       console.error('Failed to fetch quant report:', e);
     } finally {
