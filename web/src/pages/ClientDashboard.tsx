@@ -92,7 +92,7 @@ export default function ClientDashboard() {
   const [maxDailyProfit, setMaxDailyProfit] = useState(150);
   const [selectedPreset, setSelectedPreset] = useState<'conservative' | 'moderate' | 'aggressive' | 'custom'>('moderate');
 
-  const isPlanActive = user?.planActive !== false; // Lógica Freemium
+  const isPlanActive = account ? account.planActive !== false : user?.planActive !== false;
 
   const notify = (msg: string, type: 'success' | 'error' = 'success') => {
     setNotification({ msg, type });
@@ -305,6 +305,8 @@ export default function ClientDashboard() {
   const aggressiveNotional = ((activeBank * 0.02) / 0.01).toFixed(2);
   const aggressiveMargin = (Number(aggressiveNotional) / 15).toFixed(2);
 
+  const checkoutUrl = 'https://wa.me/?text=' + encodeURIComponent('Olá! Gostaria de ativar meu plano no Copy Trading Bybit.');
+
   return (
     <div className="min-h-screen bg-background text-slate-100 font-sans flex flex-col">
 
@@ -319,9 +321,9 @@ export default function ClientDashboard() {
       )}
 
       {/* Header */}
-      <header className="h-14 bg-surface/95 border-b border-border/60 backdrop-blur-md flex items-center px-6 shrink-0">
+      <header className="h-auto md:h-14 bg-surface/95 border-b border-border/60 backdrop-blur-md flex flex-wrap items-center px-4 md:px-6 py-2 md:py-0 shrink-0 gap-2 md:gap-0">
         <div className="flex items-center space-x-3 flex-1">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-accent to-violet-500 flex items-center justify-center shadow-lg shadow-accent/30">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-accent to-violet-500 flex items-center justify-center shadow-lg shadow-accent/30 shrink-0">
             <TrendingUp className="w-4 h-4 text-white" />
           </div>
           <div>
@@ -329,13 +331,13 @@ export default function ClientDashboard() {
             <span className="ml-2 text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
               {account?.bybitTestnet ? 'TESTNET' : 'MAINNET'}
             </span>
-            <span className={`ml-1.5 text-[10px] font-mono px-2 py-0.5 rounded border ${isPlanActive ? 'bg-accent/20 text-accent border-accent/30' : 'bg-amber-500/20 text-amber-400 border-amber-500/30'}`}>
+            <span className={`ml-1.5 text-[10px] font-mono px-2 py-0.5 rounded border ${isPlanActive ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border-amber-500/30'}`}>
               {isPlanActive ? 'PLANO ATIVO' : 'MODO VITRINE (LEITURA)'}
             </span>
           </div>
         </div>
 
-        <nav className="flex items-center space-x-1">
+        <nav className="flex items-center space-x-1 overflow-x-auto w-full md:w-auto py-1 md:py-0">
           {([
             { id: 'overview', icon: Activity, label: 'Visão Geral' },
             { id: 'api-keys', icon: Key, label: 'API Bybit' },
@@ -345,7 +347,7 @@ export default function ClientDashboard() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
                 activeTab === tab.id
                   ? 'bg-accent/20 text-accent border border-accent/30'
                   : 'text-slate-400 hover:text-white hover:bg-surface-hover'
@@ -357,15 +359,15 @@ export default function ClientDashboard() {
           ))}
         </nav>
 
-        <div className="flex items-center space-x-3 ml-4">
+        <div className="flex items-center space-x-3 ml-auto md:ml-4">
           <div className="flex items-center space-x-1.5">
             {account?.apiConnected
-              ? <><Wifi className="w-3.5 h-3.5 text-emerald-400" /><span className="text-xs text-emerald-400 font-mono">Bybit OK</span></>
-              : <><WifiOff className="w-3.5 h-3.5 text-rose-400" /><span className="text-xs text-rose-400 font-mono">Sem API</span></>
+              ? <><Wifi className="w-3.5 h-3.5 text-emerald-400" /><span className="text-xs text-emerald-400 font-mono hidden sm:inline">Bybit OK</span></>
+              : <><WifiOff className="w-3.5 h-3.5 text-rose-400" /><span className="text-xs text-rose-400 font-mono hidden sm:inline">Sem API</span></>
             }
           </div>
-          <span className="text-slate-600">|</span>
-          <span className="text-xs text-slate-400 font-mono">{user?.name || user?.email}</span>
+          <span className="text-slate-600 hidden sm:inline">|</span>
+          <span className="text-xs text-slate-400 font-mono truncate max-w-[120px]">{user?.name || user?.email}</span>
           <button onClick={logout} className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 transition-all">
             <LogOut className="w-4 h-4" />
           </button>
@@ -374,24 +376,24 @@ export default function ClientDashboard() {
 
       {/* Banner de Modo Vitrine (Inativos) */}
       {!isPlanActive && (
-        <div className="bg-gradient-to-r from-amber-950/80 via-surface to-amber-950/80 border-b border-amber-500/40 px-6 py-2.5 flex items-center justify-between">
+        <div className="bg-gradient-to-r from-amber-950/80 via-surface to-amber-950/80 border-b border-amber-500/40 px-4 md:px-6 py-2.5 flex flex-col sm:flex-row items-center justify-between gap-2">
           <div className="flex items-center space-x-2 text-xs font-mono text-amber-300">
             <Lock className="w-4 h-4 text-amber-400 shrink-0" />
             <span><strong>Modo Vitrine Ativo:</strong> Seu painel está em modo Somente Leitura. O Simulador de Risco e a visualização de resultados estão liberados.</span>
           </div>
           <a
-            href="https://wa.me"
+            href={checkoutUrl}
             target="_blank"
             rel="noreferrer"
-            className="px-3 py-1 rounded-lg bg-amber-500 text-slate-950 text-xs font-bold font-mono hover:bg-amber-400 transition-all flex items-center space-x-1"
+            className="px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 text-xs font-bold font-mono hover:bg-amber-400 transition-all flex items-center space-x-1 shrink-0"
           >
-            <span>Assinar Plano</span>
+            <span>Assinar Plano via WhatsApp</span>
             <ExternalLink className="w-3 h-3" />
           </a>
         </div>
       )}
 
-      <main className="flex-1 overflow-auto p-6 max-w-6xl mx-auto w-full">
+      <main className="flex-1 overflow-y-auto p-4 md:p-6 max-w-6xl mx-auto w-full pb-16">
 
         {/* 📢 Avisos em Tela / Banners do Administrador */}
         {announcements.length > 0 && (
@@ -435,14 +437,14 @@ export default function ClientDashboard() {
         {/* ── VISÃO GERAL ── */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-xl font-bold text-white">Minha Conta — Bybit</h2>
                 <p className="text-xs text-slate-400 mt-0.5">Visão consolidada do saldo, posições abertas e réplica do Master Quant.</p>
               </div>
 
               {/* Botões de Controle: Sincronização & Pânico */}
-              <div className="flex items-center space-x-3">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={handleToggleSync}
                   disabled={syncLoading}
@@ -485,6 +487,7 @@ export default function ClientDashboard() {
                 </button>
               </div>
             </div>
+
 
             {!account?.hasApiKeys && (
               <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start space-x-4 text-sm">

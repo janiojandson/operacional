@@ -79,6 +79,12 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
     }
   }
 
+  let userPlanActive = true;
+  if (config.user_id) {
+    const u = await UserDB.findById(config.user_id);
+    if (u) userPlanActive = Number(u.plan_active) === 1 && Number(u.is_active) === 1;
+  }
+
   res.json({
     clientId,
     balance: bybitAccount?.walletBalance ?? Number(config.balance),
@@ -91,6 +97,7 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
     maxDailyProfitUsd: Number(config.max_daily_profit_usd),
     maxOpenPositions: Number(config.max_open_positions),
     isActive: Number(config.is_active) === 1,
+    planActive: userPlanActive,
     syncEnabled: Number(config.sync_enabled) === 1,
     apiConnected: Number(config.api_connected) === 1,
     bybitTestnet: Number(config.bybit_testnet) === 1,
@@ -100,6 +107,7 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
     planExpiresAt: config.plan_expires_at ? Number(config.plan_expires_at) : null
   });
 });
+
 
 // POST /api/client/sync-toggle — Ligar ou Desligar Sincronização (com Pânico ao Desligar)
 clientRouter.post('/sync-toggle', async (req: Request, res: Response) => {

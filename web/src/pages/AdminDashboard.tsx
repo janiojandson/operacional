@@ -606,13 +606,27 @@ export default function AdminDashboard() {
                                 <Edit3 className="w-4 h-4" />
                               </button>
 
-                              {/* Botão Bloquear / Desbloquear */}
+                              {/* Botão Ativar / Desativar Cliente (Verde ativa / Vermelho desativa) */}
                               <button
-                                onClick={() => handleKillSwitch(c.clientId!, !c.config?.isActive)}
-                                title={c.config?.isActive ? 'Bloquear Cliente' : 'Desbloquear Cliente'}
-                                className={`p-1.5 rounded-lg transition-all ${c.config?.isActive ? 'text-emerald-400 hover:bg-rose-500/20 hover:text-rose-400' : 'text-rose-400 hover:bg-emerald-500/20 hover:text-emerald-400'}`}
+                                onClick={() => handleKillSwitch(c.clientId!, !(c.isActive && c.planActive))}
+                                title={c.isActive && c.planActive ? 'Cliente Ativo — Clique para Desativar' : 'Cliente Inativo — Clique para Ativar'}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold font-mono transition-all flex items-center space-x-1 ${
+                                  c.isActive && c.planActive
+                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-rose-500/20 hover:text-rose-400 hover:border-rose-500/40'
+                                    : 'bg-rose-500/20 text-rose-400 border border-rose-500/40 hover:bg-emerald-500/20 hover:text-emerald-400 hover:border-emerald-500/40'
+                                }`}
                               >
-                                {c.config?.isActive ? <Power className="w-4 h-4" /> : <PowerOff className="w-4 h-4" />}
+                                {c.isActive && c.planActive ? (
+                                  <>
+                                    <Power className="w-3.5 h-3.5" />
+                                    <span>Ativo</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <PowerOff className="w-3.5 h-3.5" />
+                                    <span>Desativado</span>
+                                  </>
+                                )}
                               </button>
 
                               {/* Botão Forçar Desconexão (Pânico Bybit) */}
@@ -620,7 +634,7 @@ export default function AdminDashboard() {
                                 <button
                                   onClick={() => handleForceDisconnect(c.clientId!, c.name || c.email)}
                                   title="Forçar Desconexão (Zerar Posições na Bybit)"
-                                  className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/20 transition-all"
+                                  className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/20 border border-rose-500/30 transition-all"
                                 >
                                   <AlertOctagon className="w-4 h-4" />
                                 </button>
@@ -636,6 +650,7 @@ export default function AdminDashboard() {
             </div>
           </div>
         )}
+
 
         {/* ── RELATÓRIOS ── */}
         {activeTab === 'reports' && (

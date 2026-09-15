@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { requireAdmin } from '../auth/authMiddleware.js';
-import { UserDB, ClientConfigDB, TradeHistoryDB, AnnouncementDB } from '../database/db.js';
+import { UserDB, ClientConfigDB, TradeHistoryDB, AnnouncementDB, query } from '../database/db.js';
 import { BybitExecutionEngine } from '../engine/bybitExecutionEngine.js';
+
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
@@ -144,13 +145,23 @@ adminRouter.post('/clients/:clientId/plan', async (req: Request, res: Response) 
   res.json({ success: true, clientId, planType: planType || current.plan_type, planExpiresAt: expiresAt });
 });
 
-// POST /api/admin/clients/:clientId/kill-switch — ativar/bloquear cliente
+// POST /api/admin/clients/:clientId/kill-switch — ativar/bloquear cliente (atualiza is_active e plan_active)
 adminRouter.post('/clients/:clientId/kill-switch', async (req: Request, res: Response) => {
   const { clientId } = req.params;
   const { active } = req.body;
-  await ClientConfigDB.setActive(clientId, active !== false);
-  res.json({ success: true, clientId, active: active !== false });
+  const isActive = active !== false;
+
+  await ClientConfigDB.setActive(clientId, isActive);
+
+  const user = await UserDB.findByClientId(clientId);
+  if (user) {
+    await UserDB.setPlanActive(user.id, isActive);
+    await query('UPDATE app_users SET is_active = $1 WHERE id = $2', [isActive ? 1 : 0, user.id]);
+  }
+
+  res.json({ success: true, clientId, active: isActive });
 });
+
 
 // GET /api/admin/announcements — listar anúncios do sistema
 adminRouter.get('/announcements', async (_req: Request, res: Response) => {
