@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { authFetch } from '../contexts/AuthContext';
 import { 
   X, 
   Terminal, 
@@ -28,7 +29,7 @@ export const ShadowAuditModal: React.FC<ShadowAuditModalProps> = ({ isOpen, onCl
   const fetchLogs = async () => {
     try {
       setIsLoading(true);
-      const res = await fetch('/api/audit-logs');
+      const res = await authFetch('/api/audit-logs');
       if (res.ok) {
         const data = await res.json();
         setLogsText(data.logs || 'Sem logs disponíveis no momento.');

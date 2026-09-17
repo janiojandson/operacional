@@ -343,8 +343,8 @@ app.get('/api/strategy/health-report', requireAuth, (req, res) => {
   res.json(report);
 });
 
-// ─── Shadow Mode Auditoria Logs (Restrito a Admin) ──────────────────────────
-app.get('/api/audit-logs', requireAdmin, async (req, res) => {
+// ─── Shadow Mode Auditoria Logs ──────────────────────────────────────────
+app.get('/api/audit-logs', requireAuth, async (req, res) => {
   try {
     const logPath1 = path.resolve(process.cwd(), 'audit_shadow_mode.log');
     const logPath2 = path.resolve(rootDir, 'audit_shadow_mode.log');
