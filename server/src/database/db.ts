@@ -336,13 +336,20 @@ export const OtpDB = {
 
   findValid: (email: string, otpCode: string) =>
     queryOne<OtpRow>(
-      `SELECT * FROM password_reset_otps WHERE email = $1 AND otp_code = $2 AND used = 0 AND expires_at > EXTRACT(EPOCH FROM NOW()) * 1000 ORDER BY created_at DESC LIMIT 1`,
+      `SELECT * FROM password_reset_otps WHERE LOWER(email) = LOWER($1) AND otp_code = $2 AND used = 0 AND expires_at > EXTRACT(EPOCH FROM NOW()) * 1000 ORDER BY created_at DESC LIMIT 1`,
       [email, otpCode]
+    ),
+
+  findByCode: (otpCode: string) =>
+    queryOne<OtpRow>(
+      `SELECT * FROM password_reset_otps WHERE otp_code = $1 AND used = 0 AND expires_at > EXTRACT(EPOCH FROM NOW()) * 1000 ORDER BY created_at DESC LIMIT 1`,
+      [otpCode]
     ),
 
   markUsed: (id: string) =>
     query(`UPDATE password_reset_otps SET used = 1 WHERE id = $1`, [id])
 };
+
 
 // ─── Funções de Acesso — ClientConfigDB ───────────────────────────────────
 
@@ -488,12 +495,12 @@ export const AnnouncementDB = {
 // ─── Funções de Acesso — TradeHistoryDB ───────────────────────────────────
 
 export const TradeHistoryDB = {
-  insert: async (trade: Omit<TradeHistoryRow, 'close_price' | 'pnl_usd' | 'close_time'> & { bybitOrderId?: string }) => {
+  insert: async (trade: Omit<TradeHistoryRow, 'close_price' | 'pnl_usd' | 'close_time' | 'bybit_order_id'> & { bybitOrderId?: string; bybit_order_id?: string | null }) => {
     await query(
       `INSERT INTO trade_history (id, client_id, symbol, side, entry_price, qty, notional_usd, leverage, status, signal_reason, bybit_order_id, entry_time)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        ON CONFLICT (id) DO NOTHING`,
-      [trade.id, trade.client_id, trade.symbol, trade.side, trade.entry_price, trade.qty, trade.notional_usd, trade.leverage || null, trade.status, trade.signal_reason || null, trade.bybitOrderId || null, trade.entry_time]
+      [trade.id, trade.client_id, trade.symbol, trade.side, trade.entry_price, trade.qty, trade.notional_usd, trade.leverage || null, trade.status, trade.signal_reason || null, trade.bybitOrderId || trade.bybit_order_id || null, trade.entry_time]
     );
   },
 

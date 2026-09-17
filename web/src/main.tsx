@@ -9,7 +9,7 @@ import './index.css';
 
 // ─── Rotas Protegidas ─────────────────────────────────────────────────────
 
-function RequireAuth({ children, role }: { children: JSX.Element; role?: 'ADMIN' | 'CLIENT' }) {
+function RequireAuth({ children, role }: { children: React.ReactElement; role?: 'ADMIN' | 'CLIENT' }) {
   const { user, isLoading } = useAuth();
 
   if (isLoading) {

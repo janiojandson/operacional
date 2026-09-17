@@ -150,7 +150,7 @@ authRouter.post('/signup', async (req: Request, res: Response) => {
 
     // Disparar mensagem de Onboarding Anti-Spam via Railway Comunicação
     try {
-      await ComunicacaoService.sendOnboardingMessage(cleanPhone, name.trim());
+      await ComunicacaoService.sendOnboardingMessage(name.trim(), cleanPhone);
     } catch (err: any) {
       console.error('[Signup] Erro ao disparar mensagem de onboarding WhatsApp:', err.message);
     }
@@ -209,8 +209,15 @@ authRouter.post('/forgot-password', async (req: Request, res: Response) => {
   // Gerar OTP de 6 dígitos (100000 - 999999)
   const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
   const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutos
+  const otpId = `otp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-  await OtpDB.create(user.id, otpCode, expiresAt);
+  await OtpDB.create({
+    id: otpId,
+    email: user.email,
+    phone: user.whatsapp,
+    otpCode,
+    expiresAt
+  });
 
   // Enviar código OTP via WhatsApp
   const sent = await ComunicacaoService.sendOtpMessage(user.whatsapp, otpCode);
@@ -243,14 +250,29 @@ authRouter.post('/reset-password-otp', async (req: Request, res: Response) => {
   }
 
   const cleanOtp = String(otp).trim();
-  const validOtp = await OtpDB.verify(cleanOtp);
+  let validOtp = null;
+  if (identifier) {
+    const cleanIdent = String(identifier).trim().toLowerCase();
+    const user = (await UserDB.findByEmail(cleanIdent)) || (await UserDB.findByWhatsApp(cleanIdent.replace(/\D/g, '')));
+    if (user) {
+      validOtp = await OtpDB.findValid(user.email, cleanOtp);
+    }
+  }
+  if (!validOtp) {
+    validOtp = await OtpDB.findByCode(cleanOtp);
+  }
 
   if (!validOtp) {
     return res.status(400).json({ error: 'Código de verificação inválido ou expirado (válido por 10 min).' });
   }
 
+  const user = await UserDB.findByEmail(validOtp.email);
+  if (!user) {
+    return res.status(404).json({ error: 'Usuário associado a este código não foi localizado.' });
+  }
+
   const hash = await bcrypt.hash(newPassword, 12);
-  await query('UPDATE app_users SET password_hash = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $2', [hash, validOtp.user_id]);
+  await UserDB.updatePassword(user.id, hash);
   await OtpDB.markUsed(validOtp.id);
 
   res.json({

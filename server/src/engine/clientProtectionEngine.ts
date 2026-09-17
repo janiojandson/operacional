@@ -44,8 +44,33 @@ export class ClientProtectionEngine {
     ]
   ]);
 
-  public static async sendWhatsAppAlert(phone: string, message: string): Promise<boolean> {
-    if (!phone) return false;
+  public static async sendWhatsAppAlert(
+    phoneOrParams: string | { phone?: string; clientName?: string; messageType?: string; currentBalance?: number; initialBalance?: number; dailyPnl?: number; reason?: string },
+    messageText?: string
+  ): Promise<boolean> {
+    let phone = '';
+    let message = '';
+
+    if (typeof phoneOrParams === 'string') {
+      phone = phoneOrParams;
+      message = messageText || '';
+    } else if (typeof phoneOrParams === 'object' && phoneOrParams !== null) {
+      phone = phoneOrParams.phone || '';
+      if (messageText) {
+        message = messageText;
+      } else {
+        const p = phoneOrParams;
+        message = `🛡️ *MarketFlow Pro — Relatório de Proteção*\n\n` +
+          `👤 *Cliente:* ${p.clientName || 'Cliente'}\n` +
+          `📊 *Tipo:* ${p.messageType || 'RESUMO'}\n` +
+          `💰 *Saldo Atual:* $${Number(p.currentBalance || 0).toFixed(2)}\n` +
+          `📈 *P&L do Dia:* ${Number(p.dailyPnl || 0) >= 0 ? '+' : ''}$${Number(p.dailyPnl || 0).toFixed(2)}\n` +
+          (p.reason ? `ℹ️ *Detalhes:* ${p.reason}\n` : '') +
+          `\n_MarketFlow Pro 24/7 Engine_`;
+      }
+    }
+
+    if (!phone || !message) return false;
     const cleanPhone = phone.replace(/\D/g, '');
     const to = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
 

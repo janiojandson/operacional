@@ -1,5 +1,8 @@
-import { ClientAccountConfig, ClientTradeLog } from '../../shared/clientTypes';
-import { SimulatedTrade } from '../../shared/paperTypes';
+import { ClientAccountConfig, ClientTradeLog } from '../../shared/clientTypes.js';
+import { SimulatedTrade } from '../../shared/paperTypes.js';
+import { ClientConfigDB } from '../database/db.js';
+import { BybitExecutionEngine } from './bybitExecutionEngine.js';
+import { ComunicacaoService } from '../services/comunicacaoService.js';
 
 export class ClientCopyTraderEngine {
   private clients: Map<string, ClientAccountConfig> = new Map();
@@ -40,7 +43,8 @@ export class ClientCopyTraderEngine {
   }
 
   // Replica a ordem disparada pela estratégia protegendo os limites de risco
-  public replicateTrade(trade: SimulatedTrade, powerMultiplier = 1.0) {
+  public async replicateTrade(trade: SimulatedTrade, powerMultiplier = 1.0) {
+    // 1. Execução para clientes em memória / demonstração
     for (const client of this.clients.values()) {
       if (!client.isActive) continue;
 
@@ -93,37 +97,89 @@ export class ClientCopyTraderEngine {
         costUsd: orderCost,
         status: 'EXECUTED',
         executedAt: Date.now(),
-        reason: `🚀 Ordem Replicada via API ${client.exchange} (${finalMultiplier}x Potência | $${orderCost} alocado)`
+        reason: `🚀 Ordem Replicada (Simulação / Demo | ${finalMultiplier}x Potência | $${orderCost} alocado)`
       });
 
-      // Notificar via Comunicacao Hub se configurado
-      this.sendWhatsAppNotification(client, trade, orderCost);
+      // Notificar via Comunicacao Service se configurado
+      if (client.notificationPhone) {
+        const msg = `🚨 *MarketFlow Pro — Alerta de Execução*\n\nPar: *${trade.symbol}*\nTipo: *${trade.type}*\nPreço: *$${trade.entryPrice.toLocaleString()}*\nAlocação: *$${orderCost.toLocaleString()}*\nMotivo: ${trade.signalReason}`;
+        ComunicacaoService.sendWhatsApp({ to: client.notificationPhone, message: msg }).catch(() => {});
+      }
     }
-  }
 
-  private async sendWhatsAppNotification(client: ClientAccountConfig, trade: SimulatedTrade, orderCost: number) {
-    const comunicacaoUrl = process.env.COMUNICACAO_API_URL || 'https://comunicacao-hub-production.up.railway.app/api';
-    const secretKey = process.env.API_SECRET_KEY || 'nexus_secret_hub_2026_x89a';
-
-    if (!client.notificationPhone) return;
-
+    // 2. Execução REAL para clientes cadastrados no Banco de Dados com sincronização ativada
     try {
-      const message = `🚨 *MarketFlow Pro — Alerta de Execução*\n\nPar: *${trade.symbol}*\nTipo: *${trade.type}*\nPreço: *$${trade.entryPrice.toLocaleString()}*\nAlocação: *$${orderCost.toLocaleString()}*\nMotivo: ${trade.signalReason}`;
-      
-      await fetch(`${comunicacaoUrl}/messages/send`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': secretKey
-        },
-        body: JSON.stringify({
-          instance: 'financas',
-          to: client.notificationPhone,
-          message
-        })
-      }).catch(() => {});
-    } catch (e) {
-      // Background notify resilience
+      const realConfigs = await ClientConfigDB.listAll();
+      const now = Date.now();
+      const eligibleClients = realConfigs.filter(c => {
+        const isExp = c.plan_expires_at ? Number(c.plan_expires_at) < now : false;
+        const isVitrine = c.plan_type === 'VITRINE';
+        return (
+          Number(c.is_active) === 1 &&
+          Number(c.sync_enabled) === 1 &&
+          Number(c.api_connected) === 1 &&
+          Number(c.plan_active) === 1 &&
+          !isExp &&
+          !isVitrine &&
+          Boolean(c.bybit_api_key_enc)
+        );
+      });
+
+      if (eligibleClients.length > 0) {
+        console.log(`[CopyTrader] 📡 Disparando ordem real para ${eligibleClients.length} cliente(s) ativo(s)...`);
+
+        await Promise.allSettled(
+          eligibleClients.map(async (cfg) => {
+            try {
+              const execRes = await BybitExecutionEngine.executeCopyTrade(cfg.client_id, {
+                symbol: trade.symbol,
+                side: trade.type === 'BUY' ? 'BUY' : 'SELL',
+                entryPrice: trade.entryPrice,
+                stopLoss: trade.stopLoss,
+                takeProfit: trade.takeProfit,
+                signalReason: trade.signalReason
+              });
+
+              if (execRes.success) {
+                this.emitLog({
+                  id: `exec-real-${Date.now()}-${cfg.client_id}`,
+                  clientId: cfg.client_id,
+                  symbol: trade.symbol,
+                  side: trade.type,
+                  price: trade.entryPrice,
+                  amount: execRes.sizing?.qty || 0,
+                  costUsd: execRes.sizing?.notionalUsd || 0,
+                  status: 'EXECUTED',
+                  executedAt: Date.now(),
+                  reason: `✅ Ordem Real Executada Bybit (Order: ${execRes.orderId || 'OK'} | Qty: ${execRes.sizing?.qty})`
+                });
+
+                if (cfg.notification_phone) {
+                  const msg = `⚡ *MarketFlow Pro — Ordem Real Executada*\n\nPar: *${trade.symbol}*\nTipo: *${trade.type}*\nPreço: *$${trade.entryPrice.toLocaleString()}*\nVolume: *$${execRes.sizing?.notionalUsd}*\nAlavancagem: *${execRes.sizing?.leverage}x*\nOrdem Bybit: \`${execRes.orderId}\``;
+                  ComunicacaoService.sendWhatsApp({ to: cfg.notification_phone, message: msg }).catch(() => {});
+                }
+              } else {
+                this.emitLog({
+                  id: `err-real-${Date.now()}-${cfg.client_id}`,
+                  clientId: cfg.client_id,
+                  symbol: trade.symbol,
+                  side: trade.type,
+                  price: trade.entryPrice,
+                  amount: 0,
+                  costUsd: 0,
+                  status: 'BLOCKED_RISK_LIMIT',
+                  executedAt: Date.now(),
+                  reason: `⚠️ Falha ao executar na Bybit: ${execRes.error}`
+                });
+              }
+            } catch (err: any) {
+              console.error(`[CopyTrader] Erro ao executar para cliente real ${cfg.client_id}:`, err.message);
+            }
+          })
+        );
+      }
+    } catch (dbErr: any) {
+      console.error('[CopyTrader] Erro ao buscar clientes reais do banco:', dbErr.message);
     }
   }
 
@@ -135,3 +191,4 @@ export class ClientCopyTraderEngine {
     }
   }
 }
+

@@ -57,7 +57,7 @@ function toBybitLinear(symbol: string): string {
 /**
  * Cria instância CCXT Bybit para o cliente
  */
-function createBybitClient(apiKey: string, apiSecret: string, testnet: boolean): ccxt.bybit {
+function createBybitClient(apiKey: string, apiSecret: string, testnet: boolean): any {
   const exchange = new ccxt.bybit({
     apiKey,
     secret: apiSecret,

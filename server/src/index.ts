@@ -18,14 +18,14 @@ import { QuantStrategyEngine } from './engine/quantStrategyEngine.js';
 import { ClientCopyTraderEngine } from './engine/clientCopyTraderEngine.js';
 import { AutonomousPairScanner } from './engine/autonomousPairScanner.js';
 import { ClientProtectionEngine } from './engine/clientProtectionEngine.js';
-import { FlowSignal, OrderBookData } from '../../shared/types.js';
+import { FlowSignal, OrderBookData, CandleData } from '../../shared/types.js';
 import { ClientAccountConfig } from '../../shared/clientTypes.js';
 // SaaS: Autenticação e Rotas
 import { authRouter } from './auth/authRoutes.js';
 import { adminRouter } from './routes/adminRoutes.js';
 import { clientRouter } from './routes/clientRoutes.js';
-import { requireAuth } from './auth/authMiddleware.js';
-import { initDatabase } from './database/db.js';
+import { requireAuth, requireAdmin, verifyToken } from './auth/authMiddleware.js';
+import { initDatabase, UserDB } from './database/db.js';
 
 dotenv.config();
 
@@ -131,7 +131,10 @@ const broadcast = (event: string, data: any) => {
 // ─── Engines de Trading ───────────────────────────────────────────────────
 
 const clientCopyTrader = new ClientCopyTraderEngine((log) => {
-  io.emit('client_trade_log', log);
+  io.to('admin_room').emit('client_trade_log', log);
+  if (log.clientId) {
+    io.to(`client_${log.clientId}`).emit('client_trade_log', log);
+  }
 });
 
 const paperTrading = new PaperTradingEngine((account, tradeEvent) => {
@@ -140,7 +143,9 @@ const paperTrading = new PaperTradingEngine((account, tradeEvent) => {
     io.emit('simulated_trade_event', tradeEvent);
     const pairConfig = AutoPairSelectorEngine.getPairConfig(tradeEvent.symbol);
     const power = pairConfig?.powerMultiplier || 1.0;
-    clientCopyTrader.replicateTrade(tradeEvent, power);
+    clientCopyTrader.replicateTrade(tradeEvent, power).catch((err) => {
+      console.error('[PaperTradingEngine] Erro ao replicar trade nos clientes:', err.message);
+    });
   }
   recalculateAllPairs();
 });
@@ -217,7 +222,7 @@ app.post('/api/clients', requireAuth, (req, res) => {
 });
 
 app.post('/api/pairs/:symbol/toggle', requireAuth, (req, res) => {
-  const symbol = decodeURIComponent(req.params.symbol);
+  const symbol = decodeURIComponent(String(req.params.symbol));
   const active = req.body.active;
   AutoPairSelectorEngine.toggleManualOverride(symbol, active);
   const { dynamicPairs } = recalculateAllPairs();
@@ -266,7 +271,7 @@ app.get('/api/autonomous-pairs', requireAuth, (req, res) => {
 });
 
 app.post('/api/autonomous-pairs/:symbol/toggle', requireAuth, (req, res) => {
-  const symbol = decodeURIComponent(req.params.symbol);
+  const symbol = decodeURIComponent(String(req.params.symbol));
   const { active } = req.body;
   const updated = AutonomousPairScanner.togglePairManual(symbol, active);
   io.emit('autonomous_pairs_update', AutonomousPairScanner.getAllPairs());
@@ -284,13 +289,13 @@ app.post('/api/client-protection', requireAuth, (req, res) => {
 });
 
 app.delete('/api/client-protection/:id', requireAuth, (req, res) => {
-  const success = ClientProtectionEngine.deleteClient(req.params.id);
+  const success = ClientProtectionEngine.deleteClient(String(req.params.id));
   io.emit('client_protection_update', ClientProtectionEngine.getAllClients());
   res.json({ success });
 });
 
 app.post('/api/client-protection/:id/unlock', requireAuth, (req, res) => {
-  const client = ClientProtectionEngine.unlockClient(req.params.id);
+  const client = ClientProtectionEngine.unlockClient(String(req.params.id));
   io.emit('client_protection_update', ClientProtectionEngine.getAllClients());
   res.json(client);
 });
@@ -310,7 +315,7 @@ app.post('/api/client-protection/send-alert', requireAuth, async (req, res) => {
 });
 
 app.get('/api/assets/:symbol/pressure', requireAuth, (req, res) => {
-  const symbol = decodeURIComponent(req.params.symbol);
+  const symbol = decodeURIComponent(String(req.params.symbol));
   const state = marketManager.getSymbolState(symbol);
   if (!state) return res.status(404).json({ error: 'Ativo não encontrado' });
 
@@ -338,8 +343,8 @@ app.get('/api/strategy/health-report', requireAuth, (req, res) => {
   res.json(report);
 });
 
-// ─── Shadow Mode Auditoria Logs ──────────────────────────────────────────
-app.get('/api/audit-logs', async (req, res) => {
+// ─── Shadow Mode Auditoria Logs (Restrito a Admin) ──────────────────────────
+app.get('/api/audit-logs', requireAdmin, async (req, res) => {
   try {
     const logPath1 = path.resolve(process.cwd(), 'audit_shadow_mode.log');
     const logPath2 = path.resolve(rootDir, 'audit_shadow_mode.log');
@@ -393,7 +398,7 @@ app.post('/api/ai-advisor/chat', requireAuth, async (req, res) => {
 });
 
 app.get('/api/assets/:symbol/state', requireAuth, (req, res) => {
-  const symbol = decodeURIComponent(req.params.symbol);
+  const symbol = decodeURIComponent(String(req.params.symbol));
   const state = marketManager.getSymbolState(symbol);
   if (!state) {
     return res.status(404).json({ error: 'Asset not found' });
@@ -422,7 +427,7 @@ app.get('/api/assets/:symbol/state', requireAuth, (req, res) => {
 });
 
 app.get('/api/assets/:symbol/klines', requireAuth, (req, res) => {
-  const symbol = decodeURIComponent(req.params.symbol);
+  const symbol = decodeURIComponent(String(req.params.symbol));
   const tf = (req.query.tf as string) || '1m';
   const state = marketManager.getSymbolState(symbol);
   if (!state) {
@@ -490,17 +495,42 @@ app.get('*', (req, res) => {
 });
 
 // ─── WebSocket Connection Handling ────────────────────────────────────────
+io.use((socket, next) => {
+  const token = (socket.handshake.auth?.token as string)
+    || (socket.handshake.headers?.authorization?.startsWith('Bearer ') ? socket.handshake.headers.authorization.split(' ')[1] : undefined);
+  
+  if (token) {
+    try {
+      const payload = verifyToken(token);
+      (socket as any).user = payload;
+    } catch {
+      // Token expirado ou inválido: conecta apenas como convidado de dados de mercado públicos
+    }
+  }
+  next();
+});
+
 io.on('connection', (socket) => {
+  const user = (socket as any).user;
   const { pairStats, dynamicPairs } = recalculateAllPairs();
+
+  // Enviar estado inicial: dados de mercado sempre; dados de clientes APENAS se for ADMIN autenticado
   socket.emit('initial_state', {
     assets: marketManager.getSummaries(),
     signals: flowEngine.getRecentSignals(),
     paperAccount: paperTrading.getAccountState(),
     pairStats,
     dynamicPairs,
-    clients: clientCopyTrader.getClients(),
-    clientLogs: clientCopyTrader.getLogs()
+    clients: user?.role === 'ADMIN' ? clientCopyTrader.getClients() : [],
+    clientLogs: user?.role === 'ADMIN' ? clientCopyTrader.getLogs() : []
   });
+
+  // Inscrever em salas específicas por permissão
+  if (user?.role === 'ADMIN') {
+    socket.join('admin_room');
+  } else if (user?.clientId) {
+    socket.join(`client_${user.clientId}`);
+  }
 });
 
 // Inicializar banco de dados ANTES de iniciar o servidor

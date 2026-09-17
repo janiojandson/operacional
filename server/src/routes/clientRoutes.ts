@@ -3,6 +3,7 @@ import { requireClient } from '../auth/authMiddleware.js';
 import { UserDB, ClientConfigDB, TradeHistoryDB } from '../database/db.js';
 import { encrypt } from '../utils/crypto.js';
 import { BybitExecutionEngine } from '../engine/bybitExecutionEngine.js';
+import { sanitizeCsvField, escapeHtml } from '../utils/sanitizer.js';
 
 export const clientRouter = Router();
 clientRouter.use(requireClient);
@@ -217,16 +218,16 @@ clientRouter.get('/history/download', async (req: Request, res: Response) => {
   if (format === 'excel' || format === 'xlsx') {
     const tableRows = trades.map(t => `
       <tr>
-        <td style="text-align: left; font-weight: bold;">${t.symbol}</td>
-        <td style="text-align: center; color: ${t.side === 'BUY' ? '#10b981' : '#f43f5e'}; font-weight: bold;">${t.side}</td>
+        <td style="text-align: left; font-weight: bold;">${escapeHtml(t.symbol)}</td>
+        <td style="text-align: center; color: ${t.side === 'BUY' ? '#10b981' : '#f43f5e'}; font-weight: bold;">${escapeHtml(t.side)}</td>
         <td style="text-align: right;">$${Number(t.entry_price).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
         <td style="text-align: right;">${t.close_price ? '$' + Number(t.close_price).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}</td>
         <td style="text-align: right;">${t.qty}</td>
         <td style="text-align: right;">$${Number(t.notional_usd).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
         <td style="text-align: right; font-weight: bold; color: ${(t.pnl_usd ?? 0) >= 0 ? '#10b981' : '#f43f5e'};">${t.pnl_usd != null ? (t.pnl_usd >= 0 ? '+' : '') + '$' + Number(t.pnl_usd).toFixed(2) : '—'}</td>
         <td style="text-align: center;">${t.leverage ? t.leverage + 'x' : '—'}</td>
-        <td style="text-align: center;">${t.status}</td>
-        <td style="text-align: left;">${t.signal_reason || 'Manual / Estratégia Quant'}</td>
+        <td style="text-align: center;">${escapeHtml(t.status)}</td>
+        <td style="text-align: left;">${escapeHtml(t.signal_reason || 'Manual / Estratégia Quant')}</td>
         <td style="text-align: center;">${formatDate(t.entry_time)}</td>
         <td style="text-align: center;">${formatDate(t.close_time)}</td>
       </tr>
@@ -243,7 +244,7 @@ clientRouter.get('/history/download', async (req: Request, res: Response) => {
       </head>
       <body>
         <h2 style="font-family: Arial; color: #312e81;">MarketFlow Pro — Relatório de Operações</h2>
-        <p style="font-family: Arial; font-size: 10pt; color: #64748b;">Cliente: <b>${clientId}</b> | Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+        <p style="font-family: Arial; font-size: 10pt; color: #64748b;">Cliente: <b>${escapeHtml(clientId)}</b> | Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
         <table border="1">
           <thead>
             <tr>
@@ -274,14 +275,24 @@ clientRouter.get('/history/download', async (req: Request, res: Response) => {
     return res.send(excelHtml);
   }
 
-  // Fallback CSV
+  // Fallback CSV com sanitização contra CSV Injection
   const headers = ['id', 'symbol', 'side', 'entry_price', 'close_price', 'qty', 'notional_usd', 'pnl_usd', 'leverage', 'status', 'signal_reason', 'entry_time', 'close_time'];
   const csvRows = [
     headers.join(','),
     ...trades.map(t => [
-      t.id, t.symbol, t.side, t.entry_price, t.close_price ?? '', t.qty,
-      t.notional_usd, t.pnl_usd ?? '', t.leverage ?? '', t.status,
-      `"${t.signal_reason ?? ''}"`, formatDate(t.entry_time), formatDate(t.close_time)
+      sanitizeCsvField(t.id),
+      sanitizeCsvField(t.symbol),
+      sanitizeCsvField(t.side),
+      sanitizeCsvField(t.entry_price),
+      sanitizeCsvField(t.close_price ?? ''),
+      sanitizeCsvField(t.qty),
+      sanitizeCsvField(t.notional_usd),
+      sanitizeCsvField(t.pnl_usd ?? ''),
+      sanitizeCsvField(t.leverage ?? ''),
+      sanitizeCsvField(t.status),
+      sanitizeCsvField(t.signal_reason ?? ''),
+      sanitizeCsvField(formatDate(t.entry_time)),
+      sanitizeCsvField(formatDate(t.close_time))
     ].join(','))
   ];
 

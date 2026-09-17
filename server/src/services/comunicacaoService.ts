@@ -40,7 +40,7 @@ export const ComunicacaoService = {
         body: JSON.stringify(payload)
       });
 
-      const resData = await response.json().catch(() => ({}));
+      const resData: any = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         console.warn(`[ComunicacaoService] Falha ao enviar WhatsApp para ${cleanPhone} (instancia: ${targetInstance}):`, resData);
