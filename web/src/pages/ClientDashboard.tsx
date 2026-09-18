@@ -5,7 +5,7 @@ import {
   AlertTriangle, CheckCircle, Loader2, RefreshCw, Download,
   Eye, EyeOff, LogOut, Shield, Activity, Clock,
   TrendingDown, Zap, FileSpreadsheet, Lock,
-  HelpCircle, Info, Bell, ExternalLink, Sliders, Power, AlertOctagon, ShieldAlert
+  HelpCircle, Info, Bell, ExternalLink, Sliders, Power, AlertOctagon, ShieldAlert, Trash2
 } from 'lucide-react';
 
 type ClientTab = 'overview' | 'api-keys' | 'risk' | 'history';
@@ -249,6 +249,24 @@ export default function ClientDashboard() {
       fetchAccount();
     } else {
       notify(data.error || 'Erro ao salvar chaves.', 'error');
+    }
+  };
+
+  const handleDeleteApiKeys = async () => {
+    if (!window.confirm('Tem certeza que deseja remover suas chaves de API da Bybit? A sincronização será desligada.')) {
+      return;
+    }
+    try {
+      const res = await authFetch('/api/client/api-keys', { method: 'DELETE' });
+      const data = await res.json();
+      if (res.ok) {
+        notify('Chaves de API removidas com sucesso.');
+        fetchAccount();
+      } else {
+        notify(data.error || 'Erro ao remover chaves.', 'error');
+      }
+    } catch {
+      notify('Erro de conexão ao remover chaves.', 'error');
     }
   };
 
@@ -705,16 +723,19 @@ export default function ClientDashboard() {
               </div>
             </form>
 
-            {/* Chaves Cadastradas */}
+            {/* Chaves Cadastradas & Gerenciamento */}
             {account?.hasApiKeys && (
               <div className="bg-surface border border-border/60 rounded-2xl p-6 mt-6 space-y-4">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
-                    <h3 className="text-sm font-bold text-white flex items-center space-x-2">
+                    <div className="flex items-center space-x-2">
                       <Lock className="w-4 h-4 text-emerald-400" />
-                      <span>Chave de API Cadastrada</span>
-                    </h3>
-                    <p className="text-xs text-slate-400 mt-1">Sua conexão atual com a Bybit.</p>
+                      <h3 className="text-sm font-bold text-white">Gerenciamento de Chave Bybit</h3>
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold ${account.bybitTestnet ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
+                        {account.bybitTestnet ? 'TESTNET' : 'CONTA REAL'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1">Status e controle operacional das suas ordens conectadas.</p>
                   </div>
                   
                   {/* Status & Botão de Ligar/Desligar */}
@@ -724,7 +745,7 @@ export default function ClientDashboard() {
                       <div className="flex items-center space-x-1.5">
                         <div className={`w-2 h-2 rounded-full ${account.apiConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
                         <span className={`text-xs font-bold ${account.apiConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {account.apiConnected ? 'Pronta para uso' : 'Inválida / Erro'}
+                          {account.apiConnected ? 'Pronta para uso' : 'Pendente / Erro'}
                         </span>
                       </div>
                     </div>
@@ -736,6 +757,7 @@ export default function ClientDashboard() {
                       <button
                         onClick={handleToggleSync}
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${account.syncEnabled ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                        title={account.syncEnabled ? 'Desligar sincronização' : 'Ligar sincronização'}
                       >
                         <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${account.syncEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
                       </button>
@@ -743,11 +765,39 @@ export default function ClientDashboard() {
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-3 p-3 bg-accent/5 rounded-xl border border-accent/10">
-                  <span className="text-xs text-accent font-mono bg-accent/10 px-2 py-1 rounded">API KEY</span>
-                  <code className="text-sm font-mono text-white tracking-widest">{account.maskedKey || '••••••••'}****************</code>
-                  <span className="text-[10px] text-slate-400 ml-auto border border-border px-2 py-1 rounded-md">AES-256</span>
+                <div className="flex items-center justify-between p-3 bg-accent/5 rounded-xl border border-accent/10">
+                  <div className="flex items-center space-x-3">
+                    <span className="text-xs text-accent font-mono bg-accent/10 px-2 py-1 rounded">API KEY</span>
+                    <code className="text-sm font-mono text-white tracking-widest">{account.maskedKey || '••••••••'}****************</code>
+                    <span className="text-[10px] text-slate-400 border border-border px-2 py-1 rounded-md">AES-256</span>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={handleTestConnection}
+                      disabled={testing}
+                      className="px-3 py-1.5 rounded-lg bg-surface border border-border text-xs text-slate-300 hover:text-white hover:border-accent flex items-center space-x-1.5 transition-all"
+                    >
+                      {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                      <span>Testar Conexão</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeleteApiKeys}
+                      className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 transition-all"
+                      title="Excluir Chave de API"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
+
+                {testResult && (
+                  <div className={`p-3 rounded-xl text-xs font-mono border ${testResult.success ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-rose-500/10 border-rose-500/30 text-rose-300'}`}>
+                    {testResult.message || testResult.error}
+                  </div>
+                )}
               </div>
             )}
           </div>

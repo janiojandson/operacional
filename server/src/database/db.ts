@@ -415,6 +415,13 @@ export const ClientConfigDB = {
     );
   },
 
+  deleteApiKeys: async (clientId: string) => {
+    await query(
+      `UPDATE client_configs SET bybit_api_key_enc = NULL, bybit_api_secret_enc = NULL, api_connected = 0, sync_enabled = 0, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $1`,
+      [clientId]
+    );
+  },
+
   setApiConnected: async (clientId: string, connected: boolean) => {
     await query(
       'UPDATE client_configs SET api_connected = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $2',

@@ -56,18 +56,18 @@ clientRouter.post('/api-keys', async (req: Request, res: Response) => {
     const encSecret = encrypt(apiSecret.trim());
     await ClientConfigDB.updateApiKeys(clientId, encKey, encSecret, testnet);
     
+    // Tenta validar a conexão imediatamente
     const result = await BybitExecutionEngine.connectAndValidate(clientId);
-    if (!result.success) {
-      return res.status(400).json({ 
-        error: result.error || 'A chave API fornecida é inválida ou não possui a permissão de Contrato na Bybit.' 
-      });
-    }
-
+    
     res.json({
       success: true,
-      message: 'API Keys validadas e prontas para uso.',
+      validated: result.success,
+      message: result.success 
+        ? 'Chaves da Bybit salvas e validadas com sucesso!' 
+        : 'Chaves salvas com criptografia AES-256. ' + (result.error || 'Aguardando validação com a Bybit.'),
       testnet,
-      maskedKey: result.maskedKey
+      maskedKey: result.maskedKey || `${apiKey.trim().substring(0, 5)}...`,
+      warning: result.success ? null : result.error
     });
   } catch (err: any) {
     console.error('[API-Keys] Erro ao salvar chaves:', err);
@@ -75,7 +75,20 @@ clientRouter.post('/api-keys', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/client/api-keys/test
+// DELETE /api/client/api-keys — Excluir chaves cadastradas
+clientRouter.delete('/api-keys', async (req: Request, res: Response) => {
+  const clientId = await resolveClientId(req);
+  if (!clientId) return res.status(400).json({ error: 'clientId não encontrado no token.' });
+
+  try {
+    await ClientConfigDB.deleteApiKeys(clientId);
+    res.json({ success: true, message: 'Chaves da Bybit removidas com sucesso.' });
+  } catch (err: any) {
+    res.status(500).json({ error: `Erro ao remover chaves: ${err.message}` });
+  }
+});
+
+// POST /api/client/api-keys/test — Testar conexão sob demanda
 clientRouter.post('/api-keys/test', async (req: Request, res: Response) => {
   const clientId = await resolveClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
