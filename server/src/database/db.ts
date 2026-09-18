@@ -138,6 +138,15 @@ export async function initDatabase(): Promise<void> {
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_active INTEGER NOT NULL DEFAULT 1`).catch(() => {});
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_expires_at BIGINT`).catch(() => {});
   
+  // Suporte a armazenamento simultâneo de chaves Conta Real e Testnet
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_real_api_key_enc TEXT`).catch(() => {});
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_real_api_secret_enc TEXT`).catch(() => {});
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_real_connected INTEGER NOT NULL DEFAULT 0`).catch(() => {});
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_test_api_key_enc TEXT`).catch(() => {});
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_test_api_secret_enc TEXT`).catch(() => {});
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_test_connected INTEGER NOT NULL DEFAULT 0`).catch(() => {});
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS active_environment TEXT NOT NULL DEFAULT 'REAL'`).catch(() => {});
+
   // Garantir que a constraint estrita de chave estrangeira não trave cadastros simultâneos ou chaves API
   await query(`ALTER TABLE client_configs DROP CONSTRAINT IF EXISTS client_configs_user_id_fkey`).catch(() => {});
 
@@ -409,17 +418,90 @@ export const ClientConfigDB = {
   },
 
   updateApiKeys: async (clientId: string, encryptedApiKey: string, encryptedApiSecret: string, testnet: boolean) => {
-    await query(
-      `UPDATE client_configs SET bybit_api_key_enc = $1, bybit_api_secret_enc = $2, bybit_testnet = $3, api_connected = 0, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $4`,
-      [encryptedApiKey, encryptedApiSecret, testnet ? 1 : 0, clientId]
-    );
+    if (testnet) {
+      await query(
+        `UPDATE client_configs SET 
+          bybit_test_api_key_enc = $1, 
+          bybit_test_api_secret_enc = $2, 
+          bybit_test_connected = 0,
+          bybit_api_key_enc = $1,
+          bybit_api_secret_enc = $2,
+          bybit_testnet = 1,
+          api_connected = 0,
+          updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 
+         WHERE client_id = $3`,
+        [encryptedApiKey, encryptedApiSecret, clientId]
+      );
+    } else {
+      await query(
+        `UPDATE client_configs SET 
+          bybit_real_api_key_enc = $1, 
+          bybit_real_api_secret_enc = $2, 
+          bybit_real_connected = 0,
+          bybit_api_key_enc = $1,
+          bybit_api_secret_enc = $2,
+          bybit_testnet = 0,
+          api_connected = 0,
+          updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 
+         WHERE client_id = $3`,
+        [encryptedApiKey, encryptedApiSecret, clientId]
+      );
+    }
   },
 
-  deleteApiKeys: async (clientId: string) => {
-    await query(
-      `UPDATE client_configs SET bybit_api_key_enc = NULL, bybit_api_secret_enc = NULL, api_connected = 0, sync_enabled = 0, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $1`,
-      [clientId]
-    );
+  deleteApiKeys: async (clientId: string, env?: 'REAL' | 'TESTNET') => {
+    if (env === 'TESTNET') {
+      await query(
+        `UPDATE client_configs SET 
+          bybit_test_api_key_enc = NULL, 
+          bybit_test_api_secret_enc = NULL, 
+          bybit_test_connected = 0,
+          updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 
+         WHERE client_id = $1`,
+        [clientId]
+      );
+    } else if (env === 'REAL') {
+      await query(
+        `UPDATE client_configs SET 
+          bybit_real_api_key_enc = NULL, 
+          bybit_real_api_secret_enc = NULL, 
+          bybit_real_connected = 0,
+          updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 
+         WHERE client_id = $1`,
+        [clientId]
+      );
+    } else {
+      await query(
+        `UPDATE client_configs SET 
+          bybit_api_key_enc = NULL, 
+          bybit_api_secret_enc = NULL, 
+          bybit_real_api_key_enc = NULL,
+          bybit_real_api_secret_enc = NULL,
+          bybit_test_api_key_enc = NULL,
+          bybit_test_api_secret_enc = NULL,
+          api_connected = 0, 
+          bybit_real_connected = 0,
+          bybit_test_connected = 0,
+          sync_enabled = 0, 
+          updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 
+         WHERE client_id = $1`,
+        [clientId]
+      );
+    }
+  },
+
+  setEnvironmentStatus: async (clientId: string, testnet: boolean, connected: boolean) => {
+    if (testnet) {
+      await query(
+        `UPDATE client_configs SET bybit_test_connected = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $2`,
+        [connected ? 1 : 0, clientId]
+      );
+    } else {
+      await query(
+        `UPDATE client_configs SET bybit_real_connected = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $2`,
+        [connected ? 1 : 0, clientId]
+      );
+    }
   },
 
   setApiConnected: async (clientId: string, connected: boolean) => {

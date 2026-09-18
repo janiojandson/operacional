@@ -29,6 +29,12 @@ interface AccountInfo {
   apiConnected: boolean;
   bybitTestnet: boolean;
   hasApiKeys: boolean;
+  hasRealKeys?: boolean;
+  realMaskedKey?: string;
+  realConnected?: boolean;
+  hasTestKeys?: boolean;
+  testMaskedKey?: string;
+  testConnected?: boolean;
   notificationPhone?: string;
   planType?: string;
   planExpiresAt?: number | null;
@@ -252,15 +258,17 @@ export default function ClientDashboard() {
     }
   };
 
-  const handleDeleteApiKeys = async () => {
-    if (!window.confirm('Tem certeza que deseja remover suas chaves de API da Bybit? A sincronização será desligada.')) {
+  const handleDeleteApiKeys = async (env?: 'REAL' | 'TESTNET') => {
+    const label = env ? (env === 'REAL' ? 'Conta Real' : 'Testnet') : 'todas as contas';
+    if (!window.confirm(`Tem certeza que deseja remover suas chaves de API da Bybit (${label})?`)) {
       return;
     }
     try {
-      const res = await authFetch('/api/client/api-keys', { method: 'DELETE' });
+      const url = env ? `/api/client/api-keys?env=${env}` : '/api/client/api-keys';
+      const res = await authFetch(url, { method: 'DELETE' });
       const data = await res.json();
       if (res.ok) {
-        notify('Chaves de API removidas com sucesso.');
+        notify(`Chaves de API (${label}) removidas com sucesso.`);
         fetchAccount();
       } else {
         notify(data.error || 'Erro ao remover chaves.', 'error');
@@ -270,13 +278,16 @@ export default function ClientDashboard() {
     }
   };
 
-  const handleTestConnection = async () => {
+  const handleTestConnection = async (env?: 'REAL' | 'TESTNET') => {
     setTesting(true);
     setTestResult(null);
-    const res = await authFetch('/api/client/api-keys/test', { method: 'POST' });
+    const res = await authFetch('/api/client/api-keys/test', { 
+      method: 'POST',
+      body: JSON.stringify({ env })
+    });
     const data = await res.json();
     setTestResult(data);
-    if (data.success) { notify('✅ Conexão com Bybit estabelecida!'); fetchAccount(); }
+    if (data.success) { notify(`✅ Conexão com Bybit ${env || ''} estabelecida!`); fetchAccount(); }
     else notify(data.error || 'Falha na conexão.', 'error');
     setTesting(false);
   };
@@ -723,75 +734,139 @@ export default function ClientDashboard() {
               </div>
             </form>
 
-            {/* Chaves Cadastradas & Gerenciamento */}
+            {/* Chaves Cadastradas & Gerenciamento Multi-Ambiente */}
             {account?.hasApiKeys && (
-              <div className="bg-surface border border-border/60 rounded-2xl p-6 mt-6 space-y-4">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div>
-                    <div className="flex items-center space-x-2">
-                      <Lock className="w-4 h-4 text-emerald-400" />
-                      <h3 className="text-sm font-bold text-white">Gerenciamento de Chave Bybit</h3>
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold ${account.bybitTestnet ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
-                        {account.bybitTestnet ? 'TESTNET' : 'CONTA REAL'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-1">Status e controle operacional das suas ordens conectadas.</p>
-                  </div>
-                  
-                  {/* Status & Botão de Ligar/Desligar */}
-                  <div className="flex items-center space-x-4 bg-background p-3 rounded-xl border border-border/50">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Status da Chave</span>
-                      <div className="flex items-center space-x-1.5">
-                        <div className={`w-2 h-2 rounded-full ${account.apiConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-                        <span className={`text-xs font-bold ${account.apiConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {account.apiConnected ? 'Pronta para uso' : 'Pendente / Erro'}
-                        </span>
+              <div className="space-y-4 mt-6">
+                {/* Card de Conta Real */}
+                {(account.hasRealKeys || (!account.bybitTestnet && account.hasApiKeys)) && (
+                  <div className="bg-surface border border-emerald-500/30 rounded-2xl p-6 space-y-4 shadow-lg shadow-emerald-950/10">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <Lock className="w-4 h-4 text-emerald-400" />
+                          <h3 className="text-sm font-bold text-white">Chave Bybit — CONTA REAL</h3>
+                          <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                            MAINNET ATIVA
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1">Conexão oficial para operações com saldo real na Bybit.</p>
+                      </div>
+                      
+                      {/* Status & Toggle */}
+                      <div className="flex items-center space-x-4 bg-background p-3 rounded-xl border border-border/50">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Status Real</span>
+                          <div className="flex items-center space-x-1.5">
+                            <div className={`w-2 h-2 rounded-full ${account.realConnected ?? account.apiConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                            <span className={`text-xs font-bold ${account.realConnected ?? account.apiConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {account.realConnected ?? account.apiConnected ? '🟢 Pronta para uso' : '🔴 Pendente / Erro'}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <div className="w-px h-8 bg-border/50" />
+                        
+                        <div className="flex flex-col items-center">
+                          <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Copy Trade</span>
+                          <button
+                            onClick={handleToggleSync}
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${account.syncEnabled ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                            title={account.syncEnabled ? 'Desligar sincronização' : 'Ligar sincronização'}
+                          >
+                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${account.syncEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                    
-                    <div className="w-px h-8 bg-border/50" />
-                    
-                    <div className="flex flex-col items-center">
-                      <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Operações</span>
-                      <button
-                        onClick={handleToggleSync}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${account.syncEnabled ? 'bg-emerald-500' : 'bg-slate-700'}`}
-                        title={account.syncEnabled ? 'Desligar sincronização' : 'Ligar sincronização'}
-                      >
-                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${account.syncEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
-                      </button>
+
+                    <div className="flex items-center justify-between p-3 bg-emerald-500/5 rounded-xl border border-emerald-500/10">
+                      <div className="flex items-center space-x-3">
+                        <span className="text-xs text-emerald-400 font-mono bg-emerald-500/10 px-2 py-1 rounded">API KEY REAL</span>
+                        <code className="text-sm font-mono text-white tracking-widest">{account.realMaskedKey || account.maskedKey || '••••••••'}****************</code>
+                        <span className="text-[10px] text-slate-400 border border-border px-2 py-1 rounded-md">AES-256</span>
+                      </div>
+
+                      <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => handleTestConnection('REAL')}
+                          disabled={testing}
+                          className="px-3 py-1.5 rounded-lg bg-surface border border-emerald-500/30 text-xs text-emerald-300 hover:text-white hover:border-emerald-400 flex items-center space-x-1.5 transition-all"
+                        >
+                          {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                          <span>Testar Real</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteApiKeys('REAL')}
+                          className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 transition-all"
+                          title="Excluir Chave de Conta Real"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
 
-                <div className="flex items-center justify-between p-3 bg-accent/5 rounded-xl border border-accent/10">
-                  <div className="flex items-center space-x-3">
-                    <span className="text-xs text-accent font-mono bg-accent/10 px-2 py-1 rounded">API KEY</span>
-                    <code className="text-sm font-mono text-white tracking-widest">{account.maskedKey || '••••••••'}****************</code>
-                    <span className="text-[10px] text-slate-400 border border-border px-2 py-1 rounded-md">AES-256</span>
-                  </div>
+                {/* Card de Testnet */}
+                {(account.hasTestKeys || (account.bybitTestnet && account.hasApiKeys)) && (
+                  <div className="bg-surface border border-amber-500/30 rounded-2xl p-6 space-y-4 shadow-lg shadow-amber-950/10">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <Lock className="w-4 h-4 text-amber-400" />
+                          <h3 className="text-sm font-bold text-white">Chave Bybit — TESTNET (Sem Risco)</h3>
+                          <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                            TESTNET
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1">Ambiente de simulação e testes com saldo fictício.</p>
+                      </div>
+                      
+                      {/* Status */}
+                      <div className="flex items-center space-x-4 bg-background p-3 rounded-xl border border-border/50">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Status Testnet</span>
+                          <div className="flex items-center space-x-1.5">
+                            <div className={`w-2 h-2 rounded-full ${account.testConnected ?? account.apiConnected ? 'bg-amber-500 animate-pulse' : 'bg-rose-500'}`} />
+                            <span className={`text-xs font-bold ${account.testConnected ?? account.apiConnected ? 'text-amber-400' : 'text-rose-400'}`}>
+                              {account.testConnected ?? account.apiConnected ? '🟡 Pronta para teste' : '🔴 Pendente / Erro'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
 
-                  <div className="flex items-center space-x-2">
-                    <button
-                      type="button"
-                      onClick={handleTestConnection}
-                      disabled={testing}
-                      className="px-3 py-1.5 rounded-lg bg-surface border border-border text-xs text-slate-300 hover:text-white hover:border-accent flex items-center space-x-1.5 transition-all"
-                    >
-                      {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                      <span>Testar Conexão</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDeleteApiKeys}
-                      className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 transition-all"
-                      title="Excluir Chave de API"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center justify-between p-3 bg-amber-500/5 rounded-xl border border-amber-500/10">
+                      <div className="flex items-center space-x-3">
+                        <span className="text-xs text-amber-400 font-mono bg-amber-500/10 px-2 py-1 rounded">API KEY TESTNET</span>
+                        <code className="text-sm font-mono text-white tracking-widest">{account.testMaskedKey || account.maskedKey || '••••••••'}****************</code>
+                        <span className="text-[10px] text-slate-400 border border-border px-2 py-1 rounded-md">AES-256</span>
+                      </div>
+
+                      <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => handleTestConnection('TESTNET')}
+                          disabled={testing}
+                          className="px-3 py-1.5 rounded-lg bg-surface border border-amber-500/30 text-xs text-amber-300 hover:text-white hover:border-amber-400 flex items-center space-x-1.5 transition-all"
+                        >
+                          {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                          <span>Testar Testnet</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteApiKeys('TESTNET')}
+                          className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 transition-all"
+                          title="Excluir Chave Testnet"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {testResult && (
                   <div className={`p-3 rounded-xl text-xs font-mono border ${testResult.success ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-rose-500/10 border-rose-500/30 text-rose-300'}`}>

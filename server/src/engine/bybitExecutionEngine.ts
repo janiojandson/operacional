@@ -126,16 +126,34 @@ export class BybitExecutionEngine {
   /**
    * Testa conexão com a API do cliente e retorna info da conta
    */
-  static async connectAndValidate(clientId: string): Promise<{ success: boolean; accountInfo?: BybitAccountInfo; maskedKey?: string; error?: string }> {
+  static async connectAndValidate(clientId: string, targetEnv?: 'REAL' | 'TESTNET'): Promise<{ success: boolean; accountInfo?: BybitAccountInfo; maskedKey?: string; error?: string }> {
     const config = await ClientConfigDB.findByClientId(clientId);
-    if (!config || !config.bybit_api_key_enc || !config.bybit_api_secret_enc) {
+    if (!config) {
       return { success: false, error: 'Chaves de API não configuradas para este cliente.' };
     }
 
+    let apiKeyEnc = config.bybit_api_key_enc;
+    let apiSecretEnc = config.bybit_api_secret_enc;
+    let isTestnet = Number(config.bybit_testnet) === 1;
+
+    if (targetEnv === 'TESTNET') {
+      apiKeyEnc = config.bybit_test_api_key_enc || config.bybit_api_key_enc;
+      apiSecretEnc = config.bybit_test_api_secret_enc || config.bybit_api_secret_enc;
+      isTestnet = true;
+    } else if (targetEnv === 'REAL') {
+      apiKeyEnc = config.bybit_real_api_key_enc || config.bybit_api_key_enc;
+      apiSecretEnc = config.bybit_real_api_secret_enc || config.bybit_api_secret_enc;
+      isTestnet = false;
+    }
+
+    if (!apiKeyEnc || !apiSecretEnc) {
+      return { success: false, error: 'Chaves de API não configuradas para este ambiente.' };
+    }
+
     try {
-      const apiKey = decrypt(config.bybit_api_key_enc);
-      const apiSecret = decrypt(config.bybit_api_secret_enc);
-      const testnet = Number(config.bybit_testnet) === 1;
+      const apiKey = decrypt(apiKeyEnc);
+      const apiSecret = decrypt(apiSecretEnc);
+      const testnet = isTestnet;
 
       let exchange = createBybitClient(apiKey, apiSecret, testnet, false);
 
@@ -180,6 +198,7 @@ export class BybitExecutionEngine {
 
       // Atualizar status de conexão no banco
       await ClientConfigDB.setApiConnected(clientId, true);
+      await ClientConfigDB.setEnvironmentStatus(clientId, testnet, true);
       await ClientConfigDB.updateBalance(clientId, accountInfo.walletBalance);
 
       return {
@@ -189,6 +208,7 @@ export class BybitExecutionEngine {
       };
     } catch (err: any) {
       await ClientConfigDB.setApiConnected(clientId, false);
+      await ClientConfigDB.setEnvironmentStatus(clientId, isTestnet, false);
       console.error(`[BybitEngine] Falha ao conectar cliente ${clientId}:`, err.message);
       
       let friendlyError = `Erro de conexão com Bybit: ${err.message}`;

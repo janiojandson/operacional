@@ -75,29 +75,33 @@ clientRouter.post('/api-keys', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /api/client/api-keys — Excluir chaves cadastradas
+// DELETE /api/client/api-keys — Excluir chaves cadastradas (Geral, REAL ou TESTNET)
 clientRouter.delete('/api-keys', async (req: Request, res: Response) => {
   const clientId = await resolveClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado no token.' });
 
+  const env = (req.query.env || req.body?.env) as 'REAL' | 'TESTNET' | undefined;
+
   try {
-    await ClientConfigDB.deleteApiKeys(clientId);
-    res.json({ success: true, message: 'Chaves da Bybit removidas com sucesso.' });
+    await ClientConfigDB.deleteApiKeys(clientId, env);
+    res.json({ success: true, message: `Chaves da Bybit ${env ? `(${env})` : ''} removidas com sucesso.` });
   } catch (err: any) {
     res.status(500).json({ error: `Erro ao remover chaves: ${err.message}` });
   }
 });
 
-// POST /api/client/api-keys/test — Testar conexão sob demanda
+// POST /api/client/api-keys/test — Testar conexão sob demanda por ambiente
 clientRouter.post('/api-keys/test', async (req: Request, res: Response) => {
   const clientId = await resolveClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
 
-  const result = await BybitExecutionEngine.connectAndValidate(clientId);
+  const env = (req.body?.env || req.query.env) as 'REAL' | 'TESTNET' | undefined;
+
+  const result = await BybitExecutionEngine.connectAndValidate(clientId, env);
   if (result.success) {
     res.json({
       success: true,
-      message: '✅ Conexão com Bybit estabelecida com sucesso!',
+      message: `✅ Conexão com Bybit ${env ? `(${env})` : ''} estabelecida com sucesso!`,
       maskedKey: result.maskedKey,
       accountInfo: result.accountInfo
     });
@@ -132,6 +136,16 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
   const isVitalicio = config.plan_type === 'VITALICIO';
   const isVitrine = config.plan_type === 'VITRINE';
   const isPlanActive = Number(config.plan_active) === 1 && Number(config.is_active) === 1 && !isExpired && !isVitrine;
+  const realKeyEnc = (config as any).bybit_real_api_key_enc || (!config.bybit_testnet ? config.bybit_api_key_enc : null);
+  const testKeyEnc = (config as any).bybit_test_api_key_enc || (config.bybit_testnet ? config.bybit_api_key_enc : null);
+
+  const realConnected = (config as any).bybit_real_connected !== undefined 
+    ? Number((config as any).bybit_real_connected) === 1 
+    : (!config.bybit_testnet && Number(config.api_connected) === 1);
+
+  const testConnected = (config as any).bybit_test_connected !== undefined 
+    ? Number((config as any).bybit_test_connected) === 1 
+    : (!!config.bybit_testnet && Number(config.api_connected) === 1);
 
   res.json({
     clientId,
@@ -152,8 +166,14 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
     syncEnabled: Number(config.sync_enabled) === 1,
     apiConnected: Number(config.api_connected) === 1,
     bybitTestnet: Number(config.bybit_testnet) === 1,
-    hasApiKeys: !!(config.bybit_api_key_enc),
+    hasApiKeys: !!(config.bybit_api_key_enc || realKeyEnc || testKeyEnc),
     maskedKey: config.bybit_api_key_enc ? `${decrypt(config.bybit_api_key_enc).substring(0, 5)}...` : null,
+    hasRealKeys: !!realKeyEnc,
+    realMaskedKey: realKeyEnc ? `${decrypt(realKeyEnc).substring(0, 5)}...` : null,
+    realConnected,
+    hasTestKeys: !!testKeyEnc,
+    testMaskedKey: testKeyEnc ? `${decrypt(testKeyEnc).substring(0, 5)}...` : null,
+    testConnected,
     notificationPhone: config.notification_phone,
     planType: config.plan_type || 'ACTIVE',
     planExpiresAt: expiresAt
