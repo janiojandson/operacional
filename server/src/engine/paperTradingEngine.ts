@@ -9,8 +9,7 @@ export class PaperTradingEngine {
   private realizedPnl: number = 0;
   private openPositions: Map<string, SimulatedTrade> = new Map();
   private history: SimulatedTrade[] = [];
-  private onUpdateCallback?: (account: PaperAccount, newTradeEvent?: SimulatedTrade) => void;
-  private activePairs: Set<string> = new Set(['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'EUR/USD', 'GBP/USD', 'USD/JPY']);
+  private activePairs: Set<string> = new Set(['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT']);
   private minTemperature: number = 1.5; // Temperatura mínima de trabalho a partir de 1.5x
 
   constructor(onUpdate?: (account: PaperAccount, newTradeEvent?: SimulatedTrade) => void) {

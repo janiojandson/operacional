@@ -5,11 +5,8 @@ export class AutonomousPairScanner {
     ['BTC/USDT', { symbol: 'BTC/USDT', name: 'Bitcoin', category: 'crypto', isActive: true, activatedByAI: true, reason: 'Alta liquidez e expansão de fluxo', volatilityScore: 88, orderFlowScore: 92, liquidityScore: 95 }],
     ['ETH/USDT', { symbol: 'ETH/USDT', name: 'Ethereum', category: 'crypto', isActive: true, activatedByAI: true, reason: 'Volume consistente e absorções claras', volatilityScore: 82, orderFlowScore: 85, liquidityScore: 90 }],
     ['SOL/USDT', { symbol: 'SOL/USDT', name: 'Solana', category: 'crypto', isActive: true, activatedByAI: true, reason: 'Alta volatilidade com expansão de Order Blocks', volatilityScore: 94, orderFlowScore: 89, liquidityScore: 86 }],
-    ['EUR/USD', { symbol: 'EUR/USD', name: 'Euro / Dólar', category: 'forex', isActive: true, activatedByAI: true, reason: 'Sessão com spread institucional baixo', volatilityScore: 65, orderFlowScore: 78, liquidityScore: 98 }],
-    ['GBP/USD', { symbol: 'GBP/USD', name: 'Libra / Dólar', category: 'forex', isActive: true, activatedByAI: true, reason: 'Deslocamento direcional SMC', volatilityScore: 72, orderFlowScore: 80, liquidityScore: 94 }],
-    ['USD/JPY', { symbol: 'USD/JPY', name: 'Dólar / Iene', category: 'forex', isActive: true, activatedByAI: true, reason: 'Tendência macro consolidada', volatilityScore: 68, orderFlowScore: 75, liquidityScore: 92 }],
-    ['BNB/USDT', { symbol: 'BNB/USDT', name: 'Binance Coin', category: 'crypto', isActive: false, activatedByAI: false, reason: 'Volume em consolidação (aguardando rompimento)', volatilityScore: 45, orderFlowScore: 40, liquidityScore: 75 }],
-    ['XAU/USD', { symbol: 'XAU/USD', name: 'Ouro Spot', category: 'forex', isActive: true, activatedByAI: true, reason: 'Forte desbalanceamento de book (Whale activity)', volatilityScore: 91, orderFlowScore: 94, liquidityScore: 88 }]
+    ['BNB/USDT', { symbol: 'BNB/USDT', name: 'Binance Coin', category: 'crypto', isActive: true, activatedByAI: true, reason: 'Fluxo comprador consistente em suporte institucional', volatilityScore: 76, orderFlowScore: 81, liquidityScore: 92 }],
+    ['XRP/USDT', { symbol: 'XRP/USDT', name: 'Ripple XRP', category: 'crypto', isActive: true, activatedByAI: true, reason: 'Deslocamento direcional e forte book imbalance', volatilityScore: 85, orderFlowScore: 87, liquidityScore: 94 }]
   ]);
 
   public static getAllPairs(): PairAutonomousStatus[] {

@@ -228,6 +228,17 @@ app.get('/api/client/master-feed', requireAuth, (req, res) => {
 
   res.json({
     masterOnline: true,
+    autonomiaStatus: '100% ATIVA (24/7 Bybit Perpétuos)',
+    metrics: {
+      winRate: account.winRate,
+      totalTrades: account.totalTrades,
+      winningTrades: account.winningTrades,
+      losingTrades: account.losingTrades,
+      realizedPnl: account.realizedPnl,
+      openPositionsCount: account.openPositions.length,
+      balance: account.balance,
+      equity: account.equity
+    },
     trackedCryptoPairs: cryptoPairs,
     masterOpenPositions: account.openPositions.map(p => ({
       id: p.id,
@@ -235,14 +246,30 @@ app.get('/api/client/master-feed', requireAuth, (req, res) => {
       type: p.type,
       entryPrice: p.entryPrice,
       currentPrice: p.currentPrice,
-      pnl: p.pnl,
+      pnlUsd: p.pnlUsd,
       pnlPct: p.pnlPct,
+      rMultiple: p.rMultiple,
       entryTime: p.entryTime,
       stopLoss: p.stopLoss,
       takeProfit: p.takeProfit,
-      signalReason: p.signalReason
+      signalReason: p.signalReason,
+      powerMultiplier: p.powerMultiplier
     })),
-    recentLogs: logs.slice(-15).reverse()
+    masterHistory: account.history.slice(0, 15).map(h => ({
+      id: h.id,
+      symbol: h.symbol,
+      type: h.type,
+      entryPrice: h.entryPrice,
+      currentPrice: h.currentPrice,
+      pnlUsd: h.pnlUsd,
+      pnlPct: h.pnlPct,
+      rMultiple: h.rMultiple,
+      status: h.status,
+      entryTime: h.entryTime,
+      closeTime: h.closeTime,
+      signalReason: h.signalReason
+    })),
+    recentLogs: logs.slice(-25).reverse()
   });
 });
 

@@ -26,7 +26,6 @@ export class MarketDataManager {
   constructor(flowEngine: FlowEngine, onBroadcast?: (type: string, data: any) => void) {
     this.flowEngine = flowEngine;
     this.onBroadcast = onBroadcast;
-
     this.initDefaultSymbols();
   }
 
@@ -35,9 +34,8 @@ export class MarketDataManager {
       { symbol: 'BTC/USDT', basePrice: 94850.00, category: 'crypto', name: 'Bitcoin' },
       { symbol: 'ETH/USDT', basePrice: 2840.50, category: 'crypto', name: 'Ethereum' },
       { symbol: 'SOL/USDT', basePrice: 198.40, category: 'crypto', name: 'Solana' },
-      { symbol: 'EUR/USD', basePrice: 1.0542, category: 'forex', name: 'Euro / US Dollar' },
-      { symbol: 'GBP/USD', basePrice: 1.2685, category: 'forex', name: 'British Pound / US Dollar' },
-      { symbol: 'USD/JPY', basePrice: 154.30, category: 'forex', name: 'US Dollar / Yen' }
+      { symbol: 'BNB/USDT', basePrice: 652.80, category: 'crypto', name: 'Binance Coin' },
+      { symbol: 'XRP/USDT', basePrice: 2.38, category: 'crypto', name: 'Ripple XRP' }
     ];
 
     for (const asset of defaultAssets) {

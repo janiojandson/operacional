@@ -28,7 +28,7 @@ export class ClientProtectionEngine {
       'cli-2',
       {
         id: 'cli-2',
-        name: 'Fundo Quant Forex Prime',
+        name: 'Fundo Quant Bybit Momentum',
         phone: '5541999997777',
         initialBalance: 10000,
         currentBalance: 10320.00,
@@ -37,7 +37,7 @@ export class ClientProtectionEngine {
         trailingLossUsd: 300,
         timeWindow: '1h',
         status: 'ACTIVE',
-        activePairs: ['EUR/USD', 'GBP/USD', 'USD/JPY'],
+        activePairs: ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT'],
         createdAt: Date.now() - 86400000 * 2,
         lastUpdated: Date.now()
       }

@@ -23,7 +23,7 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
   const [targetGainUsd, setTargetGainUsd] = useState(1000);
   const [trailingLossUsd, setTrailingLossUsd] = useState(400);
   const [timeWindow, setTimeWindow] = useState<'30m' | '1h' | '1d' | '1w' | '1m'>('1d');
-  const [selectedPairs, setSelectedPairs] = useState<string[]>(['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'EUR/USD']);
+  const [selectedPairs, setSelectedPairs] = useState<string[]>(['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT']);
   const [loading, setLoading] = useState(false);
   const [sendingAlertId, setSendingAlertId] = useState<string | null>(null);
 
@@ -156,7 +156,7 @@ export const ClientProtectionModal: React.FC<ClientProtectionModalProps> = ({
     }
   };
 
-  const allAvailablePairs = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'EUR/USD', 'GBP/USD', 'USD/JPY', 'XAU/USD'];
+  const allAvailablePairs = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT'];
   const clientsList = Array.isArray(localClients) ? localClients : [];
 
   return (
