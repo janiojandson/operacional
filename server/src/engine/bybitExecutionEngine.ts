@@ -57,8 +57,9 @@ function toBybitLinear(symbol: string): string {
 
 /**
  * Cria instância CCXT Bybit para o cliente
+ * Suporta domínio alternativo oficial da Bybit (bytick.com) para contornar bloqueios regionais do CloudFront em servidores cloud como Railway (EUA/AWS)
  */
-function createBybitClient(apiKey: string, apiSecret: string, testnet: boolean): any {
+function createBybitClient(apiKey: string, apiSecret: string, testnet: boolean, useAlternateDomain: boolean = false): any {
   const exchange = new ccxt.bybit({
     apiKey,
     secret: apiSecret,
@@ -69,6 +70,15 @@ function createBybitClient(apiKey: string, apiSecret: string, testnet: boolean):
 
   if (testnet) {
     exchange.setSandboxMode(true);
+  } else if (useAlternateDomain) {
+    // Domínio oficial alternativo global da Bybit sem bloqueio regional CloudFront
+    exchange.urls['api'] = {
+      spot: 'https://api.bytick.com',
+      futures: 'https://api.bytick.com',
+      v2: 'https://api.bytick.com',
+      public: 'https://api.bytick.com',
+      private: 'https://api.bytick.com'
+    };
   }
 
   return exchange;
@@ -127,17 +137,32 @@ export class BybitExecutionEngine {
       const apiSecret = decrypt(config.bybit_api_secret_enc);
       const testnet = Number(config.bybit_testnet) === 1;
 
-      const exchange = createBybitClient(apiKey, apiSecret, testnet);
+      let exchange = createBybitClient(apiKey, apiSecret, testnet, false);
 
-      // Buscar saldo da conta (compatível com Bybit V5 Unified Margin e Classic Accounts)
+      // Função auxiliar para tentar buscar o saldo
+      const fetchAccountBal = async (ex: any) => {
+        try {
+          return await ex.fetchBalance({ type: 'unified' });
+        } catch (e: any) {
+          try {
+            return await ex.fetchBalance({ type: 'contract' });
+          } catch {
+            return await ex.fetchBalance();
+          }
+        }
+      };
+
       let balance: any;
       try {
-        balance = await exchange.fetchBalance({ type: 'unified' });
-      } catch (e: any) {
-        try {
-          balance = await exchange.fetchBalance({ type: 'contract' });
-        } catch {
-          balance = await exchange.fetchBalance();
+        balance = await fetchAccountBal(exchange);
+      } catch (firstErr: any) {
+        // Se houver bloqueio CloudFront / 403 Forbidden por região dos servidores do Railway
+        if (firstErr.message?.includes('403') || firstErr.message?.includes('CloudFront') || firstErr.message?.includes('country')) {
+          console.warn(`[BybitEngine] 403 CloudFront detectado na Bybit para ${clientId}. Tentando rota alternativa (bytick.com)...`);
+          exchange = createBybitClient(apiKey, apiSecret, testnet, true);
+          balance = await fetchAccountBal(exchange);
+        } else {
+          throw firstErr;
         }
       }
 
@@ -165,9 +190,15 @@ export class BybitExecutionEngine {
     } catch (err: any) {
       await ClientConfigDB.setApiConnected(clientId, false);
       console.error(`[BybitEngine] Falha ao conectar cliente ${clientId}:`, err.message);
+      
+      let friendlyError = `Erro de conexão com Bybit: ${err.message}`;
+      if (err.message?.includes('CloudFront') || err.message?.includes('country')) {
+        friendlyError = 'A Bybit bloqueou a requisição a partir da região dos servidores da nuvem (CloudFront 403). Ative a rota alternativa ou conecte as chaves via Mainnet.';
+      }
+
       return {
         success: false,
-        error: `Erro de conexão com Bybit: ${err.message}`
+        error: friendlyError
       };
     }
   }
@@ -182,16 +213,42 @@ export class BybitExecutionEngine {
     try {
       const apiKey = decrypt(config.bybit_api_key_enc);
       const apiSecret = decrypt(config.bybit_api_secret_enc);
-      const exchange = createBybitClient(apiKey, apiSecret, config.bybit_testnet === 1);
+      const testnet = config.bybit_testnet === 1;
+      let exchange = createBybitClient(apiKey, apiSecret, testnet, false);
 
-      const balance = await exchange.fetchBalance({ type: 'unified' });
-      const usdt = balance.USDT;
+      const fetchBal = async (ex: any) => {
+        try {
+          return await ex.fetchBalance({ type: 'unified' });
+        } catch {
+          try {
+            return await ex.fetchBalance({ type: 'contract' });
+          } catch {
+            return await ex.fetchBalance();
+          }
+        }
+      };
+
+      let balance: any;
+      try {
+        balance = await fetchBal(exchange);
+      } catch (e: any) {
+        if (e.message?.includes('403') || e.message?.includes('CloudFront')) {
+          exchange = createBybitClient(apiKey, apiSecret, testnet, true);
+          balance = await fetchBal(exchange);
+        } else {
+          throw e;
+        }
+      }
+
+      const usdt = balance.USDT || balance.total;
+      const totalBalance = Number(usdt?.total ?? balance?.free?.USDT ?? 0);
+      const freeBalance = Number(usdt?.free ?? balance?.free?.USDT ?? 0);
 
       return {
-        walletBalance: Number(usdt?.total ?? 0),
-        availableBalance: Number(usdt?.free ?? 0),
+        walletBalance: isNaN(totalBalance) ? 0 : totalBalance,
+        availableBalance: isNaN(freeBalance) ? 0 : freeBalance,
         unrealisedPnl: 0,
-        equity: Number(usdt?.total ?? 0),
+        equity: isNaN(totalBalance) ? 0 : totalBalance,
         coin: 'USDT'
       };
     } catch (err: any) {
