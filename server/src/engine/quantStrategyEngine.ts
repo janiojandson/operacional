@@ -10,8 +10,8 @@ import {
   MonteCarloBlock,
   SegmentItem,
   TemperatureLevel
-} from '../../shared/paperTypes';
-import { SessionType, MarketRegime } from '../../shared/types';
+} from '../../../shared/paperTypes';
+import { SessionType, MarketRegime } from '../../../shared/types';
 
 export class QuantStrategyEngine {
   private static INITIAL_BALANCE = 10000;

@@ -1,4 +1,4 @@
-import { Trade, OrderBookData, CandleData, AssetSummary } from '../../shared/types';
+import { Trade, OrderBookData, CandleData, AssetSummary } from '../../../shared/types';
 import { FlowEngine } from './flowEngine';
 
 interface ActiveSymbolState {

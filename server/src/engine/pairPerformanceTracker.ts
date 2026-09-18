@@ -1,5 +1,5 @@
-import { PaperAccount, SimulatedTrade } from '../../shared/paperTypes';
-import { AssetSummary, FlowSignal } from '../../shared/types';
+import { PaperAccount, SimulatedTrade } from '../../../shared/paperTypes';
+import { AssetSummary, FlowSignal } from '../../../shared/types';
 
 export interface PairPerformance {
   symbol: string;

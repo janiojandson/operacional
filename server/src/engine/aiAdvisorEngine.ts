@@ -1,6 +1,6 @@
 import { PairPerformance } from './pairPerformanceTracker';
-import { PaperAccount, QuantStrategyHealthReport } from '../../shared/paperTypes';
-import { AssetSummary, FlowSignal } from '../../shared/types';
+import { PaperAccount, QuantStrategyHealthReport } from '../../../shared/paperTypes';
+import { AssetSummary, FlowSignal } from '../../../shared/types';
 import { QuantStrategyEngine } from './quantStrategyEngine';
 
 export interface AIAdvisorAuditReport {
@@ -23,7 +23,7 @@ export class AIAdvisorEngine {
   private static async callAI(prompt: string, systemPrompt: string, provider = 'HYBRID_AUTO'): Promise<string> {
     const nexusKey = process.env.NEXUS_API_KEY || '';
     const geminiKey = process.env.GEMINI_API_KEY || '';
-    const nexusUrl = process.env.NEXUS_CEREBRO_URL || 'https://nexus-cerebro-production-a7c0.up.railway.app/v1';
+    const nexusUrl = process.env.NEXUS_CEREBRO_URL || process.env.NEXUS_BASE_URL || 'https://nexus-cerebro-production-a7c0.up.railway.app/v1';
 
     // 1. Tenta Nexus Cérebro se selecionado ou automático
     if ((provider === 'NEXUS_CEREBRO' || provider === 'HYBRID_AUTO') && nexusKey) {
@@ -43,7 +43,7 @@ export class AIAdvisorEngine {
           })
         });
         if (response.ok) {
-          const data = await response.json();
+          const data = await response.json() as any;
           const reply = data?.choices?.[0]?.message?.content;
           if (reply) return reply;
         }
@@ -65,7 +65,7 @@ export class AIAdvisorEngine {
           signal: AbortSignal.timeout(15000)
         });
         if (response.ok) {
-          const data = await response.json();
+          const data = await response.json() as any;
           const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text;
           if (reply) return reply;
         }
@@ -99,10 +99,10 @@ DADOS EM TEMPO REAL DA CONTA E ESTRATÉGIA:
 - Saldo Atual: $${account.balance.toFixed(2)} | PnL Realizado: $${account.realizedPnl.toFixed(2)}
 - Score Geral de Saúde: ${quantReport.overallScore}/100 (${quantReport.verdict})
 - Expectativa Matemática ($R$): ${quantReport.financial.mathExpectationR}R | Profit Factor: ${quantReport.financial.profitFactor} | Payoff: ${quantReport.financial.payoffRatio}x
-- Taxa de Acerto (Win Rate): ${quantReport.financial.winRatePct}% (Total Trades: ${quantReport.financial.totalTradesCount})
+- Taxa de Acerto (Win Rate): ${account.winRate.toFixed(1)}% (Total Trades: ${account.totalTrades})
 - Drawdown Máximo: ${quantReport.riskDrawdown.maxDrawdownPct}% (Alerta Breaker: ${quantReport.riskDrawdown.isBreakerTriggered ? 'ATIVO' : 'OK'})
 - Risco de Ruína (Monte Carlo 1.000 simulações): ${quantReport.monteCarlo.probabilityOfRuinPct}%
-- Posições Abertas Atualmente: ${account.openPositions.length} (${account.openPositions.map(p => `${p.symbol} ${p.side} $${p.entryPrice}`).join(', ') || 'Nenhuma'})
+- Posições Abertas Atualmente: ${account.openPositions.length} (${account.openPositions.map((p: any) => `${p.symbol} ${p.side} $${p.entryPrice}`).join(', ') || 'Nenhuma'})
 - Par Mais Rentável: ${topPerformer}
 
 Instruções:
@@ -154,7 +154,7 @@ Instruções:
     }
 
     const systemAuditPrompt = `Você é o Auditor Chefe de Estratégias Quantitativas do MarketFlow Pro. Analise os dados dos 6 Blocos e produza um relatório institucional executivo.`;
-    const promptAudit = `Analise a performance da conta com Score ${quantReport.overallScore}/100, Expectativa ${quantReport.financial.mathExpectationR}R, Win Rate ${quantReport.financial.winRatePct}%, Risco de Ruína ${quantReport.monteCarlo.probabilityOfRuinPct}%, Par Líder ${topPerformer}. Forneça recomendações práticas e objetivas.`;
+    const promptAudit = `Analise a performance da conta com Score ${quantReport.overallScore}/100, Expectativa ${quantReport.financial.mathExpectationR}R, Win Rate ${account.winRate.toFixed(1)}%, Risco de Ruína ${quantReport.monteCarlo.probabilityOfRuinPct}%, Par Líder ${topPerformer}. Forneça recomendações práticas e objetivas.`;
 
     const aiAnalysis = await this.callAI(promptAudit, systemAuditPrompt, provider);
 

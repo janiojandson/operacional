@@ -1,4 +1,4 @@
-import { AssetSummary, OrderBookData } from '../../shared/types';
+import { AssetSummary, OrderBookData } from '../../../shared/types';
 import { PairPerformance } from './pairPerformanceTracker';
 
 export type RegimeType = 'HIGH_TREND' | 'CHOPPY_RANGING' | 'LOW_LIQUIDITY' | 'EXPANSION_FLOW';

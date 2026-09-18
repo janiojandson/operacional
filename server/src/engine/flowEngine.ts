@@ -1,4 +1,4 @@
-import { Trade, OrderBookData, FlowSignal } from '../../shared/types';
+import { Trade, OrderBookData, FlowSignal } from '../../../shared/types';
 
 export class FlowEngine {
   private recentTrades: Map<string, Trade[]> = new Map();

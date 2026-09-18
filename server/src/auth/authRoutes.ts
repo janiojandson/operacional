@@ -31,6 +31,9 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     name: user.name || undefined
   });
 
+  const clientCfg = user.client_id ? await ClientConfigDB.findByClientId(user.client_id) : await ClientConfigDB.findByUserId(user.id);
+  const isPlanActive = clientCfg ? Number(clientCfg.plan_active) === 1 && Number(clientCfg.is_active) === 1 : true;
+
   res.json({
     success: true,
     token,
@@ -42,7 +45,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
       name: user.name,
       whatsapp: user.whatsapp,
       whatsappValidado: Number(user.whatsapp_validado) === 1,
-      planActive: Number(user.plan_active) === 1
+      planActive: isPlanActive
     }
   });
 });

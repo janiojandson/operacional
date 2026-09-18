@@ -1,5 +1,5 @@
-import { FlowSignal } from '../../shared/types';
-import { SimulatedTrade, PaperAccount } from '../../shared/paperTypes';
+import { FlowSignal } from '../../../shared/types';
+import { SimulatedTrade, PaperAccount } from '../../../shared/paperTypes';
 import { AutoPairSelectorEngine } from './autoPairSelectorEngine';
 import { QuantStrategyEngine } from './quantStrategyEngine';
 

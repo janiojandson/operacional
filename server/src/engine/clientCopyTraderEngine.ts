@@ -1,5 +1,5 @@
-import { ClientAccountConfig, ClientTradeLog } from '../../shared/clientTypes.js';
-import { SimulatedTrade } from '../../shared/paperTypes.js';
+import { ClientAccountConfig, ClientTradeLog } from '../../../shared/clientTypes.js';
+import { SimulatedTrade } from '../../../shared/paperTypes.js';
 import { ClientConfigDB } from '../database/db.js';
 import { BybitExecutionEngine } from './bybitExecutionEngine.js';
 import { ComunicacaoService } from '../services/comunicacaoService.js';

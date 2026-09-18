@@ -1,4 +1,4 @@
-import { PairAutonomousStatus, OrderBookData, FlowSignal } from '../../shared/types';
+import { PairAutonomousStatus, OrderBookData, FlowSignal } from '../../../shared/types';
 
 export class AutonomousPairScanner {
   private static pairRegistry: Map<string, PairAutonomousStatus> = new Map([

@@ -101,5 +101,20 @@ export interface AssetSummary {
   high24h: number;
   low24h: number;
   cvd: number;
-}export type SessionType = 'ASIA' | 'LONDON' | 'NY' | 'OFF_HOURS';
-export type MarketRegime = 'TRENDING_BULL' | 'TRENDING_BEAR' | 'RANGING' | 'VOLATILE_EXPANSION' | 'COMPRESSION';
+}
+
+export type SessionType = 'ASIA' | 'LONDON' | 'NY' | 'OFF_HOURS';
+export type MarketRegime = 
+  | 'TRENDING_BULL' 
+  | 'TRENDING_BEAR' 
+  | 'RANGING' 
+  | 'VOLATILE_EXPANSION' 
+  | 'COMPRESSION'
+  | 'TREND'
+  | 'RANGE'
+  | 'HIGH_VOLATILITY'
+  | 'HIGH_TREND'
+  | 'CHOPPY_RANGING'
+  | 'LOW_LIQUIDITY'
+  | 'EXPANSION_FLOW';
+

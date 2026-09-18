@@ -1,4 +1,4 @@
-import { ClientProtectionAccount } from '../../shared/types';
+import { ClientProtectionAccount } from '../../../shared/types';
 
 export class ClientProtectionEngine {
   private static comunicacaoHubUrl = process.env.COMUNICACAO_API_URL || 'https://comunicacao-hub-production.up.railway.app/api';
