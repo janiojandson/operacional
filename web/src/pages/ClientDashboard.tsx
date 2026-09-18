@@ -20,6 +20,7 @@ interface AccountInfo {
   maxDailyLossUsd: number;
   maxDailyProfitUsd: number;
   isActive: boolean;
+  maskedKey?: string;
   planActive?: boolean;
   isVitalicio?: boolean;
   isVitrine?: boolean;
@@ -704,41 +705,49 @@ export default function ClientDashboard() {
               </div>
             </form>
 
-            {/* Test Connection */}
+            {/* Chaves Cadastradas */}
             {account?.hasApiKeys && (
-              <div className="bg-surface border border-border/60 rounded-2xl p-5 space-y-3">
-                <div className="flex items-center justify-between">
+              <div className="bg-surface border border-border/60 rounded-2xl p-6 mt-6 space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
-                    <h3 className="text-sm font-bold text-white">Validar Conexão com a Bybit</h3>
-                    <p className="text-xs text-slate-400">Testa se a Bybit aceita a chave e busca seu saldo real.</p>
+                    <h3 className="text-sm font-bold text-white flex items-center space-x-2">
+                      <Lock className="w-4 h-4 text-emerald-400" />
+                      <span>Chave de API Cadastrada</span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1">Sua conexão atual com a Bybit.</p>
                   </div>
-                  <button
-                    onClick={handleTestConnection}
-                    disabled={testing}
-                    className="flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-600/30 font-bold text-sm transition-all disabled:opacity-60 shrink-0"
-                  >
-                    {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />}
-                    <span>{testing ? 'Verificando...' : 'Testar Conexão'}</span>
-                  </button>
+                  
+                  {/* Status & Botão de Ligar/Desligar */}
+                  <div className="flex items-center space-x-4 bg-background p-3 rounded-xl border border-border/50">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Status da Chave</span>
+                      <div className="flex items-center space-x-1.5">
+                        <div className={`w-2 h-2 rounded-full ${account.apiConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                        <span className={`text-xs font-bold ${account.apiConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {account.apiConnected ? 'Pronta para uso' : 'Inválida / Erro'}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="w-px h-8 bg-border/50" />
+                    
+                    <div className="flex flex-col items-center">
+                      <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Operações</span>
+                      <button
+                        onClick={handleToggleSync}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${account.syncEnabled ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${account.syncEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                {testResult && (
-                  <div className={`p-4 rounded-xl border text-xs font-mono ${testResult.success ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-300' : 'bg-rose-950/30 border-rose-500/30 text-rose-300'}`}>
-                    {testResult.success ? (
-                      <div className="space-y-1">
-                        <div className="flex items-center space-x-2"><CheckCircle className="w-4 h-4" /><span className="font-bold">{testResult.message}</span></div>
-                        {testResult.accountInfo && (
-                          <div className="text-slate-300">Saldo na Bybit: <span className="text-white font-bold">${Number(testResult.accountInfo.walletBalance).toFixed(2)} USDT</span></div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex items-start space-x-2">
-                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                        <div><div className="font-bold">{testResult.error}</div><div className="text-rose-400/70 mt-1">{testResult.hint}</div></div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                <div className="flex items-center space-x-3 p-3 bg-accent/5 rounded-xl border border-accent/10">
+                  <span className="text-xs text-accent font-mono bg-accent/10 px-2 py-1 rounded">API KEY</span>
+                  <code className="text-sm font-mono text-white tracking-widest">{account.maskedKey || '••••••••'}****************</code>
+                  <span className="text-[10px] text-slate-400 ml-auto border border-border px-2 py-1 rounded-md">AES-256</span>
+                </div>
               </div>
             )}
           </div>

@@ -301,36 +301,42 @@ authRouter.post('/register', requireAdmin, async (req: Request, res: Response) =
   const userId = `usr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const clientId = role === 'CLIENT' ? `cli-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` : undefined;
 
-  await UserDB.create({
-    id: userId,
-    email: email.toLowerCase().trim(),
-    passwordHash: hash,
-    role,
-    clientId,
-    name: name.trim(),
-    whatsapp: cleanPhone || undefined,
-    whatsappValidado: false,
-    planActive: true
-  });
-
-  if (role === 'CLIENT' && clientId) {
-    await ClientConfigDB.create({ 
-      clientId, 
-      userId, 
+  try {
+    await UserDB.create({
+      id: userId,
+      email: email.toLowerCase().trim(),
+      passwordHash: hash,
+      role,
+      clientId,
       name: name.trim(),
-      notificationPhone: cleanPhone || undefined,
-      syncEnabled: true 
+      whatsapp: cleanPhone || undefined,
+      whatsappValidado: false,
+      planActive: true
     });
-  }
 
-  res.status(201).json({
-    success: true,
-    userId,
-    clientId,
-    email: email.toLowerCase().trim(),
-    role,
-    name
-  });
+    if (role === 'CLIENT' && clientId) {
+      await ClientConfigDB.create({ 
+        clientId, 
+        userId, 
+        name: name.trim(),
+        notificationPhone: cleanPhone || undefined,
+        syncEnabled: true 
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      userId,
+      clientId,
+      email: email.toLowerCase().trim(),
+      role,
+      name
+    });
+  } catch (err: any) {
+    console.error('[AuthRoutes] Erro no cadastro:', err);
+    try { await query('DELETE FROM app_users WHERE id = $1', [userId]); } catch (e) {}
+    res.status(500).json({ error: 'Erro interno ao salvar dados do cliente.' });
+  }
 });
 
 // POST /api/auth/change-password

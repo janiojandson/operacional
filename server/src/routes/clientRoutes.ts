@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requireClient } from '../auth/authMiddleware.js';
 import { UserDB, ClientConfigDB, TradeHistoryDB } from '../database/db.js';
-import { encrypt } from '../utils/crypto.js';
+import { encrypt, decrypt } from '../utils/crypto.js';
 import { BybitExecutionEngine } from '../engine/bybitExecutionEngine.js';
 import { sanitizeCsvField, escapeHtml } from '../utils/sanitizer.js';
 
@@ -39,13 +39,20 @@ clientRouter.post('/api-keys', async (req: Request, res: Response) => {
     const encKey = encrypt(apiKey);
     const encSecret = encrypt(apiSecret);
     await ClientConfigDB.updateApiKeys(clientId, encKey, encSecret, testnet);
+    
+    const result = await BybitExecutionEngine.connectAndValidate(clientId);
+    if (!result.success) {
+      return res.status(400).json({ error: 'A chave API fornecida é inválida ou não possui a permissão de Contrato na Bybit.' });
+    }
+
     res.json({
       success: true,
-      message: 'API Keys salvas com criptografia AES-256. Clique em "Testar Conexão" para validar.',
-      testnet
+      message: 'API Keys validadas e prontas para uso.',
+      testnet,
+      maskedKey: result.maskedKey
     });
   } catch (err: any) {
-    res.status(500).json({ error: `Erro ao salvar chaves: ${err.message}` });
+    res.status(500).json({ error: `Erro interno ao salvar chaves: ${err.message}` });
   }
 });
 
@@ -114,6 +121,7 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
     apiConnected: Number(config.api_connected) === 1,
     bybitTestnet: Number(config.bybit_testnet) === 1,
     hasApiKeys: !!(config.bybit_api_key_enc),
+    maskedKey: config.bybit_api_key_enc ? `${decrypt(config.bybit_api_key_enc).substring(0, 5)}...` : null,
     notificationPhone: config.notification_phone,
     planType: config.plan_type || 'ACTIVE',
     planExpiresAt: expiresAt
