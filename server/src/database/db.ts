@@ -136,8 +136,10 @@ export async function initDatabase(): Promise<void> {
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS whatsapp_validado INTEGER NOT NULL DEFAULT 0`).catch(() => {});
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS sync_enabled INTEGER NOT NULL DEFAULT 0`).catch(() => {});
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_active INTEGER NOT NULL DEFAULT 1`).catch(() => {});
-  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_type TEXT NOT NULL DEFAULT 'ACTIVE'`).catch(() => {});
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_expires_at BIGINT`).catch(() => {});
+  
+  // Garantir que a constraint estrita de chave estrangeira não trave cadastros simultâneos ou chaves API
+  await query(`ALTER TABLE client_configs DROP CONSTRAINT IF EXISTS client_configs_user_id_fkey`).catch(() => {});
 
   // Índices para performance
   await query(`CREATE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email)`);
