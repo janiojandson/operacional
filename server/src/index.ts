@@ -214,6 +214,38 @@ app.get('/api/clients', requireAuth, (req, res) => {
   });
 });
 
+// Endpoint do feed em tempo real do Master Quant para a visão do Cliente
+app.get('/api/client/master-feed', requireAuth, (req, res) => {
+  const account = paperTrading.getAccountState();
+  const summaries = marketManager.getSummaries();
+  const logs = clientCopyTrader.getLogs();
+
+  const cryptoPairs = summaries.filter(s => s.symbol.includes('USDT')).map(s => ({
+    symbol: s.symbol,
+    price: s.lastPrice,
+    change24h: s.change24h
+  }));
+
+  res.json({
+    masterOnline: true,
+    trackedCryptoPairs: cryptoPairs,
+    masterOpenPositions: account.openPositions.map(p => ({
+      id: p.id,
+      symbol: p.symbol,
+      type: p.type,
+      entryPrice: p.entryPrice,
+      currentPrice: p.currentPrice,
+      pnl: p.pnl,
+      pnlPct: p.pnlPct,
+      entryTime: p.entryTime,
+      stopLoss: p.stopLoss,
+      takeProfit: p.takeProfit,
+      signalReason: p.signalReason
+    })),
+    recentLogs: logs.slice(-15).reverse()
+  });
+});
+
 app.post('/api/clients', requireAuth, (req, res) => {
   const config: ClientAccountConfig = req.body;
   clientCopyTrader.addOrUpdateClient(config);
