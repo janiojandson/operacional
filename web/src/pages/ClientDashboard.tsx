@@ -5,7 +5,8 @@ import {
   AlertTriangle, CheckCircle, Loader2, RefreshCw, Download,
   Eye, EyeOff, LogOut, Shield, Activity, Clock,
   TrendingDown, Zap, FileSpreadsheet, Lock,
-  HelpCircle, Info, Bell, ExternalLink, Sliders, Power, AlertOctagon, ShieldAlert, Trash2, ArrowRightLeft
+  HelpCircle, Info, Bell, ExternalLink, Sliders, Power, AlertOctagon, ShieldAlert, Trash2, ArrowRightLeft,
+  Terminal
 } from 'lucide-react';
 
 type ClientTab = 'overview' | 'api-keys' | 'risk' | 'history';
