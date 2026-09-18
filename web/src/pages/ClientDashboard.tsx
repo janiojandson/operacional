@@ -101,6 +101,8 @@ export default function ClientDashboard() {
   const [leverage, setLeverage] = useState(10);
   const [maxDailyLoss, setMaxDailyLoss] = useState(50);
   const [maxDailyProfit, setMaxDailyProfit] = useState(150);
+  const [autoConfig, setAutoConfig] = useState(true);
+  const [refreshingBalance, setRefreshingBalance] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<'conservative' | 'moderate' | 'aggressive' | 'custom'>('moderate');
 
   const isPlanActive = account ? account.planActive !== false : user?.planActive !== false;
@@ -108,6 +110,24 @@ export default function ClientDashboard() {
   const notify = (msg: string, type: 'success' | 'error' = 'success') => {
     setNotification({ msg, type });
     setTimeout(() => setNotification(null), 4000);
+  };
+
+  const handleRefreshBalance = async () => {
+    setRefreshingBalance(true);
+    try {
+      const res = await authFetch('/api/client/account/refresh', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        notify('✅ Saldo atualizado com a Bybit!');
+        fetchAccount();
+      } else {
+        notify(data.error || 'Erro ao sincronizar com a Bybit.', 'error');
+      }
+    } catch {
+      notify('Erro de conexão ao atualizar saldo.', 'error');
+    } finally {
+      setRefreshingBalance(false);
+    }
   };
 
   const fetchAccount = async () => {
@@ -120,6 +140,9 @@ export default function ClientDashboard() {
         setLeverage(data.leverage);
         setMaxDailyLoss(data.maxDailyLossUsd);
         setMaxDailyProfit(data.maxDailyProfitUsd);
+        if (data.autoConfigEnabled !== undefined) {
+          setAutoConfig(data.autoConfigEnabled);
+        }
         if (data.balance > 0 && simulatedBank === 1000) {
           setSimulatedBank(data.balance);
         }
@@ -296,9 +319,15 @@ export default function ClientDashboard() {
     e.preventDefault();
     const res = await authFetch('/api/client/risk', {
       method: 'POST',
-      body: JSON.stringify({ riskPct, leverage, maxDailyLossUsd: maxDailyLoss, maxDailyProfitUsd: maxDailyProfit })
+      body: JSON.stringify({ 
+        riskPct, 
+        leverage, 
+        maxDailyLossUsd: maxDailyLoss, 
+        maxDailyProfitUsd: maxDailyProfit,
+        autoConfigEnabled: autoConfig
+      })
     });
-    if (res.ok) { notify('✅ Configuração de risco salva com sucesso!'); fetchAccount(); }
+    if (res.ok) { notify('✅ Gestão de risco do projeto salva com sucesso!'); fetchAccount(); }
     else notify('Erro ao salvar configuração.', 'error');
   };
 
@@ -541,13 +570,34 @@ export default function ClientDashboard() {
 
             {/* KPI Cards */}
             <div className="grid grid-cols-4 gap-4">
-              <div className="bg-surface border border-border/60 rounded-2xl p-5 shadow-lg shadow-black/20">
+              <div className="bg-surface border border-border/60 rounded-2xl p-5 shadow-lg shadow-black/20 relative group">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-slate-400 font-mono uppercase">Saldo Total</span>
-                  <DollarSign className="w-4 h-4 text-amber-400" />
+                  <div className="flex items-center space-x-1.5">
+                    <button
+                      onClick={handleRefreshBalance}
+                      disabled={refreshingBalance}
+                      title="Sincronizar saldo ao vivo na Bybit"
+                      className="p-1 rounded-md hover:bg-white/10 text-amber-400 transition-colors"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${refreshingBalance ? 'animate-spin' : ''}`} />
+                    </button>
+                    <DollarSign className="w-4 h-4 text-amber-400" />
+                  </div>
                 </div>
-                <div className="text-2xl font-black text-amber-400">${(account?.balance ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                <div className="text-xs text-slate-500 mt-1">USDT na carteira unificada</div>
+                <div className="text-2xl font-black text-amber-400">
+                  ${(account?.balance ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </div>
+                <div className="flex items-center justify-between text-xs text-slate-500 mt-1">
+                  <span>USDT na carteira unificada</span>
+                  <button 
+                    onClick={handleRefreshBalance} 
+                    disabled={refreshingBalance}
+                    className="text-[10px] text-amber-400 hover:underline font-mono"
+                  >
+                    {refreshingBalance ? 'Atualizando...' : 'Atualizar'}
+                  </button>
+                </div>
               </div>
 
               <div className="bg-surface border border-border/60 rounded-2xl p-5 shadow-lg shadow-black/20">
@@ -1002,7 +1052,84 @@ export default function ClientDashboard() {
               </div>
             </div>
 
+            {/* Card de Modo Automático Oficial do Projeto */}
+            <div className={`p-6 rounded-2xl border transition-all ${
+              autoConfig 
+                ? 'bg-gradient-to-r from-emerald-950/40 via-surface to-emerald-950/30 border-emerald-500/50 shadow-xl shadow-emerald-500/10' 
+                : 'bg-surface border-border/60'
+            }`}>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center space-x-2">
+                    <Shield className="w-5 h-5 text-emerald-400" />
+                    <h3 className="text-base font-bold text-white">Configuração Automática Oficial do Projeto</h3>
+                    <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono text-[10px] font-black border border-emerald-500/30">
+                      PADRÃO INSTITUCIONAL
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300">
+                    O robô calibra o risco estritamente de acordo com o tamanho da sua banca na Bybit (${activeBank.toFixed(2)} USDT), sem necessidade de ajustes manuais.
+                  </p>
+                </div>
+
+                <div className="flex items-center space-x-3 bg-background/80 px-4 py-3 rounded-xl border border-border/50">
+                  <span className="text-xs font-mono font-bold text-slate-300">
+                    {autoConfig ? 'AUTOMÁTICO ATIVO' : 'MANUAL / LIVRE'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !autoConfig;
+                      setAutoConfig(next);
+                      if (next) {
+                        setRiskPct(1.0);
+                        setLeverage(10);
+                        setMaxDailyLoss(Number(Math.max(15, activeBank * 0.03).toFixed(2)));
+                        setMaxDailyProfit(Number(Math.max(30, activeBank * 0.06).toFixed(2)));
+                      }
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${autoConfig ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoConfig ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+              </div>
+
+              {autoConfig && (
+                <div className="grid grid-cols-4 gap-3 mt-4 pt-4 border-t border-border/40 font-mono text-xs">
+                  <div className="p-2.5 rounded-xl bg-background/60 border border-border/40">
+                    <span className="text-slate-400 text-[10px] block">Risco por Trade</span>
+                    <span className="text-emerald-400 font-bold text-sm">1.0% (${(activeBank * 0.01).toFixed(2)})</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-background/60 border border-border/40">
+                    <span className="text-slate-400 text-[10px] block">Alavancagem</span>
+                    <span className="text-accent font-bold text-sm">10x Isolada</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-background/60 border border-border/40">
+                    <span className="text-slate-400 text-[10px] block">Stop Diário (Loss)</span>
+                    <span className="text-rose-400 font-bold text-sm">-${Number(Math.max(15, activeBank * 0.03).toFixed(2))} (3%)</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-background/60 border border-border/40">
+                    <span className="text-slate-400 text-[10px] block">Meta Diária (Gain)</span>
+                    <span className="text-emerald-400 font-bold text-sm">+${Number(Math.max(30, activeBank * 0.06).toFixed(2))} (6%)</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <form onSubmit={handleSaveRisk} className="bg-surface border border-border/60 rounded-2xl p-6 space-y-6">
+              <div className="flex items-center justify-between pb-2 border-b border-border/40">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                  {autoConfig ? 'Parâmetros Travados pelo Projeto Oficial' : 'Ajuste Manual Personalizado'}
+                </span>
+                {autoConfig && (
+                  <span className="text-[11px] text-emerald-400 font-mono font-bold flex items-center space-x-1">
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    <span>Protegido contra erros operacionais</span>
+                  </span>
+                )}
+              </div>
+
               <div>
                 <div className="flex justify-between mb-2">
                   <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Risk % por Trade (Perda Máxima por Operação)</label>
@@ -1010,11 +1137,12 @@ export default function ClientDashboard() {
                 </div>
                 <input
                   type="range" min={0.1} max={5} step={0.1}
+                  disabled={autoConfig}
                   value={riskPct} onChange={e => { setRiskPct(Number(e.target.value)); setSelectedPreset('custom'); }}
-                  className="w-full accent-accent cursor-pointer"
+                  className={`w-full accent-accent ${autoConfig ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
                 />
                 <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1">
-                  <span>0.1% (Conservador)</span><span>1.0% (Recomendado)</span><span>5.0% (Máx. Permitido)</span>
+                  <span>0.1% (Conservador)</span><span>1.0% (Padrão do Projeto)</span><span>5.0% (Máx. Permitido)</span>
                 </div>
               </div>
 
@@ -1025,8 +1153,9 @@ export default function ClientDashboard() {
                 </div>
                 <input
                   type="range" min={1} max={50} step={1}
+                  disabled={autoConfig}
                   value={leverage} onChange={e => { setLeverage(Number(e.target.value)); setSelectedPreset('custom'); }}
-                  className="w-full accent-accent cursor-pointer"
+                  className={`w-full accent-accent ${autoConfig ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
                 />
                 <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1">
                   <span>1x (Sem alavancar)</span><span>10x (Padrão Bybit)</span><span>50x (Máximo)</span>
@@ -1038,8 +1167,9 @@ export default function ClientDashboard() {
                   <label className="text-[11px] text-rose-400 font-mono block mb-1">Stop Diário Máximo (Trava de Perda $)</label>
                   <input
                     type="number" min={1} step={0.5}
+                    disabled={autoConfig}
                     value={maxDailyLoss} onChange={e => { setMaxDailyLoss(Number(e.target.value)); setSelectedPreset('custom'); }}
-                    className="w-full bg-background border border-rose-500/40 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-rose-500 font-mono"
+                    className={`w-full bg-background border border-rose-500/40 rounded-xl px-4 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-rose-500 ${autoConfig ? 'opacity-50 cursor-not-allowed' : ''}`}
                   />
                   <span className="text-[10px] text-slate-500 mt-1 block">O robô pausa se as perdas do dia atingirem esse valor.</span>
                 </div>
@@ -1047,15 +1177,16 @@ export default function ClientDashboard() {
                   <label className="text-[11px] text-emerald-400 font-mono block mb-1">Meta Diária (Stop Gain $)</label>
                   <input
                     type="number" min={1} step={0.5}
+                    disabled={autoConfig}
                     value={maxDailyProfit} onChange={e => { setMaxDailyProfit(Number(e.target.value)); setSelectedPreset('custom'); }}
-                    className="w-full bg-background border border-emerald-500/40 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500 font-mono"
+                    className={`w-full bg-background border border-emerald-500/40 rounded-xl px-4 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-emerald-500 ${autoConfig ? 'opacity-50 cursor-not-allowed' : ''}`}
                   />
                   <span className="text-[10px] text-slate-500 mt-1 block">Preserva o lucro do dia e suspende novas entradas.</span>
                 </div>
               </div>
 
               <button type="submit" className="w-full py-3 rounded-xl bg-accent hover:bg-accent/80 text-white text-sm font-bold transition-all shadow-lg shadow-accent/20">
-                Salvar Configurações de Risco
+                {autoConfig ? 'Confirmar Configuração Automática do Projeto' : 'Salvar Configurações Manuais'}
               </button>
             </form>
           </div>

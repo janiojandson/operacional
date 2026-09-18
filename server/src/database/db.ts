@@ -146,6 +146,7 @@ export async function initDatabase(): Promise<void> {
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_test_api_secret_enc TEXT`).catch(() => {});
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_test_connected INTEGER NOT NULL DEFAULT 0`).catch(() => {});
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS active_environment TEXT NOT NULL DEFAULT 'REAL'`).catch(() => {});
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS auto_config_enabled INTEGER NOT NULL DEFAULT 1`).catch(() => {});
 
   // Garantir que a constraint estrita de chave estrangeira não trave cadastros simultâneos ou chaves API
   await query(`ALTER TABLE client_configs DROP CONSTRAINT IF EXISTS client_configs_user_id_fkey`).catch(() => {});
@@ -535,7 +536,7 @@ export const ClientConfigDB = {
     );
   },
 
-  updateRiskConfig: async (clientId: string, config: { riskPct?: number; leverage?: number; maxDailyLossUsd?: number; maxDailyProfitUsd?: number; fixedLotUsd?: number }) => {
+  updateRiskConfig: async (clientId: string, config: { riskPct?: number; leverage?: number; maxDailyLossUsd?: number; maxDailyProfitUsd?: number; fixedLotUsd?: number; autoConfigEnabled?: boolean }) => {
     const fields: string[] = [];
     const values: any[] = [];
     let i = 1;
@@ -544,6 +545,7 @@ export const ClientConfigDB = {
     if (config.maxDailyLossUsd !== undefined) { fields.push(`max_daily_loss_usd = $${i++}`); values.push(config.maxDailyLossUsd); }
     if (config.maxDailyProfitUsd !== undefined) { fields.push(`max_daily_profit_usd = $${i++}`); values.push(config.maxDailyProfitUsd); }
     if (config.fixedLotUsd !== undefined) { fields.push(`fixed_lot_usd = $${i++}`); values.push(config.fixedLotUsd); }
+    if (config.autoConfigEnabled !== undefined) { fields.push(`auto_config_enabled = $${i++}`); values.push(config.autoConfigEnabled ? 1 : 0); }
     if (fields.length === 0) return;
     values.push(clientId);
     await query(`UPDATE client_configs SET ${fields.join(', ')}, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $${i}`, values);

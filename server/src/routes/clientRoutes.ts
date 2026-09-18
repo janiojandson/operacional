@@ -174,10 +174,58 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
     hasTestKeys: !!testKeyEnc,
     testMaskedKey: testKeyEnc ? `${decrypt(testKeyEnc).substring(0, 5)}...` : null,
     testConnected,
+    autoConfigEnabled: (config as any).auto_config_enabled !== undefined ? Number((config as any).auto_config_enabled) === 1 : true,
     notificationPhone: config.notification_phone,
     planType: config.plan_type || 'ACTIVE',
     planExpiresAt: expiresAt
   });
+});
+
+// POST /api/client/account/refresh — Força sincronização imediata do saldo com a Bybit
+clientRouter.post('/account/refresh', async (req: Request, res: Response) => {
+  const clientId = await resolveClientId(req);
+  if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
+
+  const config = await ClientConfigDB.findByClientId(clientId);
+  if (!config) return res.status(404).json({ error: 'Configuração não encontrada.' });
+
+  try {
+    const bybitAccount = await BybitExecutionEngine.getAccountBalance(clientId);
+    if (bybitAccount) {
+      await ClientConfigDB.updateBalance(clientId, bybitAccount.walletBalance);
+
+      // Se configuração automática estiver ligada, calibra os stops e metas conforme o projeto
+      const isAuto = (config as any).auto_config_enabled !== undefined ? Number((config as any).auto_config_enabled) === 1 : true;
+      if (isAuto && bybitAccount.walletBalance > 0) {
+        const bal = bybitAccount.walletBalance;
+        // Estrutura do projeto: Risco 1.0%, Stop Diário 3%, Meta 6%, Alavancagem padrão 10x
+        const stopUsd = Number(Math.max(15, bal * 0.03).toFixed(2));
+        const metaUsd = Number(Math.max(30, bal * 0.06).toFixed(2));
+        await ClientConfigDB.updateRiskConfig(clientId, {
+          riskPct: 1.0,
+          leverage: 10,
+          maxDailyLossUsd: stopUsd,
+          maxDailyProfitUsd: metaUsd,
+          autoConfigEnabled: true
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: '✅ Saldo e proteções atualizados com sucesso da Bybit!',
+        balance: bybitAccount.walletBalance,
+        availableBalance: bybitAccount.availableBalance,
+        equity: bybitAccount.equity
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'Não foi possível buscar o saldo da Bybit. Verifique a chave ou o status da conexão.'
+      });
+    }
+  } catch (err: any) {
+    return res.status(500).json({ error: `Erro ao sincronizar saldo: ${err.message}` });
+  }
 });
 
 
@@ -366,7 +414,7 @@ clientRouter.post('/risk', async (req: Request, res: Response) => {
   const clientId = await resolveClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
 
-  const { riskPct, leverage, maxDailyLossUsd, maxDailyProfitUsd, fixedLotUsd } = req.body;
+  const { riskPct, leverage, maxDailyLossUsd, maxDailyProfitUsd, fixedLotUsd, autoConfigEnabled } = req.body;
 
   if (riskPct !== undefined && (riskPct < 0.1 || riskPct > 5)) {
     return res.status(400).json({ error: 'Risk% deve ser entre 0.1% e 5%.' });
@@ -375,7 +423,7 @@ clientRouter.post('/risk', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Alavancagem deve ser entre 1x e 50x.' });
   }
 
-  await ClientConfigDB.updateRiskConfig(clientId, { riskPct, leverage, maxDailyLossUsd, maxDailyProfitUsd, fixedLotUsd });
+  await ClientConfigDB.updateRiskConfig(clientId, { riskPct, leverage, maxDailyLossUsd, maxDailyProfitUsd, fixedLotUsd, autoConfigEnabled });
 
   const updated = await ClientConfigDB.findByClientId(clientId);
   res.json({
