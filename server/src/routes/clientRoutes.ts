@@ -155,6 +155,9 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
     unrealisedPnl: bybitAccount?.unrealisedPnl ?? 0,
     fundingUsdt: bybitAccount?.fundingUsdt ?? 0,
     fundingBrl: bybitAccount?.fundingBrl ?? 0,
+    unifiedBrl: bybitAccount?.unifiedBrl ?? 0,
+    brlBalance: bybitAccount?.brlBalance ?? 0,
+    totalEquityUsd: bybitAccount?.totalEquityUsd ?? (bybitAccount?.walletBalance ?? Number(config.balance)),
     riskPct: Number(config.risk_pct),
     leverage: Number(config.leverage),
     maxDailyLossUsd: Number(config.max_daily_loss_usd),
@@ -216,7 +219,10 @@ clientRouter.post('/account/refresh', async (req: Request, res: Response) => {
         availableBalance: bybitAccount.availableBalance,
         equity: bybitAccount.equity,
         fundingUsdt: bybitAccount.fundingUsdt ?? 0,
-        fundingBrl: bybitAccount.fundingBrl ?? 0
+        fundingBrl: bybitAccount.fundingBrl ?? 0,
+        unifiedBrl: bybitAccount.unifiedBrl ?? 0,
+        brlBalance: bybitAccount.brlBalance ?? 0,
+        totalEquityUsd: bybitAccount.totalEquityUsd ?? bybitAccount.walletBalance
       });
     } else {
       return res.status(400).json({

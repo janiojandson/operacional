@@ -17,6 +17,9 @@ interface AccountInfo {
   unrealisedPnl: number;
   fundingUsdt?: number;
   fundingBrl?: number;
+  unifiedBrl?: number;
+  brlBalance?: number;
+  totalEquityUsd?: number;
   riskPct: number;
   leverage: number;
   maxDailyLossUsd: number;
@@ -570,8 +573,15 @@ export default function ClientDashboard() {
                   <span>Pânico (Zerar Bybit)</span>
                 </button>
 
-                <button onClick={() => { fetchAccount(); fetchPositions(); }} className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white transition-colors bg-surface px-3 py-2 rounded-xl border border-border/60">
-                  <RefreshCw className="w-3.5 h-3.5" />
+                {/* Botão de Atualizar Saldo ao vivo com a Bybit */}
+                <button
+                  onClick={handleRefreshBalance}
+                  disabled={refreshingBalance}
+                  className="flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-surface border border-border/60 hover:border-amber-500/50 text-slate-300 hover:text-white font-bold text-xs transition-all cursor-pointer"
+                  title="Consulta saldo e posições em tempo real diretamente na Bybit"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${refreshingBalance ? 'animate-spin' : ''}`} />
+                  <span>{refreshingBalance ? 'Atualizando...' : 'Atualizar Saldo Bybit'}</span>
                 </button>
               </div>
             </div>
@@ -593,39 +603,41 @@ export default function ClientDashboard() {
               </div>
             )}
 
-            {/* 💡 Banner Assistente: Saldo em BRL (Reais) na Conta de Financiamento */}
-            {(account?.fundingBrl ?? 0) > 0 && (
-              <div className="p-5 rounded-2xl bg-sky-500/10 border border-sky-500/30 flex items-start space-x-4 text-sm">
-                <ArrowRightLeft className="w-6 h-6 text-sky-400 shrink-0 mt-0.5" />
-                <div className="space-y-1.5 flex-1">
+            {/* 💡 Banner Assistente: Saldo em BRL (Reais) detectado na Bybit */}
+            {((account?.brlBalance ?? 0) > 0 || (account?.fundingBrl ?? 0) > 0) && (
+              <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/40 flex items-start space-x-4 text-sm shadow-xl shadow-amber-500/5">
+                <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-400 shrink-0">
+                  <ArrowRightLeft className="w-6 h-6" />
+                </div>
+                <div className="space-y-2 flex-1">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                    <p className="font-bold text-sky-300 text-base">
-                      Saldo em Reais Detectado na Bybit: R$ {account?.fundingBrl?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    <p className="font-bold text-white text-base">
+                      Saldo em Reais Identificado: <span className="text-amber-400 font-mono">R$ {((account?.brlBalance ?? 0) > 0 ? account?.brlBalance : account?.fundingBrl)?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span> <span className="text-xs text-slate-400 font-normal">(~${(((account?.brlBalance ?? 0) > 0 ? account?.brlBalance : account?.fundingBrl) ?? 0 / 5.15).toFixed(2)} USD)</span>
                     </p>
-                    <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono text-[10px] font-bold self-start sm:self-auto">
-                      CONTA DE FINANCIAMENTO (BRL)
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[10px] font-bold border border-amber-500/30 self-start sm:self-auto">
+                      CONVERSÃO NECESSÁRIA PARA FUTUROS
                     </span>
                   </div>
-                  <p className="text-sky-200/80 text-xs">
-                    Seu PIX entrou como BRL fiduciário. Para que o robô execute as operações de futuros, você precisa <strong>converter para USDT</strong> (taxa zero) e movê-lo para a <strong>Conta de Trading Unificada (UTA)</strong>.
+                  <p className="text-slate-300 text-xs leading-relaxed">
+                    Identificamos seu saldo em Reais na Bybit! Como o robô opera contratos futuros em paridade com o dólar cripto, esse valor precisa ser convertido para <strong>USDT</strong>. Na sua tela da Bybit (em Trading Unificado), clique no botão <strong>"Converter"</strong> (no topo) para converter BRL em USDT instantaneamente com <strong>taxa zero</strong>.
                   </p>
-                  <div className="pt-2 flex flex-wrap gap-2 items-center">
+                  <div className="pt-2 flex flex-wrap gap-2.5 items-center">
                     <a
                       href="https://www.bybit.com/trade/spot/USDT/BRL"
                       target="_blank"
                       rel="noreferrer"
-                      className="px-3.5 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs transition-all flex items-center space-x-1.5 shadow-lg shadow-sky-500/20"
+                      className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-all flex items-center space-x-1.5 shadow-lg shadow-amber-500/20 cursor-pointer"
                     >
-                      <span>Abrir Conversão na Bybit (BRL ➡️ USDT)</span>
+                      <span>Abrir Conversor Bybit (BRL ➡️ USDT)</span>
                       <ExternalLink className="w-3.5 h-3.5" />
                     </a>
                     <button
                       onClick={handleRefreshBalance}
                       disabled={refreshingBalance}
-                      className="px-3.5 py-1.5 rounded-xl bg-surface border border-border/60 hover:bg-white/10 text-white font-bold text-xs transition-all flex items-center space-x-1.5"
+                      className="px-4 py-2 rounded-xl bg-surface border border-border/60 hover:bg-white/10 text-white font-bold text-xs transition-all flex items-center space-x-1.5 cursor-pointer"
                     >
-                      <RefreshCw className={`w-3.5 h-3.5 ${refreshingBalance ? 'animate-spin' : ''}`} />
-                      <span>Já converti, atualizar saldo</span>
+                      <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${refreshingBalance ? 'animate-spin' : ''}`} />
+                      <span>{refreshingBalance ? 'Sincronizando...' : 'Já converti na Bybit, Atualizar Saldo'}</span>
                     </button>
                   </div>
                 </div>
@@ -687,17 +699,15 @@ export default function ClientDashboard() {
                   </div>
                 </div>
                 <div className="text-2xl font-black text-amber-400">
-                  ${(account?.balance ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  ${(account?.balance ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
-                <div className="flex items-center justify-between text-xs text-slate-500 mt-1">
-                  <span>USDT na carteira unificada</span>
-                  <button 
-                    onClick={handleRefreshBalance} 
-                    disabled={refreshingBalance}
-                    className="text-[10px] text-amber-400 hover:underline font-mono"
-                  >
-                    {refreshingBalance ? 'Atualizando...' : 'Atualizar'}
-                  </button>
+                <div className="flex items-center justify-between text-xs text-slate-400 mt-1">
+                  <span>USDT margem futuros</span>
+                  {((account?.brlBalance ?? 0) > 0 || (account?.fundingBrl ?? 0) > 0) && (
+                    <span className="text-[10px] text-amber-400 font-mono font-bold">
+                      + R$ {((account?.brlBalance ?? 0) > 0 ? account?.brlBalance : account?.fundingBrl)?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} BRL
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -706,7 +716,7 @@ export default function ClientDashboard() {
                   <span className="text-xs text-slate-400 font-mono uppercase">Disponível</span>
                   <Activity className="w-4 h-4 text-emerald-400" />
                 </div>
-                <div className="text-2xl font-black text-emerald-400">${(account?.availableBalance ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                <div className="text-2xl font-black text-emerald-400">${(account?.availableBalance ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                 <div className="text-xs text-slate-500 mt-1">Margem livre para trades</div>
               </div>
 

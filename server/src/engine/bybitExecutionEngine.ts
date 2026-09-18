@@ -13,6 +13,9 @@ export interface BybitAccountInfo {
   coin: string;
   fundingUsdt?: number;
   fundingBrl?: number;
+  unifiedBrl?: number;
+  brlBalance?: number;
+  totalEquityUsd?: number;
 }
 
 export interface BybitPosition {
@@ -262,9 +265,12 @@ export class BybitExecutionEngine {
         }
       }
 
-      const usdt = balance.USDT || balance.total;
+      const usdt = balance.USDT;
       const totalBalance = Number(usdt?.total ?? balance?.free?.USDT ?? 0);
       const freeBalance = Number(usdt?.free ?? balance?.free?.USDT ?? 0);
+
+      // 🔍 BRL na Conta de Trading Unificado (UTA)
+      const unifiedBrl = Number(balance.BRL?.total ?? balance?.free?.BRL ?? 0);
 
       // 🔍 Verificar saldo na Conta de Financiamento (Funding Account)
       let fundingUsdt = 0;
@@ -277,14 +283,22 @@ export class BybitExecutionEngine {
         // Ignora se a chave de API não tiver permissão para ler funding account
       }
 
+      const brlBalance = unifiedBrl + fundingBrl;
+      // Total Equity em USD reportado pela Bybit (ex: 779.00 USD)
+      const rawTotalEquity = Number(balance.info?.result?.list?.[0]?.totalEquity ?? 0);
+      const totalEquityUsd = rawTotalEquity > 0 ? rawTotalEquity : totalBalance;
+
       return {
         walletBalance: isNaN(totalBalance) ? 0 : totalBalance,
         availableBalance: isNaN(freeBalance) ? 0 : freeBalance,
         unrealisedPnl: 0,
-        equity: isNaN(totalBalance) ? 0 : totalBalance,
+        equity: totalEquityUsd,
         coin: 'USDT',
         fundingUsdt: isNaN(fundingUsdt) ? 0 : fundingUsdt,
-        fundingBrl: isNaN(fundingBrl) ? 0 : fundingBrl
+        fundingBrl: isNaN(fundingBrl) ? 0 : fundingBrl,
+        unifiedBrl: isNaN(unifiedBrl) ? 0 : unifiedBrl,
+        brlBalance: isNaN(brlBalance) ? 0 : brlBalance,
+        totalEquityUsd: isNaN(totalEquityUsd) ? 0 : totalEquityUsd
       };
     } catch (err: any) {
       console.error(`[BybitEngine] Erro ao buscar saldo ${clientId}:`, err.message);
