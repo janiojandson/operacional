@@ -73,8 +73,8 @@ export class PaperTradingEngine {
     }
 
     let tradeType: 'BUY' | 'SELL' | null = null;
-    let slDistancePct = 0.0030; // 0.30% de Stop Loss
-    let tpDistancePct = 0.0075; // 0.75% de Take Profit (Risco/Retorno 2.5R)
+    let slDistancePct = 0.0100; // 1.00% de Stop Loss Técnico Institucional
+    let tpDistancePct = 0.0250; // 2.50% de Take Profit (Risco/Retorno 2.5R)
 
     if (signal.type === 'ABSORPTION_BUY') {
       tradeType = 'SELL';
@@ -87,13 +87,14 @@ export class PaperTradingEngine {
 
     if (!tradeType) return;
 
+    const decimals = currentPrice < 5 ? 4 : (currentPrice < 100 ? 3 : 2);
     const stopLoss = tradeType === 'BUY' 
-      ? Number((currentPrice * (1 - slDistancePct)).toFixed(currentPrice > 500 ? 2 : 5))
-      : Number((currentPrice * (1 + slDistancePct)).toFixed(currentPrice > 500 ? 2 : 5));
+      ? Number((currentPrice * (1 - slDistancePct)).toFixed(decimals))
+      : Number((currentPrice * (1 + slDistancePct)).toFixed(decimals));
 
     const takeProfit = tradeType === 'BUY'
-      ? Number((currentPrice * (1 + tpDistancePct)).toFixed(currentPrice > 500 ? 2 : 5))
-      : Number((currentPrice * (1 - tpDistancePct)).toFixed(currentPrice > 500 ? 2 : 5));
+      ? Number((currentPrice * (1 + tpDistancePct)).toFixed(decimals))
+      : Number((currentPrice * (1 - tpDistancePct)).toFixed(decimals));
 
     // Potência proporcional à banca (20% por trade padrão)
     const baseAllocation = Math.max(100, this.balance * 0.20);

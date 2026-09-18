@@ -97,8 +97,8 @@ export class MarketDataManager {
   }
 
   private generateRealisticBook(symbol: string, currentPrice: number, category: 'crypto' | 'forex'): OrderBookData {
-    const decimals = category === 'forex' ? 5 : 2;
-    const step = category === 'forex' ? 0.0001 : (currentPrice > 1000 ? 5 : 0.1);
+    const decimals = currentPrice < 5 ? 4 : (currentPrice < 100 ? 3 : 2);
+    const step = Math.max(0.0001, Number((currentPrice * 0.0003).toFixed(decimals)));
     const bids = [];
     const asks = [];
     let bidTotal = 0;
@@ -107,8 +107,8 @@ export class MarketDataManager {
     for (let i = 1; i <= 20; i++) {
       const bidPrice = Number((currentPrice - i * step).toFixed(decimals));
       const askPrice = Number((currentPrice + i * step).toFixed(decimals));
-      const bidAmount = Number((category === 'crypto' ? (Math.random() * 3 + 0.2) * (i > 15 ? 3 : 1) : Math.random() * 50 + 10).toFixed(2));
-      const askAmount = Number((category === 'crypto' ? (Math.random() * 3 + 0.2) * (i > 15 ? 3 : 1) : Math.random() * 50 + 10).toFixed(2));
+      const bidAmount = Number(((Math.random() * 3 + 0.2) * (i > 15 ? 3 : 1)).toFixed(2));
+      const askAmount = Number(((Math.random() * 3 + 0.2) * (i > 15 ? 3 : 1)).toFixed(2));
 
       bidTotal += bidAmount;
       askTotal += askAmount;
@@ -135,16 +135,22 @@ export class MarketDataManager {
       for (const [symbol, state] of this.symbols.entries()) {
         const isWhale = Math.random() < 0.04;
         const side: 'buy' | 'sell' = Math.random() > 0.49 ? 'buy' : 'sell';
-        const priceTick = state.category === 'forex' 
-          ? (side === 'buy' ? 0.00005 : -0.00005) * (Math.random() > 0.7 ? 2 : 1)
-          : (side === 'buy' ? 0.5 : -0.5) * (Math.random() * 3);
+        
+        // Oscilação proporcional realista (0.01% a 0.03% por tick)
+        const pctDelta = (side === 'buy' ? 1 : -1) * (0.0001 + Math.random() * 0.00025);
+        const priceTick = state.lastPrice * pctDelta;
+        const decimals = state.lastPrice < 5 ? 4 : (state.lastPrice < 100 ? 3 : 2);
 
-        const newPrice = Number((state.lastPrice + priceTick).toFixed(state.category === 'forex' ? 5 : 2));
+        const newPrice = Number((state.lastPrice + priceTick).toFixed(decimals));
         state.lastPrice = newPrice;
 
-        const baseAmount = state.category === 'crypto' 
-          ? (symbol.startsWith('BTC') ? 0.15 : (symbol.startsWith('ETH') ? 2.5 : 25))
-          : 50;
+        const baseAmount = symbol.startsWith('BTC') 
+          ? 0.15 
+          : (symbol.startsWith('ETH') 
+            ? 2.0 
+            : (symbol.startsWith('SOL') 
+              ? 15 
+              : (symbol.startsWith('BNB') ? 8 : 2000)));
         const amount = Number((isWhale ? baseAmount * (12 + Math.random() * 10) : baseAmount * (0.2 + Math.random() * 1.5)).toFixed(3));
         const cost = Number((amount * newPrice).toFixed(2));
 
