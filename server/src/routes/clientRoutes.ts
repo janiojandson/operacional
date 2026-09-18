@@ -42,7 +42,9 @@ clientRouter.post('/api-keys', async (req: Request, res: Response) => {
     
     const result = await BybitExecutionEngine.connectAndValidate(clientId);
     if (!result.success) {
-      return res.status(400).json({ error: 'A chave API fornecida é inválida ou não possui a permissão de Contrato na Bybit.' });
+      return res.status(400).json({ 
+        error: result.error || 'A chave API fornecida é inválida ou não possui a permissão de Contrato na Bybit.' 
+      });
     }
 
     res.json({

@@ -129,15 +129,27 @@ export class BybitExecutionEngine {
 
       const exchange = createBybitClient(apiKey, apiSecret, testnet);
 
-      // Buscar saldo da conta USDT Perp (unified margin)
-      const balance = await exchange.fetchBalance({ type: 'unified' });
+      // Buscar saldo da conta (compatível com Bybit V5 Unified Margin e Classic Accounts)
+      let balance: any;
+      try {
+        balance = await exchange.fetchBalance({ type: 'unified' });
+      } catch (e: any) {
+        try {
+          balance = await exchange.fetchBalance({ type: 'contract' });
+        } catch {
+          balance = await exchange.fetchBalance();
+        }
+      }
+
       const usdt = balance.USDT || balance.total;
+      const totalBalance = Number(usdt?.total ?? balance?.free?.USDT ?? 0);
+      const freeBalance = Number(usdt?.free ?? balance?.free?.USDT ?? 0);
 
       const accountInfo: BybitAccountInfo = {
-        walletBalance: Number(usdt?.total ?? 0),
-        availableBalance: Number(usdt?.free ?? 0),
+        walletBalance: isNaN(totalBalance) ? 0 : totalBalance,
+        availableBalance: isNaN(freeBalance) ? 0 : freeBalance,
         unrealisedPnl: 0,
-        equity: Number(usdt?.total ?? 0),
+        equity: isNaN(totalBalance) ? 0 : totalBalance,
         coin: 'USDT'
       };
 
