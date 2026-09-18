@@ -153,6 +153,8 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
     availableBalance: bybitAccount?.availableBalance ?? Number(config.balance),
     equity: bybitAccount?.equity ?? Number(config.balance),
     unrealisedPnl: bybitAccount?.unrealisedPnl ?? 0,
+    fundingUsdt: bybitAccount?.fundingUsdt ?? 0,
+    fundingBrl: bybitAccount?.fundingBrl ?? 0,
     riskPct: Number(config.risk_pct),
     leverage: Number(config.leverage),
     maxDailyLossUsd: Number(config.max_daily_loss_usd),
@@ -212,7 +214,9 @@ clientRouter.post('/account/refresh', async (req: Request, res: Response) => {
         message: '✅ Saldo e proteções atualizados com sucesso da Bybit!',
         balance: bybitAccount.walletBalance,
         availableBalance: bybitAccount.availableBalance,
-        equity: bybitAccount.equity
+        equity: bybitAccount.equity,
+        fundingUsdt: bybitAccount.fundingUsdt ?? 0,
+        fundingBrl: bybitAccount.fundingBrl ?? 0
       });
     } else {
       return res.status(400).json({
@@ -222,6 +226,34 @@ clientRouter.post('/account/refresh', async (req: Request, res: Response) => {
     }
   } catch (err: any) {
     return res.status(500).json({ error: `Erro ao sincronizar saldo: ${err.message}` });
+  }
+});
+
+// POST /api/client/account/transfer-funding — Move fundos de Financiamento para Conta Unificada
+clientRouter.post('/account/transfer-funding', async (req: Request, res: Response) => {
+  const clientId = await resolveClientId(req);
+  if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
+
+  const { coin = 'USDT' } = req.body;
+  try {
+    const result = await BybitExecutionEngine.transferFundingToUnified(clientId, coin);
+    if (result.success) {
+      const bybitAccount = await BybitExecutionEngine.getAccountBalance(clientId);
+      return res.json({
+        success: true,
+        message: result.message,
+        transferredAmount: result.transferredAmount,
+        account: bybitAccount
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: result.message,
+        error: result.error
+      });
+    }
+  } catch (err: any) {
+    return res.status(500).json({ error: `Erro ao realizar transferência interna: ${err.message}` });
   }
 });
 

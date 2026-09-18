@@ -5,7 +5,7 @@ import {
   AlertTriangle, CheckCircle, Loader2, RefreshCw, Download,
   Eye, EyeOff, LogOut, Shield, Activity, Clock,
   TrendingDown, Zap, FileSpreadsheet, Lock,
-  HelpCircle, Info, Bell, ExternalLink, Sliders, Power, AlertOctagon, ShieldAlert, Trash2
+  HelpCircle, Info, Bell, ExternalLink, Sliders, Power, AlertOctagon, ShieldAlert, Trash2, ArrowRightLeft
 } from 'lucide-react';
 
 type ClientTab = 'overview' | 'api-keys' | 'risk' | 'history';
@@ -15,6 +15,8 @@ interface AccountInfo {
   availableBalance: number;
   equity: number;
   unrealisedPnl: number;
+  fundingUsdt?: number;
+  fundingBrl?: number;
   riskPct: number;
   leverage: number;
   maxDailyLossUsd: number;
@@ -112,6 +114,8 @@ export default function ClientDashboard() {
     setTimeout(() => setNotification(null), 4000);
   };
 
+  const [transferringFunding, setTransferringFunding] = useState(false);
+
   const handleRefreshBalance = async () => {
     setRefreshingBalance(true);
     try {
@@ -127,6 +131,27 @@ export default function ClientDashboard() {
       notify('Erro de conexão ao atualizar saldo.', 'error');
     } finally {
       setRefreshingBalance(false);
+    }
+  };
+
+  const handleTransferFunding = async () => {
+    setTransferringFunding(true);
+    try {
+      const res = await authFetch('/api/client/account/transfer-funding', {
+        method: 'POST',
+        body: JSON.stringify({ coin: 'USDT' })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        notify(data.message || '✅ Saldo transferido com sucesso para a Conta Unificada (UTA)!');
+        fetchAccount();
+      } else {
+        notify(data.message || data.error || 'Não foi possível transferir automaticamente.', 'error');
+      }
+    } catch {
+      notify('Erro de conexão ao tentar transferir.', 'error');
+    } finally {
+      setTransferringFunding(false);
     }
   };
 
@@ -568,6 +593,82 @@ export default function ClientDashboard() {
               </div>
             )}
 
+            {/* 💡 Banner Assistente: Saldo em BRL (Reais) na Conta de Financiamento */}
+            {(account?.fundingBrl ?? 0) > 0 && (
+              <div className="p-5 rounded-2xl bg-sky-500/10 border border-sky-500/30 flex items-start space-x-4 text-sm">
+                <ArrowRightLeft className="w-6 h-6 text-sky-400 shrink-0 mt-0.5" />
+                <div className="space-y-1.5 flex-1">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <p className="font-bold text-sky-300 text-base">
+                      Saldo em Reais Detectado na Bybit: R$ {account?.fundingBrl?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                    <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono text-[10px] font-bold self-start sm:self-auto">
+                      CONTA DE FINANCIAMENTO (BRL)
+                    </span>
+                  </div>
+                  <p className="text-sky-200/80 text-xs">
+                    Seu PIX entrou como BRL fiduciário. Para que o robô execute as operações de futuros, você precisa <strong>converter para USDT</strong> (taxa zero) e movê-lo para a <strong>Conta de Trading Unificada (UTA)</strong>.
+                  </p>
+                  <div className="pt-2 flex flex-wrap gap-2 items-center">
+                    <a
+                      href="https://www.bybit.com/trade/spot/USDT/BRL"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3.5 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs transition-all flex items-center space-x-1.5 shadow-lg shadow-sky-500/20"
+                    >
+                      <span>Abrir Conversão na Bybit (BRL ➡️ USDT)</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                    <button
+                      onClick={handleRefreshBalance}
+                      disabled={refreshingBalance}
+                      className="px-3.5 py-1.5 rounded-xl bg-surface border border-border/60 hover:bg-white/10 text-white font-bold text-xs transition-all flex items-center space-x-1.5"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${refreshingBalance ? 'animate-spin' : ''}`} />
+                      <span>Já converti, atualizar saldo</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ⚡ Banner Assistente: Saldo USDT na Conta de Financiamento pronto para mover */}
+            {(account?.fundingUsdt ?? 0) > 0 && (
+              <div className="p-5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-start space-x-4 text-sm">
+                <Zap className="w-6 h-6 text-emerald-400 shrink-0 mt-0.5" />
+                <div className="space-y-1.5 flex-1">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <p className="font-bold text-emerald-300 text-base">
+                      ${account?.fundingUsdt?.toFixed(2)} USDT Disponível na Conta de Financiamento
+                    </p>
+                    <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono text-[10px] font-bold self-start sm:self-auto">
+                      PRONTO PARA MOVER
+                    </span>
+                  </div>
+                  <p className="text-emerald-200/80 text-xs">
+                    Você possui USDT na Conta de Financiamento da Bybit. Transfira para a Conta de Trading Unificada (UTA) para que o robô utilize esse valor como margem operacional.
+                  </p>
+                  <div className="pt-2 flex flex-wrap gap-2 items-center">
+                    <button
+                      onClick={handleTransferFunding}
+                      disabled={transferringFunding}
+                      className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition-all flex items-center space-x-1.5 shadow-lg shadow-emerald-500/20 cursor-pointer"
+                    >
+                      {transferringFunding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowRightLeft className="w-3.5 h-3.5" />}
+                      <span>Mover para Conta Unificada Agora (1 Clique)</span>
+                    </button>
+                    <button
+                      onClick={handleRefreshBalance}
+                      disabled={refreshingBalance}
+                      className="px-3.5 py-2 rounded-xl bg-surface border border-border/60 hover:bg-white/10 text-white font-bold text-xs transition-all"
+                    >
+                      Atualizar Saldo
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* KPI Cards */}
             <div className="grid grid-cols-4 gap-4">
               <div className="bg-surface border border-border/60 rounded-2xl p-5 shadow-lg shadow-black/20 relative group">
@@ -648,7 +749,7 @@ export default function ClientDashboard() {
                 <div className="space-y-2 font-mono text-xs">
                   <div className="flex justify-between items-center py-2 border-b border-border/30">
                     <span className="text-slate-400">Regime Operacional</span>
-                    <span className="text-emerald-400 font-bold">24/7 Contínuo (30 Dias Ativo)</span>
+                    <span className="text-emerald-400 font-bold">24/7 Contínuo (Ininterrupto)</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-border/30">
                     <span className="text-slate-400">Stop Loss Técnico por Ordem</span>
@@ -1067,13 +1168,13 @@ export default function ClientDashboard() {
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">
                     <Shield className="w-5 h-5 text-emerald-400" />
-                    <h3 className="text-base font-bold text-white">Configuração Oficial do Projeto (Execução Contínua 30 Dias)</h3>
+                    <h3 className="text-base font-bold text-white">Configuração Oficial do Projeto (Execução Contínua 24/7)</h3>
                     <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono text-[10px] font-black border border-emerald-500/30">
                       PADRÃO INSTITUCIONAL
                     </span>
                   </div>
                   <p className="text-xs text-slate-300">
-                    O robô opera de forma ininterrupta 24/7 pelos 30 dias contratados. Não há travas diárias arbitrárias que desligam o robô: o risco é 100% controlado individualmente em cada trade com Stop Loss técnico e dimensionamento matemático de 1.0% da banca (${activeBank.toFixed(2)} USDT).
+                    O robô opera de forma ininterrupta 24 horas por dia, 7 dias por semana, pelo tempo que você desejar (sem limite de prazo ou pausas forçadas). O controle de risco é 100% individual por ordem com Stop Loss técnico e dimensionamento matemático de 1.0% da banca (${activeBank.toFixed(2)} USDT).
                   </p>
                 </div>
 
@@ -1104,7 +1205,7 @@ export default function ClientDashboard() {
                 <div className="grid grid-cols-4 gap-3 mt-4 pt-4 border-t border-border/40 font-mono text-xs">
                   <div className="p-2.5 rounded-xl bg-background/60 border border-border/40">
                     <span className="text-slate-400 text-[10px] block">Regime de Operação</span>
-                    <span className="text-emerald-400 font-bold text-sm">24/7 Contínuo (30 Dias)</span>
+                    <span className="text-emerald-400 font-bold text-sm">24/7 Contínuo (Ininterrupto)</span>
                   </div>
                   <div className="p-2.5 rounded-xl bg-background/60 border border-border/40">
                     <span className="text-slate-400 text-[10px] block">Risco Máximo por Trade</span>
@@ -1130,7 +1231,7 @@ export default function ClientDashboard() {
                 {autoConfig && (
                   <span className="text-[11px] text-emerald-400 font-mono font-bold flex items-center space-x-1">
                     <CheckCircle className="w-3.5 h-3.5" />
-                    <span>Blindagem Institucional Ativa — Execução 30 Dias</span>
+                    <span>Blindagem Institucional Ativa — Execução Contínua</span>
                   </span>
                 )}
               </div>
@@ -1171,10 +1272,10 @@ export default function ClientDashboard() {
                 <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 space-y-1">
                   <p className="font-bold flex items-center space-x-1.5">
                     <CheckCircle className="w-4 h-4 text-emerald-400" />
-                    <span>Regime Operacional 30 Dias sem Pausa Diária</span>
+                    <span>Regime Operacional Contínuo 24/7 (Ininterrupto)</span>
                   </p>
                   <p className="text-[11px] text-emerald-300/80">
-                    No padrão institucional do projeto, o robô opera continuamente 24/7 ao longo de todo o mês. Travas de stop ou meta diária arbitrárias ficam desativadas para que o robô não perca operações subsequentes por oscilações normais intraday. A proteção patrimonial é estritamente garantida pelo Stop Loss técnico enviado em cada ordem.
+                    No padrão institucional do projeto, o robô opera continuamente 24/7 pelo tempo que você desejar (30, 60, 90 dias ou mais). Travas de stop ou meta diária arbitrárias ficam desativadas para que o robô não perca operações subsequentes por oscilações normais intraday. A proteção patrimonial é estritamente garantida pelo Stop Loss técnico enviado em cada ordem e pela margem isolada 10x.
                   </p>
                 </div>
               ) : (
@@ -1186,7 +1287,7 @@ export default function ClientDashboard() {
                       value={maxDailyLoss} onChange={e => { setMaxDailyLoss(Number(e.target.value)); setSelectedPreset('custom'); }}
                       className="w-full bg-background border border-rose-500/40 rounded-xl px-4 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-rose-500"
                     />
-                    <span className="text-[10px] text-slate-500 mt-1 block">Deixe 0 para desativar e operar contínuo 30 dias.</span>
+                    <span className="text-[10px] text-slate-500 mt-1 block">Deixe 0 para desativar e operar contínuo 24/7.</span>
                   </div>
                   <div>
                     <label className="text-[11px] text-emerald-400 font-mono block mb-1">Meta Diária Manual (Opcional $)</label>
@@ -1201,7 +1302,7 @@ export default function ClientDashboard() {
               )}
 
               <button type="submit" className="w-full py-3 rounded-xl bg-accent hover:bg-accent/80 text-white text-sm font-bold transition-all shadow-lg shadow-accent/20">
-                {autoConfig ? 'Confirmar Padrão Oficial do Projeto (30 Dias Contínuo)' : 'Salvar Configurações Manuais'}
+                {autoConfig ? 'Confirmar Padrão Oficial do Projeto (Execução Contínua 24/7)' : 'Salvar Configurações Manuais'}
               </button>
             </form>
           </div>

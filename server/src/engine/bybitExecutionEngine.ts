@@ -11,6 +11,8 @@ export interface BybitAccountInfo {
   unrealisedPnl: number;
   equity: number;
   coin: string;
+  fundingUsdt?: number;
+  fundingBrl?: number;
 }
 
 export interface BybitPosition {
@@ -264,16 +266,83 @@ export class BybitExecutionEngine {
       const totalBalance = Number(usdt?.total ?? balance?.free?.USDT ?? 0);
       const freeBalance = Number(usdt?.free ?? balance?.free?.USDT ?? 0);
 
+      // 🔍 Verificar saldo na Conta de Financiamento (Funding Account)
+      let fundingUsdt = 0;
+      let fundingBrl = 0;
+      try {
+        const fundBal = await exchange.fetchBalance({ type: 'funding' });
+        fundingUsdt = Number(fundBal?.USDT?.total ?? fundBal?.free?.USDT ?? 0);
+        fundingBrl = Number(fundBal?.BRL?.total ?? fundBal?.free?.BRL ?? 0);
+      } catch {
+        // Ignora se a chave de API não tiver permissão para ler funding account
+      }
+
       return {
         walletBalance: isNaN(totalBalance) ? 0 : totalBalance,
         availableBalance: isNaN(freeBalance) ? 0 : freeBalance,
         unrealisedPnl: 0,
         equity: isNaN(totalBalance) ? 0 : totalBalance,
-        coin: 'USDT'
+        coin: 'USDT',
+        fundingUsdt: isNaN(fundingUsdt) ? 0 : fundingUsdt,
+        fundingBrl: isNaN(fundingBrl) ? 0 : fundingBrl
       };
     } catch (err: any) {
       console.error(`[BybitEngine] Erro ao buscar saldo ${clientId}:`, err.message);
       return null;
+    }
+  }
+
+  /**
+   * Transfere fundos da Conta de Financiamento (Funding) para a Conta Unificada (UTA)
+   */
+  static async transferFundingToUnified(clientId: string, coin = 'USDT'): Promise<{ success: boolean; message: string; error?: string; transferredAmount?: number }> {
+    const config = await ClientConfigDB.findByClientId(clientId);
+    if (!config?.bybit_api_key_enc || !config?.bybit_api_secret_enc) {
+      return { success: false, message: 'Chaves de API Bybit não configuradas.' };
+    }
+
+    try {
+      const apiKey = decrypt(config.bybit_api_key_enc);
+      const apiSecret = decrypt(config.bybit_api_secret_enc);
+      const testnet = config.bybit_testnet === 1;
+      const exchange = createBybitClient(apiKey, apiSecret, testnet, false);
+
+      // 1. Verificar saldo disponível na Conta de Financiamento
+      const fundBal = await exchange.fetchBalance({ type: 'funding' });
+      const amount = Number(fundBal?.[coin]?.free ?? fundBal?.[coin]?.total ?? 0);
+
+      if (amount <= 0) {
+        return { 
+          success: false, 
+          message: `Nenhum saldo de ${coin} livre encontrado na Conta de Financiamento da Bybit para transferir.` 
+        };
+      }
+
+      // 2. Executar transferência interna entre contas da Bybit
+      await exchange.transfer(coin, amount, 'funding', 'unified');
+
+      // 3. Atualizar saldo no banco
+      const updatedInfo = await BybitExecutionEngine.getAccountBalance(clientId);
+      if (updatedInfo) {
+        await ClientConfigDB.updateBalance(clientId, updatedInfo.walletBalance);
+      }
+
+      return {
+        success: true,
+        transferredAmount: amount,
+        message: `✅ Sucesso! $${amount.toFixed(2)} ${coin} foram transferidos da Conta de Financiamento para a Conta de Trading Unificada (UTA)!`
+      };
+    } catch (err: any) {
+      console.error(`[BybitEngine] Erro ao transferir funding->unified para ${clientId}:`, err.message);
+      let friendlyHint = err.message;
+      if (err.message?.includes('10003') || err.message?.includes('permission') || err.message?.includes('Permission') || err.message?.includes('IP')) {
+        friendlyHint = 'Sua chave de API na Bybit precisa da permissão "Asset Transfer" (Transferência de Ativos) ativada. Você pode ativá-la na Bybit em API Management, ou realizar a transferência manualmente em 1 clique pelo app da Bybit (Menu Ativos ➡️ Transferir ➡️ De: Financiamento ➡️ Para: Conta Unificada).';
+      }
+      return {
+        success: false,
+        message: `Falha ao transferir automaticamente: ${friendlyHint}`,
+        error: err.message
+      };
     }
   }
 
