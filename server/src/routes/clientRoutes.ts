@@ -36,8 +36,24 @@ clientRouter.post('/api-keys', async (req: Request, res: Response) => {
   }
 
   try {
-    const encKey = encrypt(apiKey);
-    const encSecret = encrypt(apiSecret);
+    // Garantir que a linha em client_configs exista para este clientId
+    let config = await ClientConfigDB.findByClientId(clientId);
+    if (!config) {
+      const user = req.user?.userId ? await UserDB.findById(req.user.userId) : null;
+      const userId = user?.id || req.user?.userId || clientId;
+      await ClientConfigDB.create({
+        clientId,
+        userId,
+        name: user?.name || req.user?.name || 'Cliente',
+        notificationPhone: user?.whatsapp || undefined,
+        planType: 'VITRINE',
+        planActive: true,
+        syncEnabled: false
+      });
+    }
+
+    const encKey = encrypt(apiKey.trim());
+    const encSecret = encrypt(apiSecret.trim());
     await ClientConfigDB.updateApiKeys(clientId, encKey, encSecret, testnet);
     
     const result = await BybitExecutionEngine.connectAndValidate(clientId);
@@ -54,6 +70,7 @@ clientRouter.post('/api-keys', async (req: Request, res: Response) => {
       maskedKey: result.maskedKey
     });
   } catch (err: any) {
+    console.error('[API-Keys] Erro ao salvar chaves:', err);
     res.status(500).json({ error: `Erro interno ao salvar chaves: ${err.message}` });
   }
 });
