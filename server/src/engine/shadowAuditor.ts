@@ -7,6 +7,11 @@ import fs from 'fs';
 import path from 'path';
 import ccxt from 'ccxt';
 import { RISK_CONFIG } from '../config/riskConfig.js';
+import { GoogleSheetsService } from '../services/googleSheetsService.js';
+
+if (RISK_CONFIG.SHADOW_MODE_AUDIT) {
+  console.log(`\x1b[36m[SHADOW AUDITOR] Iniciado e aguardando sinais de entrada em modo fantasma...\x1b[0m`);
+}
 
 export interface ShadowAuditResult {
   symbol: string;
@@ -170,6 +175,17 @@ export async function runShadowAudit(
     } catch (fsErr: any) {
       console.error(`\x1b[31m[SHADOW AUDIT FILE ERROR] Falha ao gravar log em disco: ${fsErr.message}\x1b[0m`);
     }
+
+    GoogleSheetsService.logShadowAudit({
+      symbol,
+      side,
+      oldMode: oldModeText,
+      newMode: newModeText,
+      reasons: reasonText,
+      spreadPips: calculatedSpreadPips,
+      usdExposureR: currentUsdExposureR,
+      timestamp
+    });
 
     return {
       symbol,

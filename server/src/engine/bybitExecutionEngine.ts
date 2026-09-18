@@ -3,6 +3,7 @@ import { decrypt } from '../utils/crypto.js';
 import { ClientConfigDB, TradeHistoryDB } from '../database/db.js';
 import { maskApiKey } from '../utils/crypto.js';
 import { runShadowAudit } from './shadowAuditor.js';
+import { GoogleSheetsService } from '../services/googleSheetsService.js';
 
 export interface BybitAccountInfo {
   walletBalance: number;
@@ -242,8 +243,10 @@ export class BybitExecutionEngine {
       const minQty = market.limits?.amount?.min ?? 0.001;
       const qtyStep = market.precision?.amount ?? 0.001;
 
-      // Calcular tamanho da posição
-      const balance = Number(config.balance) > 0 ? Number(config.balance) : 100;
+      // Calcular tamanho da posição lendo banca ao vivo da Bybit
+      const accountInfo = await BybitExecutionEngine.getAccountBalance(clientId);
+      const liveBalance = accountInfo?.equity && accountInfo.equity > 0 ? accountInfo.equity : Number(config.balance);
+      const balance = liveBalance > 0 ? liveBalance : 100;
       const sizing = calculatePositionSize({
         balance,
         riskPct: Number(config.risk_pct),
@@ -293,9 +296,33 @@ export class BybitExecutionEngine {
         entry_time: Date.now()
       });
 
+      GoogleSheetsService.logTradeExecution({
+        symbol: payload.symbol,
+        side: payload.side,
+        entryPrice: payload.entryPrice,
+        qty: sizing.qty,
+        stopLoss: payload.stopLoss,
+        takeProfit: payload.takeProfit,
+        status: 'EXECUTADO',
+        timestamp: new Date().toISOString()
+      });
+
       return { success: true, orderId: order.id, sizing };
     } catch (err: any) {
       console.error(`[BybitEngine] Erro ao executar ordem ${clientId}:`, err.message);
+
+      GoogleSheetsService.logTradeExecution({
+        symbol: payload.symbol,
+        side: payload.side,
+        entryPrice: payload.entryPrice,
+        qty: 0,
+        stopLoss: payload.stopLoss,
+        takeProfit: payload.takeProfit,
+        status: 'FALHA',
+        timestamp: new Date().toISOString(),
+        errorMsg: err.message
+      });
+
       return { success: false, error: err.message };
     }
   }

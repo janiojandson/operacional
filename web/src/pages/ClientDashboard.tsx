@@ -5,7 +5,7 @@ import {
   AlertTriangle, CheckCircle, Loader2, RefreshCw, Download,
   Eye, EyeOff, LogOut, Shield, Activity, Clock,
   TrendingDown, Zap, FileSpreadsheet, Lock,
-  HelpCircle, Info, Bell, ExternalLink, Sliders, Power, AlertOctagon
+  HelpCircle, Info, Bell, ExternalLink, Sliders, Power, AlertOctagon, ShieldAlert
 } from 'lucide-react';
 
 type ClientTab = 'overview' | 'api-keys' | 'risk' | 'history';
@@ -633,6 +633,16 @@ export default function ClientDashboard() {
                 <li>⚠️ <strong>NÃO</strong> marque Saques (Withdrawals). Nossa plataforma nunca solicita acesso a saques.</li>
                 <li>Cole a API Key e o Secret abaixo e salve.</li>
               </ol>
+            </div>
+
+            {/* Dica de Banca Mínima */}
+            <div className="p-4 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-xs font-mono text-indigo-300">
+              <span className="font-bold text-indigo-400 flex items-center space-x-1.5 mb-1">
+                <ShieldAlert className="w-4 h-4" />
+                <span>Gestão Inteligente de Lotes:</span>
+              </span>
+              O MarketFlow Pro lê automaticamente seu saldo real em USDT na Bybit a cada sinal e calcula o tamanho dos lotes dinamicamente. <br/><br/>
+              Recomendamos uma banca mínima de <strong className="text-white">100 a 200 USDT</strong> para garantir margem suficiente para os lotes mínimos das corretoras sem risco de liquidação por spread.
             </div>
 
             <form onSubmit={handleSaveApiKeys} className="bg-surface border border-border/60 rounded-2xl p-6 space-y-4">
