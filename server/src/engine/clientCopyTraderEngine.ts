@@ -48,8 +48,8 @@ export class ClientCopyTraderEngine {
     for (const client of this.clients.values()) {
       if (!client.isActive) continue;
 
-      // 🛡️ PROTEÇÃO 1: Trava de Perda Diária Máxima (Daily Stop)
-      if (client.currentDailyPnl <= -client.maxDailyLossUsd) {
+      // 🛡️ PROTEÇÃO 1: Trava de Perda Diária Máxima (Daily Stop - apenas se configurada manualmente > 0)
+      if (client.maxDailyLossUsd > 0 && client.currentDailyPnl <= -client.maxDailyLossUsd) {
         this.emitLog({
           id: `log-${Date.now()}-${client.id}`,
           clientId: client.id,
@@ -65,8 +65,8 @@ export class ClientCopyTraderEngine {
         continue;
       }
 
-      // 🛡️ PROTEÇÃO 2: Meta Diária de Lucro Batida (Stop Gain / Preservação)
-      if (client.currentDailyPnl >= client.maxDailyProfitTargetUsd) {
+      // 🛡️ PROTEÇÃO 2: Meta Diária de Lucro Batida (Stop Gain - apenas se configurada manualmente > 0)
+      if (client.maxDailyProfitTargetUsd > 0 && client.currentDailyPnl >= client.maxDailyProfitTargetUsd) {
         this.emitLog({
           id: `log-${Date.now()}-${client.id}`,
           clientId: client.id,

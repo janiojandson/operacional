@@ -194,18 +194,15 @@ clientRouter.post('/account/refresh', async (req: Request, res: Response) => {
     if (bybitAccount) {
       await ClientConfigDB.updateBalance(clientId, bybitAccount.walletBalance);
 
-      // Se configuração automática estiver ligada, calibra os stops e metas conforme o projeto
+      // Se configuração automática estiver ligada, calibra conforme o padrão institucional do projeto (execução contínua 30 dias)
       const isAuto = (config as any).auto_config_enabled !== undefined ? Number((config as any).auto_config_enabled) === 1 : true;
-      if (isAuto && bybitAccount.walletBalance > 0) {
-        const bal = bybitAccount.walletBalance;
-        // Estrutura do projeto: Risco 1.0%, Stop Diário 3%, Meta 6%, Alavancagem padrão 10x
-        const stopUsd = Number(Math.max(15, bal * 0.03).toFixed(2));
-        const metaUsd = Number(Math.max(30, bal * 0.06).toFixed(2));
+      if (isAuto) {
+        // Padrão Institucional: Risco técnico de 1.0% por trade, Alavancagem isolada 10x, e 0 em stops diários arbitrários (robô ativo 30 dias)
         await ClientConfigDB.updateRiskConfig(clientId, {
           riskPct: 1.0,
           leverage: 10,
-          maxDailyLossUsd: stopUsd,
-          maxDailyProfitUsd: metaUsd,
+          maxDailyLossUsd: 0,
+          maxDailyProfitUsd: 0,
           autoConfigEnabled: true
         });
       }

@@ -322,13 +322,13 @@ export default function ClientDashboard() {
       body: JSON.stringify({ 
         riskPct, 
         leverage, 
-        maxDailyLossUsd: maxDailyLoss, 
-        maxDailyProfitUsd: maxDailyProfit,
+        maxDailyLossUsd: autoConfig ? 0 : maxDailyLoss, 
+        maxDailyProfitUsd: autoConfig ? 0 : maxDailyProfit,
         autoConfigEnabled: autoConfig
       })
     });
     if (res.ok) { notify('✅ Gestão de risco do projeto salva com sucesso!'); fetchAccount(); }
-    else notify('Erro ao salvar configuração.', 'error');
+    else { const d = await res.json(); notify(d.error || 'Erro ao salvar risco.', 'error'); }
   };
 
   const handleDownloadHistory = async (format: 'excel' | 'csv') => {
@@ -647,12 +647,16 @@ export default function ClientDashboard() {
                 </div>
                 <div className="space-y-2 font-mono text-xs">
                   <div className="flex justify-between items-center py-2 border-b border-border/30">
-                    <span className="text-slate-400">Trava de Stop Diário (Loss Máximo)</span>
-                    <span className="text-rose-400 font-bold">-${account?.maxDailyLossUsd?.toFixed(2) ?? '—'}</span>
+                    <span className="text-slate-400">Regime Operacional</span>
+                    <span className="text-emerald-400 font-bold">24/7 Contínuo (30 Dias Ativo)</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-border/30">
-                    <span className="text-slate-400">Meta Diária (Gain Preservado)</span>
-                    <span className="text-emerald-400 font-bold">+${account?.maxDailyProfitUsd?.toFixed(2) ?? '—'}</span>
+                    <span className="text-slate-400">Stop Loss Técnico por Ordem</span>
+                    <span className="text-rose-400 font-bold">{account?.riskPct ?? 1.0}% (${((account?.balance ?? 0) * ((account?.riskPct ?? 1.0) / 100)).toFixed(2)} USDT)</span>
+                  </div>
+                  <div className="flex justify-between items-center py-2 border-b border-border/30">
+                    <span className="text-slate-400">Alvo da Operação (Take Profit)</span>
+                    <span className="text-emerald-400 font-bold">Estratégia Quant (Direto na Bybit)</span>
                   </div>
                   <div className="flex justify-between items-center py-2">
                     <span className="text-slate-400">Status da Sincronização Bybit</span>
@@ -1053,6 +1057,7 @@ export default function ClientDashboard() {
             </div>
 
             {/* Card de Modo Automático Oficial do Projeto */}
+            {/* Card de Modo Automático Oficial do Projeto */}
             <div className={`p-6 rounded-2xl border transition-all ${
               autoConfig 
                 ? 'bg-gradient-to-r from-emerald-950/40 via-surface to-emerald-950/30 border-emerald-500/50 shadow-xl shadow-emerald-500/10' 
@@ -1062,19 +1067,19 @@ export default function ClientDashboard() {
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">
                     <Shield className="w-5 h-5 text-emerald-400" />
-                    <h3 className="text-base font-bold text-white">Configuração Automática Oficial do Projeto</h3>
+                    <h3 className="text-base font-bold text-white">Configuração Oficial do Projeto (Execução Contínua 30 Dias)</h3>
                     <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono text-[10px] font-black border border-emerald-500/30">
                       PADRÃO INSTITUCIONAL
                     </span>
                   </div>
                   <p className="text-xs text-slate-300">
-                    O robô calibra o risco estritamente de acordo com o tamanho da sua banca na Bybit (${activeBank.toFixed(2)} USDT), sem necessidade de ajustes manuais.
+                    O robô opera de forma ininterrupta 24/7 pelos 30 dias contratados. Não há travas diárias arbitrárias que desligam o robô: o risco é 100% controlado individualmente em cada trade com Stop Loss técnico e dimensionamento matemático de 1.0% da banca (${activeBank.toFixed(2)} USDT).
                   </p>
                 </div>
 
                 <div className="flex items-center space-x-3 bg-background/80 px-4 py-3 rounded-xl border border-border/50">
                   <span className="text-xs font-mono font-bold text-slate-300">
-                    {autoConfig ? 'AUTOMÁTICO ATIVO' : 'MANUAL / LIVRE'}
+                    {autoConfig ? 'PADRÃO PROJETO (ATIVO)' : 'PERSONALIZADO (MANUAL)'}
                   </span>
                   <button
                     type="button"
@@ -1084,8 +1089,8 @@ export default function ClientDashboard() {
                       if (next) {
                         setRiskPct(1.0);
                         setLeverage(10);
-                        setMaxDailyLoss(Number(Math.max(15, activeBank * 0.03).toFixed(2)));
-                        setMaxDailyProfit(Number(Math.max(30, activeBank * 0.06).toFixed(2)));
+                        setMaxDailyLoss(0);
+                        setMaxDailyProfit(0);
                       }
                     }}
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${autoConfig ? 'bg-emerald-500' : 'bg-slate-700'}`}
@@ -1098,7 +1103,11 @@ export default function ClientDashboard() {
               {autoConfig && (
                 <div className="grid grid-cols-4 gap-3 mt-4 pt-4 border-t border-border/40 font-mono text-xs">
                   <div className="p-2.5 rounded-xl bg-background/60 border border-border/40">
-                    <span className="text-slate-400 text-[10px] block">Risco por Trade</span>
+                    <span className="text-slate-400 text-[10px] block">Regime de Operação</span>
+                    <span className="text-emerald-400 font-bold text-sm">24/7 Contínuo (30 Dias)</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-background/60 border border-border/40">
+                    <span className="text-slate-400 text-[10px] block">Risco Máximo por Trade</span>
                     <span className="text-emerald-400 font-bold text-sm">1.0% (${(activeBank * 0.01).toFixed(2)})</span>
                   </div>
                   <div className="p-2.5 rounded-xl bg-background/60 border border-border/40">
@@ -1106,12 +1115,8 @@ export default function ClientDashboard() {
                     <span className="text-accent font-bold text-sm">10x Isolada</span>
                   </div>
                   <div className="p-2.5 rounded-xl bg-background/60 border border-border/40">
-                    <span className="text-slate-400 text-[10px] block">Stop Diário (Loss)</span>
-                    <span className="text-rose-400 font-bold text-sm">-${Number(Math.max(15, activeBank * 0.03).toFixed(2))} (3%)</span>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-background/60 border border-border/40">
-                    <span className="text-slate-400 text-[10px] block">Meta Diária (Gain)</span>
-                    <span className="text-emerald-400 font-bold text-sm">+${Number(Math.max(30, activeBank * 0.06).toFixed(2))} (6%)</span>
+                    <span className="text-slate-400 text-[10px] block">Proteção Stop Loss</span>
+                    <span className="text-rose-400 font-bold text-sm">Técnico na Bybit</span>
                   </div>
                 </div>
               )}
@@ -1125,7 +1130,7 @@ export default function ClientDashboard() {
                 {autoConfig && (
                   <span className="text-[11px] text-emerald-400 font-mono font-bold flex items-center space-x-1">
                     <CheckCircle className="w-3.5 h-3.5" />
-                    <span>Protegido contra erros operacionais</span>
+                    <span>Blindagem Institucional Ativa — Execução 30 Dias</span>
                   </span>
                 )}
               </div>
@@ -1142,7 +1147,7 @@ export default function ClientDashboard() {
                   className={`w-full accent-accent ${autoConfig ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
                 />
                 <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1">
-                  <span>0.1% (Conservador)</span><span>1.0% (Padrão do Projeto)</span><span>5.0% (Máx. Permitido)</span>
+                  <span>0.1% (Conservador)</span><span>1.0% (Padrão Institucional do Projeto)</span><span>5.0% (Máx. Permitido)</span>
                 </div>
               </div>
 
@@ -1158,35 +1163,45 @@ export default function ClientDashboard() {
                   className={`w-full accent-accent ${autoConfig ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
                 />
                 <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1">
-                  <span>1x (Sem alavancar)</span><span>10x (Padrão Bybit)</span><span>50x (Máximo)</span>
+                  <span>1x (Sem alavancar)</span><span>10x (Padrão Bybit / Projeto)</span><span>50x (Máximo)</span>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[11px] text-rose-400 font-mono block mb-1">Stop Diário Máximo (Trava de Perda $)</label>
-                  <input
-                    type="number" min={1} step={0.5}
-                    disabled={autoConfig}
-                    value={maxDailyLoss} onChange={e => { setMaxDailyLoss(Number(e.target.value)); setSelectedPreset('custom'); }}
-                    className={`w-full bg-background border border-rose-500/40 rounded-xl px-4 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-rose-500 ${autoConfig ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  />
-                  <span className="text-[10px] text-slate-500 mt-1 block">O robô pausa se as perdas do dia atingirem esse valor.</span>
+              {autoConfig ? (
+                <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 space-y-1">
+                  <p className="font-bold flex items-center space-x-1.5">
+                    <CheckCircle className="w-4 h-4 text-emerald-400" />
+                    <span>Regime Operacional 30 Dias sem Pausa Diária</span>
+                  </p>
+                  <p className="text-[11px] text-emerald-300/80">
+                    No padrão institucional do projeto, o robô opera continuamente 24/7 ao longo de todo o mês. Travas de stop ou meta diária arbitrárias ficam desativadas para que o robô não perca operações subsequentes por oscilações normais intraday. A proteção patrimonial é estritamente garantida pelo Stop Loss técnico enviado em cada ordem.
+                  </p>
                 </div>
-                <div>
-                  <label className="text-[11px] text-emerald-400 font-mono block mb-1">Meta Diária (Stop Gain $)</label>
-                  <input
-                    type="number" min={1} step={0.5}
-                    disabled={autoConfig}
-                    value={maxDailyProfit} onChange={e => { setMaxDailyProfit(Number(e.target.value)); setSelectedPreset('custom'); }}
-                    className={`w-full bg-background border border-emerald-500/40 rounded-xl px-4 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-emerald-500 ${autoConfig ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  />
-                  <span className="text-[10px] text-slate-500 mt-1 block">Preserva o lucro do dia e suspende novas entradas.</span>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[11px] text-rose-400 font-mono block mb-1">Stop Diário Manual (Opcional $)</label>
+                    <input
+                      type="number" min={0} step={0.5}
+                      value={maxDailyLoss} onChange={e => { setMaxDailyLoss(Number(e.target.value)); setSelectedPreset('custom'); }}
+                      className="w-full bg-background border border-rose-500/40 rounded-xl px-4 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-rose-500"
+                    />
+                    <span className="text-[10px] text-slate-500 mt-1 block">Deixe 0 para desativar e operar contínuo 30 dias.</span>
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-emerald-400 font-mono block mb-1">Meta Diária Manual (Opcional $)</label>
+                    <input
+                      type="number" min={0} step={0.5}
+                      value={maxDailyProfit} onChange={e => { setMaxDailyProfit(Number(e.target.value)); setSelectedPreset('custom'); }}
+                      className="w-full bg-background border border-emerald-500/40 rounded-xl px-4 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-emerald-500"
+                    />
+                    <span className="text-[10px] text-slate-500 mt-1 block">Deixe 0 para deixar os lucros correrem sem corte diário.</span>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <button type="submit" className="w-full py-3 rounded-xl bg-accent hover:bg-accent/80 text-white text-sm font-bold transition-all shadow-lg shadow-accent/20">
-                {autoConfig ? 'Confirmar Configuração Automática do Projeto' : 'Salvar Configurações Manuais'}
+                {autoConfig ? 'Confirmar Padrão Oficial do Projeto (30 Dias Contínuo)' : 'Salvar Configurações Manuais'}
               </button>
             </form>
           </div>

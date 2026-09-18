@@ -227,6 +227,13 @@ export interface ClientConfigRow {
   plan_type: string;
   plan_active: number;
   plan_expires_at: number | null;
+  bybit_real_api_key_enc?: string | null;
+  bybit_real_api_secret_enc?: string | null;
+  bybit_test_api_key_enc?: string | null;
+  bybit_test_api_secret_enc?: string | null;
+  bybit_real_connected?: number;
+  bybit_test_connected?: number;
+  auto_config_enabled?: number;
   created_at: number;
 }
 
