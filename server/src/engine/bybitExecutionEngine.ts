@@ -37,6 +37,7 @@ export interface TradePayload {
   stopLoss: number;
   takeProfit: number;
   signalReason: string;
+  powerMultiplier?: number;
 }
 
 export interface SizingResult {
@@ -416,12 +417,15 @@ export class BybitExecutionEngine {
       const qtyStep = market.precision?.amount ?? 0.001;
 
       // Calcular tamanho da posição lendo banca ao vivo da Bybit
-      const accountInfo = await BybitExecutionEngine.getAccountBalance(clientId);
-      const liveBalance = accountInfo?.equity && accountInfo.equity > 0 ? accountInfo.equity : Number(config.balance);
-      const balance = liveBalance > 0 ? liveBalance : 100;
+      // Ajuste proporcional de mão pela Autonomia da IA (1.5x a 5.0x) se o cliente habilitou
+      const baseRiskPct = Number(config.risk_pct) || 1.0;
+      const power = Number(payload.powerMultiplier || 1.5);
+      const isAutonomy = Number(config.copy_ai_autonomy) === 1;
+      const effectiveRiskPct = isAutonomy ? Number((baseRiskPct * (power / 1.5)).toFixed(2)) : baseRiskPct;
+
       const sizing = calculatePositionSize({
         balance,
-        riskPct: Number(config.risk_pct),
+        riskPct: effectiveRiskPct,
         entryPrice: payload.entryPrice,
         stopLoss: payload.stopLoss,
         leverage: Number(config.leverage),

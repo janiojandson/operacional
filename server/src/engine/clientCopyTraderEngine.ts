@@ -141,7 +141,8 @@ export class ClientCopyTraderEngine {
                 entryPrice: trade.entryPrice,
                 stopLoss: trade.stopLoss,
                 takeProfit: trade.takeProfit,
-                signalReason: trade.signalReason
+                signalReason: trade.signalReason,
+                powerMultiplier: powerMultiplier || trade.powerMultiplier || 1.5
               });
 
               if (execRes.success) {

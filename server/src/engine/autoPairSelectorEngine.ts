@@ -45,9 +45,11 @@ export class AutoPairSelectorEngine {
 
       // Medir Liquidez e Spread do Book
       const spread = book?.spread || 0.01;
-      const depth = book?.bidDepthTotal || 100;
+      const depthCoins = book?.bidDepthTotal || 100;
+      const depthUsd = depthCoins * (asset.lastPrice || 1);
       const spreadScore: 'TIGHT' | 'ACCEPTABLE' | 'WIDE' = spread < (asset.lastPrice * 0.0003) ? 'TIGHT' : (spread < asset.lastPrice * 0.0008 ? 'ACCEPTABLE' : 'WIDE');
-      const liquidityScore: 'DEEP' | 'MEDIUM' | 'SHALLOW' = depth > 50 ? 'DEEP' : (depth > 15 ? 'MEDIUM' : 'SHALLOW');
+      // Escala de liquidez em Dólares Notionais ($100k+ = DEEP, $30k+ = MEDIUM)
+      const liquidityScore: 'DEEP' | 'MEDIUM' | 'SHALLOW' = depthUsd > 100000 ? 'DEEP' : (depthUsd > 30000 ? 'MEDIUM' : 'SHALLOW');
 
       // Calcular Regime de Mercado
       let regime: RegimeType = 'EXPANSION_FLOW';

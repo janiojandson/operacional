@@ -145,7 +145,7 @@ const paperTrading = new PaperTradingEngine((account, tradeEvent) => {
   if (tradeEvent) {
     io.emit('simulated_trade_event', tradeEvent);
     const pairConfig = AutoPairSelectorEngine.getPairConfig(tradeEvent.symbol);
-    const power = pairConfig?.powerMultiplier || 1.0;
+    const power = tradeEvent.powerMultiplier || pairConfig?.powerMultiplier || 1.5;
     clientCopyTrader.replicateTrade(tradeEvent, power).catch((err) => {
       console.error('[PaperTradingEngine] Erro ao replicar trade nos clientes:', err.message);
     });
