@@ -81,11 +81,13 @@ export async function runShadowAudit(
       }
 
       if ((!positions || positions.length === 0) && Array.isArray(fallbackOpenPositions)) {
-        positions = fallbackOpenPositions.map(p => ({
-          symbol: p.symbol,
-          side: p.type || (p as any).side || 'BUY',
-          contracts: 1
-        }));
+        positions = fallbackOpenPositions
+          .filter(p => p.symbol !== symbol) // Não contar o próprio ativo sob auditoria como posição prévia
+          .map(p => ({
+            symbol: p.symbol,
+            side: p.type || (p as any).side || 'BUY',
+            contracts: 1
+          }));
       }
 
       for (const pos of positions) {

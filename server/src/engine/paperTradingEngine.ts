@@ -73,8 +73,19 @@ export class PaperTradingEngine {
     }
 
     let tradeType: 'BUY' | 'SELL' | null = null;
-    let slDistancePct = 0.0100; // 1.00% de Stop Loss Técnico Institucional
-    let tpDistancePct = 0.0250; // 2.50% de Take Profit (Risco/Retorno 2.5R)
+    
+    // Calibração de SL / TP específica por ativo baseada no perfil de volatilidade (Razão R:R de 2.5R mantida)
+    const coinRiskProfiles: Record<string, { sl: number; tp: number }> = {
+      'BTC/USDT': { sl: 0.0080, tp: 0.0200 }, // 0.8% SL / 2.0% TP (Baixo ruído institucional)
+      'ETH/USDT': { sl: 0.0100, tp: 0.0250 }, // 1.0% SL / 2.5% TP (Padrão ouro)
+      'SOL/USDT': { sl: 0.0140, tp: 0.0350 }, // 1.4% SL / 3.5% TP (Margem para a expansão de fluxo da Solana)
+      'BNB/USDT': { sl: 0.0090, tp: 0.0225 }, // 0.9% SL / 2.25% TP (Oscilação mais contida)
+      'XRP/USDT': { sl: 0.0120, tp: 0.0300 }  // 1.2% SL / 3.0% TP (Deslocamentos rápidos)
+    };
+
+    const riskProfile = coinRiskProfiles[signal.symbol] || { sl: 0.0100, tp: 0.0250 };
+    const slDistancePct = riskProfile.sl;
+    const tpDistancePct = riskProfile.tp;
 
     if (signal.type === 'ABSORPTION_BUY') {
       tradeType = 'SELL';

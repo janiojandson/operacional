@@ -205,7 +205,7 @@ const paperTrading = new PaperTradingEngine((account, tradeEvent) => {
         tradeEvent.symbol,
         tradeEvent.type,
         1.0,
-        account.openPositions,
+        account.openPositions.filter(p => p.symbol !== tradeEvent.symbol),
         bookState ? {
           bids: bookState.bids.map(b => [b.price, b.amount]),
           asks: bookState.asks.map(a => [a.price, a.amount]),
