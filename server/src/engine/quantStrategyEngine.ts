@@ -174,7 +174,7 @@ export class QuantStrategyEngine {
     const mean = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
     const variance = returns.length > 0 ? returns.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / returns.length : 0;
     const stdDev = Math.sqrt(variance);
-    let sharpeRatio = stdDev > 0 ? Number(((mean / stdDev) * Math.sqrt(252)).toFixed(2)) : 1.5;
+    let sharpeRatio = stdDev > 0 ? Number(((mean / stdDev) * Math.sqrt(365)).toFixed(2)) : 1.5;
     if (isNaN(sharpeRatio) || !isFinite(sharpeRatio)) sharpeRatio = 1.5;
 
     const totalDailyPnl = daily.reduce((acc, d) => acc + d.pnlUsd, 0);
@@ -229,7 +229,7 @@ export class QuantStrategyEngine {
 
     for (const t of trades) {
       const pnl = t.pnlUsd;
-      const r = t.rMultiple || (pnl >= 0 ? 2.0 : -1.0);
+      const r = t.rMultiple || (pnl >= 0 ? 2.5 : -1.0);
       totalR += r;
 
       if (pnl > 0) {
@@ -319,8 +319,8 @@ export class QuantStrategyEngine {
     const squaredDdSum = ddPoints.reduce((sum, d) => sum + (d * d), 0);
     const ulcerIndex = ddPoints.length > 0 ? Number(Math.sqrt(squaredDdSum / ddPoints.length).toFixed(2)) : 0;
 
-    // Max Drawdown em R (assumindo 1R = 0.35% do trade)
-    const maxDrawdownR = Number((maxDdPct / 0.35).toFixed(1));
+    // Max Drawdown em R (assumindo 1R = 1.0% do capital / risco base institucional)
+    const maxDrawdownR = Number((maxDdPct / 1.0).toFixed(1));
 
     return {
       maxDrawdownUsd: Number(maxDdUsd.toFixed(2)),
@@ -421,18 +421,18 @@ export class QuantStrategyEngine {
     const percentile50 = Number(pnls[p50Index].toFixed(2));
     const percentile90 = Number(pnls[p90Index].toFixed(2));
 
-    // R Distribution
+    // R Distribution (calibrado para assimetria institucional 2.5R de Cripto)
     const ranges = [
       { range: '<= -1.0R (Stop Total)', min: -999, max: -0.9 },
-      { range: '-0.9R a 0.0R (Stop Curto)', min: -0.9, max: 0.0 },
-      { range: '0.0R a +1.0R (Lucro Médio)', min: 0.0, max: 1.0 },
-      { range: '+1.0R a +2.0R (Alvo Padrão)', min: 1.0, max: 2.1 },
-      { range: '> +2.0R (Extensão)', min: 2.1, max: 999 }
+      { range: '-0.9R a 0.0R (Stop Curto / BE)', min: -0.9, max: 0.0 },
+      { range: '0.0R a +1.2R (Parcial / Momentum)', min: 0.0, max: 1.2 },
+      { range: '+1.2R a +2.5R (Alvo Institucional 2.5R)', min: 1.2, max: 2.6 },
+      { range: '> +2.5R (Extensão / Potência IA)', min: 2.6, max: 999 }
     ];
 
     const rDistribution = ranges.map(rng => {
       const matchCount = trades.filter(t => {
-        const r = t.rMultiple || (t.pnlUsd >= 0 ? 2.0 : -1.0);
+        const r = t.rMultiple || (t.pnlUsd >= 0 ? 2.5 : -1.0);
         return r >= rng.min && r < rng.max;
       }).length;
 
@@ -467,7 +467,7 @@ export class QuantStrategyEngine {
         const grossL = matching.filter(t => t.pnlUsd <= 0).reduce((s, t) => s + Math.abs(t.pnlUsd), 0);
         const pf = grossL > 0 ? Number((grossW / grossL).toFixed(2)) : (grossW > 0 ? 99.9 : 0);
         const pnl = Number((grossW - grossL).toFixed(2));
-        const totalR = matching.reduce((s, t) => s + (t.rMultiple || (t.pnlUsd >= 0 ? 2.0 : -1.0)), 0);
+        const totalR = matching.reduce((s, t) => s + (t.rMultiple || (t.pnlUsd >= 0 ? 2.5 : -1.0)), 0);
 
         return {
           key,
@@ -482,7 +482,7 @@ export class QuantStrategyEngine {
 
     // Par
     const uniqueSymbols = Array.from(new Set(trades.map(t => t.symbol)));
-    if (uniqueSymbols.length === 0) uniqueSymbols.push('BTC/USDT', 'ETH/USDT', 'SOL/USDT');
+    if (uniqueSymbols.length === 0) uniqueSymbols.push('BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT');
     const bySymbol = buildSegment(uniqueSymbols, t => t.symbol);
 
     // Sessão

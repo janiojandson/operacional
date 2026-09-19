@@ -93,7 +93,7 @@ export class AIAdvisorEngine {
     const topPerformer = sortedPairs[0]?.symbol || 'BTC/USDT';
 
     const systemPrompt = `Você é o Consultor Quantitativo e Estrategista Chefe do "MarketFlow Pro" (SaaS Institucional de Trading, Tape Reading e Smart Money Concepts - SMC).
-Seu objetivo é analisar as operações da mesa, avaliar o desempenho matemático da estratégia (6 Blocos de Saúde), dar feedbacks técnicos precisos e responder dúvidas do trader.
+Seu objetivo é analisar as operações da mesa, avaliar o desempenho matemático da estratégia (7 Blocos Institucionais de Saúde), dar feedbacks técnicos precisos e responder dúvidas do trader.
 
 DADOS EM TEMPO REAL DA CONTA E ESTRATÉGIA:
 - Saldo Atual: $${account.balance.toFixed(2)} | PnL Realizado: $${account.realizedPnl.toFixed(2)}
@@ -153,7 +153,7 @@ Instruções:
       tacticalAdjustments.push('Limitar a no máximo 2 operações simultâneas para blindar a banca.');
     }
 
-    const systemAuditPrompt = `Você é o Auditor Chefe de Estratégias Quantitativas do MarketFlow Pro. Analise os dados dos 6 Blocos e produza um relatório institucional executivo.`;
+    const systemAuditPrompt = `Você é o Auditor Chefe de Estratégias Quantitativas do MarketFlow Pro. Analise os dados dos 7 Blocos Institucionais e produza um relatório institucional executivo.`;
     const promptAudit = `Analise a performance da conta com Score ${quantReport.overallScore}/100, Expectativa ${quantReport.financial.mathExpectationR}R, Win Rate ${account.winRate.toFixed(1)}%, Risco de Ruína ${quantReport.monteCarlo.probabilityOfRuinPct}%, Par Líder ${topPerformer}. Forneça recomendações práticas e objetivas.`;
 
     const aiAnalysis = await this.callAI(promptAudit, systemAuditPrompt, provider);
