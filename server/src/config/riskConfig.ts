@@ -14,7 +14,7 @@ export const RISK_CONFIG = {
   // Parâmetros do teste quantitativo Cripto Bybit Perpetuals
   MAX_SPREAD_BPS: 5.0,     // 5.0 basis points (0.050%) teto máximo de spread seguro na Bybit Linear
   MAX_SPREAD_PIPS: 5.0,    // Retrocompatibilidade
-  MAX_USD_EXPOSURE: 2.0,   // 2.0R (ou 2.0% de risco agregado em USDT)
+  MAX_USD_EXPOSURE: 3.0,   // 3.0R (permite até 3 operações simultâneas na mesma ponta na cesta de 5 pares)
   
   // Caminho do log de auditoria
   LOG_FILE_PATH: 'audit_shadow_mode.log'

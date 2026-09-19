@@ -52,18 +52,22 @@ export class MarketDataManager {
         const close = open * (1 + deltaPct);
         const high = Math.max(open, close) * (1 + Math.random() * 0.001);
         const low = Math.min(open, close) * (1 - Math.random() * 0.001);
-        const volume = asset.category === 'crypto' ? Math.random() * 15 + 2 : Math.random() * 500 + 100;
+        
+        // Volume proporcional à escala real de cada criptoativo na Bybit
+        const baseVol = asset.symbol.startsWith('BTC') ? 0.3 : (asset.symbol.startsWith('ETH') ? 3.0 : (asset.symbol.startsWith('SOL') ? 25 : (asset.symbol.startsWith('BNB') ? 12 : 3500)));
+        const volume = baseVol * (0.5 + Math.random() * 1.0);
         const buyVolume = volume * (deltaPct > 0 ? 0.6 : 0.4);
         const sellVolume = volume - buyVolume;
         const delta = buyVolume - sellVolume;
         runningCvd += delta;
 
+        const dec = p < 5 ? 4 : (p < 100 ? 3 : 2);
         candles.push({
           time,
-          open: Number(open.toFixed(asset.category === 'forex' ? 5 : 2)),
-          high: Number(high.toFixed(asset.category === 'forex' ? 5 : 2)),
-          low: Number(low.toFixed(asset.category === 'forex' ? 5 : 2)),
-          close: Number(close.toFixed(asset.category === 'forex' ? 5 : 2)),
+          open: Number(open.toFixed(dec)),
+          high: Number(high.toFixed(dec)),
+          low: Number(low.toFixed(dec)),
+          close: Number(close.toFixed(dec)),
           volume: Number(volume.toFixed(2)),
           buyVolume: Number(buyVolume.toFixed(2)),
           sellVolume: Number(sellVolume.toFixed(2)),

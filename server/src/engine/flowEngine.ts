@@ -55,7 +55,7 @@ export class FlowEngine {
       // Absorption of Aggressive Buyers (Large buy volume hitting ask, but price doesn't break higher)
       if (buyTrades.length >= 6 && buyVol > sellVol * 3 && bestAsk) {
         const avgBuyPrice = buyTrades.reduce((acc, t) => acc + t.price, 0) / buyTrades.length;
-        if (avgBuyPrice <= bestAsk * 1.0002) {
+        if (avgBuyPrice <= bestAsk * 1.0005) {
           const signal: FlowSignal = {
             id: `abs-buy-${Date.now()}`,
             type: 'ABSORPTION_BUY',
@@ -74,7 +74,7 @@ export class FlowEngine {
       // Absorption of Aggressive Sellers (Large sell volume hitting bid, but price doesn't break lower)
       if (sellTrades.length >= 6 && sellVol > buyVol * 3 && bestBid) {
         const avgSellPrice = sellTrades.reduce((acc, t) => acc + t.price, 0) / sellTrades.length;
-        if (avgSellPrice >= bestBid * 0.9998) {
+        if (avgSellPrice >= bestBid * 0.9995) {
           const signal: FlowSignal = {
             id: `abs-sell-${Date.now()}`,
             type: 'ABSORPTION_SELL',
