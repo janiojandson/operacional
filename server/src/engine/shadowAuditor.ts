@@ -295,3 +295,17 @@ export function recordShadowOutcome(
   pendingAudits.delete(symbol);
   return { outcome: outcomeText, verdict: safetyVerdict, savedCapital, pnlUsd, pnlPct: finalPnlPct, rMultiple };
 }
+
+/**
+ * Zera o histórico do Modo Fantasma (Shadow Mode) e limpa auditorias pendentes
+ */
+export function clearShadowAudits() {
+  pendingAudits.clear();
+  try {
+    const logFilePath = path.resolve(process.cwd(), RISK_CONFIG.LOG_FILE_PATH);
+    const timestamp = new Date().toISOString();
+    fs.writeFileSync(logFilePath, `[${timestamp}] [SESSÃO ZERADA] Histórico do Modo Fantasma reiniciado para nova sessão.\n`, 'utf8');
+  } catch (fsErr: any) {
+    console.error(`[SHADOW AUDIT RESET ERROR] Falha ao resetar arquivo de log: ${fsErr.message}`);
+  }
+}

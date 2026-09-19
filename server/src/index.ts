@@ -21,7 +21,7 @@ import { ClientProtectionEngine } from './engine/clientProtectionEngine.js';
 import { FlowSignal, OrderBookData, CandleData } from '../../shared/types.js';
 import { ClientAccountConfig } from '../../shared/clientTypes.js';
 import { GoogleSheetsService } from './services/googleSheetsService.js';
-import { runShadowAudit, recordShadowOutcome } from './engine/shadowAuditor.js';
+import { runShadowAudit, recordShadowOutcome, clearShadowAudits } from './engine/shadowAuditor.js';
 import { RISK_CONFIG } from './config/riskConfig.js';
 // SaaS: Autenticação e Rotas
 import { authRouter } from './auth/authRoutes.js';
@@ -402,12 +402,38 @@ app.post('/api/paper-trading/balance', requireAuth, (req, res) => {
   res.status(400).json({ error: 'Saldo inválido' });
 });
 
-app.post('/api/paper-trading/reset', requireAuth, (req, res) => {
-  const { balance } = req.body;
-  paperTrading.resetData(typeof balance === 'number' ? balance : undefined);
-  const updated = paperTrading.getAccountState();
-  io.emit('paper_account_update', updated);
-  res.json({ success: true, message: 'Dados zerados com sucesso', account: updated });
+app.post('/api/paper-trading/reset', requireAuth, async (req, res) => {
+  try {
+    const { balance } = req.body;
+    
+    // 1. Zera a conta Master Quant (saldo, posições abertas, histórico)
+    paperTrading.resetData(typeof balance === 'number' ? balance : undefined);
+    const updated = paperTrading.getAccountState();
+    io.emit('paper_account_update', updated);
+
+    // 2. Zera o Shadow Mode Auditor (arquivo de log e auditorias pendentes)
+    clearShadowAudits();
+    io.emit('shadow_audit_reset');
+
+    // 3. Zera os logs do Copy Trader dos clientes
+    clientCopyTrader.clearLogs();
+    io.emit('client_logs_cleared');
+
+    // 4. Zera as abas de trades e auditoria na Planilha Google
+    await GoogleSheetsService.resetSpreadsheet();
+
+    // 5. Recalcula métricas e status dos pares
+    recalculateAllPairs();
+
+    res.json({ 
+      success: true, 
+      message: 'Sessão zerada com sucesso em todas as frentes (Master Quant, Shadow Mode e Planilha Google sincronizados)', 
+      account: updated 
+    });
+  } catch (err: any) {
+    console.error('[SessionReset] Erro ao resetar sessão:', err.message);
+    res.status(500).json({ error: 'Erro ao zerar sessão', message: err.message });
+  }
 });
 
 app.post('/api/paper-trading/pairs', requireAuth, (req, res) => {

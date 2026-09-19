@@ -42,6 +42,10 @@ export class ClientCopyTraderEngine {
     return this.logs;
   }
 
+  public clearLogs() {
+    this.logs = [];
+  }
+
   // Replica a ordem disparada pela estratégia protegendo os limites de risco
   public async replicateTrade(trade: SimulatedTrade, powerMultiplier = 1.0) {
     // 1. Execução para clientes em memória / demonstração

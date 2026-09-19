@@ -69,4 +69,8 @@ export class GoogleSheetsService {
   static async logShadowAudit(log: Omit<ShadowAuditPayload, 'type'>): Promise<void> {
     this.sendData({ ...log, type: 'SHADOW_AUDIT' }).catch(() => {});
   }
+
+  static async resetSpreadsheet(): Promise<void> {
+    await this.sendData({ type: 'RESET_SESSION', timestamp: new Date().toISOString() });
+  }
 }
