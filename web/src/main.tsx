@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import PresellPage from './pages/PresellPage';
 import LoginPage from './pages/LoginPage';
 import AdminDashboard from './pages/AdminDashboard';
 import ClientDashboard from './pages/ClientDashboard';
@@ -45,6 +46,10 @@ function AppRouter() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* Pre-sell / Apresentação Institucional */}
+        <Route path="/" element={<PresellPage />} />
+        <Route path="/presell" element={<PresellPage />} />
+
         {/* Login — redireciona se já autenticado */}
         <Route
           path="/login"
@@ -72,16 +77,6 @@ function AppRouter() {
             <RequireAuth role="CLIENT">
               <ClientDashboard />
             </RequireAuth>
-          }
-        />
-
-        {/* Root redirect */}
-        <Route
-          path="/"
-          element={
-            user
-              ? <Navigate to={user.role === 'ADMIN' ? '/admin' : '/dashboard'} replace />
-              : <Navigate to="/login" replace />
           }
         />
 

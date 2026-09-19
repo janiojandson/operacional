@@ -1,10 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { TrendingUp, Lock, Eye, EyeOff, AlertCircle, Loader2, Shield, UserPlus, Phone, KeyRound, ArrowLeft, CheckCircle2 } from 'lucide-react';
 
 export default function LoginPage() {
   const { login, signup } = useAuth();
-  const [mode, setMode] = useState<'login' | 'signup' | 'forgot_password'>('login');
+  const [searchParams] = useSearchParams();
+  const initialMode = searchParams.get('mode') === 'signup' ? 'signup' : 'login';
+  const [mode, setMode] = useState<'login' | 'signup' | 'forgot_password'>(initialMode);
+
+  useEffect(() => {
+    const urlMode = searchParams.get('mode');
+    if (urlMode === 'signup') {
+      setMode('signup');
+    } else if (urlMode === 'login') {
+      setMode('login');
+    }
+  }, [searchParams]);
 
   // Fields
   const [name, setName] = useState('');
@@ -176,6 +188,17 @@ export default function LoginPage() {
       </div>
 
       <div className="relative z-10 w-full max-w-md px-4 py-8">
+
+        {/* Back to Presell / Home */}
+        <div className="mb-6">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-emerald-400 transition-colors font-medium group"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+            <span>Voltar para apresentação do projeto</span>
+          </Link>
+        </div>
 
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
