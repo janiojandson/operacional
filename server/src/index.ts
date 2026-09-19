@@ -21,6 +21,8 @@ import { ClientProtectionEngine } from './engine/clientProtectionEngine.js';
 import { FlowSignal, OrderBookData, CandleData } from '../../shared/types.js';
 import { ClientAccountConfig } from '../../shared/clientTypes.js';
 import { GoogleSheetsService } from './services/googleSheetsService.js';
+import { runShadowAudit } from './engine/shadowAuditor.js';
+import { RISK_CONFIG } from './config/riskConfig.js';
 // SaaS: Autenticação e Rotas
 import { authRouter } from './auth/authRoutes.js';
 import { adminRouter } from './routes/adminRoutes.js';
@@ -178,6 +180,29 @@ const paperTrading = new PaperTradingEngine((account, tradeEvent) => {
     } catch (sheetErr: any) {
       console.error('[GoogleSheets] Erro ao enviar trade do Master:', sheetErr.message);
     }
+
+    // 🛡️ SHADOW AUDIT (MODO FANTASMA): Avaliação silenciosa em segundo plano no Master
+    if (tradeEvent.status === 'OPEN') {
+      const bookState = marketManager.getSymbolState(tradeEvent.symbol)?.book;
+      runShadowAudit(
+        null,
+        tradeEvent.symbol,
+        tradeEvent.type,
+        1.0,
+        account.openPositions,
+        bookState ? {
+          bids: bookState.bids.map(b => [b.price, b.amount]),
+          asks: bookState.asks.map(a => [a.price, a.amount]),
+          spread: bookState.spread
+        } : undefined
+      ).then(auditResult => {
+        if (auditResult) {
+          io.emit('shadow_audit_event', auditResult);
+        }
+      }).catch(auditErr => {
+        console.error('[ShadowAuditor] Erro no shadow mode do Master:', auditErr.message);
+      });
+    }
   }
   recalculateAllPairs();
 });
@@ -244,6 +269,21 @@ app.get('/api/clients', requireAuth, (req, res) => {
     clients: clientCopyTrader.getClients(),
     logs: clientCopyTrader.getLogs()
   });
+});
+
+// Endpoint de Logs do Shadow Mode (Modo Fantasma)
+app.get('/api/audit-logs', requireAuth, (req, res) => {
+  try {
+    const logFilePath = path.resolve(process.cwd(), RISK_CONFIG.LOG_FILE_PATH);
+    if (fs.existsSync(logFilePath)) {
+      const content = fs.readFileSync(logFilePath, 'utf8');
+      res.json({ logs: content, count: content.split('\n').filter(Boolean).length });
+    } else {
+      res.json({ logs: 'Aguardando primeiros registros de auditoria em modo fantasma...', count: 0 });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao ler logs de auditoria', message: err.message });
+  }
 });
 
 // Endpoint do feed em tempo real do Master Quant para a visão do Cliente

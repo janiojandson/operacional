@@ -32,7 +32,9 @@ export async function runShadowAudit(
   exchange: any,
   symbol: string,
   side: 'BUY' | 'SELL',
-  proposedRiskR: number = 1.0
+  proposedRiskR: number = 1.0,
+  fallbackOpenPositions?: Array<{ symbol: string; type?: string; side?: string }>,
+  fallbackOrderBook?: { bids: any[]; asks: any[]; spread?: number }
 ): Promise<ShadowAuditResult | null> {
   // Se auditoria estiver desativada, retorna silenciosamente
   if (!RISK_CONFIG.SHADOW_MODE_AUDIT) {
@@ -63,14 +65,25 @@ export async function runShadowAudit(
         isNewTradeUsdLong = side === 'SELL';
       }
 
-      // Buscar posições abertas na Bybit com timeout rápido
-      const positions = await Promise.race([
-        exchange.fetchPositions(),
-        new Promise<any[]>((_, reject) => setTimeout(() => reject(new Error('Timeout fetchPositions L2')), 3000))
-      ]).catch(() => []);
+      // Buscar posições abertas na Bybit ou no Master Quant (fallback)
+      let positions: any[] = [];
+      if (exchange && typeof exchange.fetchPositions === 'function') {
+        positions = await Promise.race([
+          exchange.fetchPositions(),
+          new Promise<any[]>((_, reject) => setTimeout(() => reject(new Error('Timeout fetchPositions L2')), 3000))
+        ]).catch(() => []);
+      }
+
+      if ((!positions || positions.length === 0) && Array.isArray(fallbackOpenPositions)) {
+        positions = fallbackOpenPositions.map(p => ({
+          symbol: p.symbol,
+          side: p.type || (p as any).side || 'BUY',
+          contracts: 1
+        }));
+      }
 
       for (const pos of positions) {
-        const contracts = Number(pos.contracts || pos.info?.size || 0);
+        const contracts = Number(pos.contracts || pos.info?.size || (pos.size ?? 1));
         if (contracts <= 0) continue;
 
         const posSymbol = (pos.symbol || '').replace(':USDT', '').replace('/', '');
@@ -85,7 +98,7 @@ export async function runShadowAudit(
           isPosUsdLong = isPosBuy;
         } else if (posSymbol.includes('USD') || posSymbol.includes('USDT')) {
           posRelatesToUsd = true;
-          isPosUsdLong = !isPosBuy; // Sell de EUR/USD = Long em USD
+          isPosUsdLong = !isPosBuy; // Sell de SOL/USDT = Long em USD
         }
 
         if (posRelatesToUsd && isPosUsdLong === isNewTradeUsdLong) {
@@ -107,38 +120,37 @@ export async function runShadowAudit(
     // 2. FILTRO B: TRAVA DE SPREAD DINÂMICO & ORDERBOOK L2
     // ──────────────────────────────────────────────────────────
     try {
-      const orderbook = await Promise.race([
-        exchange.fetchOrderBook(symbol, 5),
-        new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Timeout fetchOrderBook L2')), 2500))
-      ]);
+      let orderbook: any = null;
+      if (exchange && typeof exchange.fetchOrderBook === 'function') {
+        orderbook = await Promise.race([
+          exchange.fetchOrderBook(symbol, 5),
+          new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Timeout fetchOrderBook L2')), 2500))
+        ]).catch(() => null);
+      }
+
+      if (!orderbook && fallbackOrderBook) {
+        orderbook = fallbackOrderBook;
+      }
 
       if (
         orderbook &&
         Array.isArray(orderbook.bids) &&
         Array.isArray(orderbook.asks) &&
         orderbook.bids.length > 0 &&
-        orderbook.asks.length > 0 &&
-        orderbook.bids[0]?.length > 0 &&
-        orderbook.asks[0]?.length > 0
+        orderbook.asks.length > 0
       ) {
-        const bestBid = Number(orderbook.bids[0][0]);
-        const bestAsk = Number(orderbook.asks[0][0]);
+        const bidFirst = orderbook.bids[0];
+        const askFirst = orderbook.asks[0];
+        const bestBid = typeof bidFirst === 'object' && 'price' in bidFirst ? Number(bidFirst.price) : Number(bidFirst[0] || 0);
+        const bestAsk = typeof askFirst === 'object' && 'price' in askFirst ? Number(askFirst.price) : Number(askFirst[0] || 0);
 
         if (bestBid > 0 && bestAsk > 0) {
           const rawSpread = bestAsk - bestBid;
 
-          // Conversão de Pips conforme a classe do ativo
-          const isJpy = symbol.toUpperCase().includes('JPY');
-          const isForex = symbol.toUpperCase().includes('EUR') || 
-                          symbol.toUpperCase().includes('GBP') || 
-                          symbol.toUpperCase().includes('AUD') || 
-                          symbol.toUpperCase().includes('CAD') || 
-                          symbol.toUpperCase().includes('CHF') || 
-                          symbol.toUpperCase().includes('NZD');
-
-          const pipMultiplier = isJpy 
-            ? 0.01 
-            : (isForex ? 0.0001 : (bestBid > 100 ? bestBid * 0.0002 : 0.0002));
+          // Conversão de Pips conforme classe do ativo (Cripto Bybit)
+          const pipMultiplier = bestBid > 100 
+            ? bestBid * 0.0001 // Para BTC, ETH, SOL, BNB: 1 pip = 0.01%
+            : (bestBid > 5 ? 0.001 : 0.0001); // Para XRP: 1 pip = $0.0001
 
           calculatedSpreadPips = Number((rawSpread / pipMultiplier).toFixed(2));
 

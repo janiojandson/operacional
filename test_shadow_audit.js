@@ -13,25 +13,34 @@ async function test() {
     })
   };
 
-  console.log('--- TEST 1: Blocked by USD Exposure & Spread ---');
-  await runShadowAudit(mockExchange, 'GBP/USD', 'SELL'); // 2R + 1R = 3R > 2R USD LONG + Spread 2.0 pips
+  console.log('--- TEST 1: Master Quant Shadow Audit (SOL/USDT BUY) ---');
+  await runShadowAudit(
+    null,
+    'SOL/USDT',
+    'BUY',
+    1.0,
+    [],
+    {
+      bids: [[194.50, 10]],
+      asks: [[194.52, 10]]
+    }
+  );
 
-  console.log('\n--- TEST 2: Permitted Trade ---');
-  const mockExchangeGood = {
-    fetchPositions: async () => [],
-    fetchOrderBook: async (symbol, depth) => ({
-      bids: [[1.0850, 10]],
-      asks: [[1.0851, 10]] // Spread: 1.0 pip < 1.5 pips
-    })
-  };
-  await runShadowAudit(mockExchangeGood, 'EUR/USD', 'BUY');
-
-  console.log('\n--- TEST 3: Orderbook Empty Handled Gracefully ---');
-  const mockExchangeEmpty = {
-    fetchPositions: async () => [],
-    fetchOrderBook: async () => ({ bids: [], asks: [] })
-  };
-  await runShadowAudit(mockExchangeEmpty, 'BTC/USDT', 'BUY');
+  console.log('\n--- TEST 2: Master Quant Shadow Audit Anti-Correlation Block (3rd SELL on USDT) ---');
+  await runShadowAudit(
+    null,
+    'ETH/USDT',
+    'SELL',
+    1.0,
+    [
+      { symbol: 'BTC/USDT', type: 'SELL' },
+      { symbol: 'SOL/USDT', type: 'SELL' }
+    ],
+    {
+      bids: [[2840.00, 5]],
+      asks: [[2840.20, 5]]
+    }
+  );
 
   console.log('\n--- LOG FILE VERIFICATION ---');
   if (fs.existsSync('audit_shadow_mode.log')) {
