@@ -103,26 +103,36 @@ export function calculatePositionSize(params: {
   leverage: number;
   minQty: number;
   qtyStep: number;
+  symbol?: string;
 }): SizingResult {
-  const { balance, riskPct, entryPrice, stopLoss, leverage, minQty, qtyStep } = params;
+  const { balance, riskPct, entryPrice, stopLoss, leverage, minQty, qtyStep, symbol } = params;
 
   const stopDistPct = Math.abs(entryPrice - stopLoss) / entryPrice;
   if (stopDistPct <= 0) throw new Error('StopLoss inválido — distância zero.');
 
+  const safeLeverage = Math.max(1, Math.min(50, leverage || 10));
   const riskUsd = balance * (riskPct / 100);
   const notionalUsd = riskUsd / stopDistPct;
-  const marginUsd = notionalUsd / leverage;
 
   // Normalizar qty pelo stepSize da corretora
   let qty = notionalUsd / entryPrice;
   qty = Math.floor(qty / qtyStep) * qtyStep;
   qty = Math.max(qty, minQty);
 
+  const realNotional = Number((qty * entryPrice).toFixed(2));
+  const marginUsd = Number((realNotional / safeLeverage).toFixed(2));
+
+  // Trava de segurança: validar se a margem requerida cabe no saldo disponível da Bybit
+  if (marginUsd > balance * 0.95) {
+    const symStr = symbol || 'Ativo';
+    throw new Error(`Saldo insuficiente ($${balance.toFixed(2)}) para contrato mínimo de ${minQty} em ${symStr} com alavancagem ${safeLeverage}x. Margem requerida: $${marginUsd.toFixed(2)}. Aumente a alavancagem ou o saldo.`);
+  }
+
   return {
     qty: Number(qty.toFixed(8)),
-    notionalUsd: Number((qty * entryPrice).toFixed(2)),
-    marginUsd: Number(marginUsd.toFixed(2)),
-    leverage,
+    notionalUsd: realNotional,
+    marginUsd,
+    leverage: safeLeverage,
     stopDistPct: Number((stopDistPct * 100).toFixed(3))
   };
 }
@@ -416,6 +426,10 @@ export class BybitExecutionEngine {
       const minQty = market.limits?.amount?.min ?? 0.001;
       const qtyStep = market.precision?.amount ?? 0.001;
 
+      // Buscar saldo ao vivo do cliente na Bybit
+      const accountInfo = await BybitExecutionEngine.getAccountBalance(clientId);
+      const balance = accountInfo?.availableBalance || accountInfo?.walletBalance || Number(config.balance) || 100;
+
       // Calcular tamanho da posição lendo banca ao vivo da Bybit
       // Ajuste proporcional de mão pela Autonomia da IA (1.5x a 5.0x) se o cliente habilitou
       const baseRiskPct = Number(config.risk_pct) || 1.0;
@@ -428,13 +442,14 @@ export class BybitExecutionEngine {
         riskPct: effectiveRiskPct,
         entryPrice: payload.entryPrice,
         stopLoss: payload.stopLoss,
-        leverage: Number(config.leverage),
+        leverage: Number(config.leverage) || 10,
         minQty,
-        qtyStep: typeof qtyStep === 'number' ? qtyStep : 0.001
+        qtyStep: typeof qtyStep === 'number' ? qtyStep : 0.001,
+        symbol: payload.symbol
       });
 
       // Configurar alavancagem isolada ANTES de abrir a posição
-      await exchange.setLeverage(Number(config.leverage), ccxtSymbol, { marginMode: 'isolated' }).catch(() => {});
+      await exchange.setLeverage(sizing.leverage, ccxtSymbol).catch(() => {});
 
       // 🛡️ SHADOW AUDIT (MODO FANTASMA): Dispara em background sem bloquear ou atrasar a thread principal
       runShadowAudit(exchange, ccxtSymbol, payload.side).catch((err) => {
@@ -465,7 +480,7 @@ export class BybitExecutionEngine {
         entry_price: payload.entryPrice,
         qty: sizing.qty,
         notional_usd: sizing.notionalUsd,
-        leverage: Number(config.leverage),
+        leverage: sizing.leverage,
         status: 'OPEN',
         signal_reason: payload.signalReason,
         bybitOrderId: order.id,
