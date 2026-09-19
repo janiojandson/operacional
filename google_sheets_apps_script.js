@@ -278,15 +278,40 @@ function updateDashboard(ss) {
     .setVerticalAlignment('middle');
   sheet.setRowHeight(2, 24);
 
-  // Cartões de Métricas Dinâmicas com Fórmulas
+  // Cartões de Métricas Calculadas Diretamente (100% Imune a #ERROR! ou idioma)
+  var tradesSheet = ss.getSheetByName('⚡ TRADES EXECUTADOS');
+  var tradesCount = tradesSheet ? Math.max(0, tradesSheet.getLastRow() - 1) : 0;
+
+  var successCount = 0;
+  if (tradesSheet && tradesCount > 0) {
+    var statuses = tradesSheet.getRange(2, 9, tradesCount, 1).getValues();
+    for (var i = 0; i < statuses.length; i++) {
+      var st = String(statuses[i][0]).toUpperCase();
+      if (st === 'EXECUTADO' || st === 'OK' || st.includes('SUCESSO')) {
+        successCount++;
+      }
+    }
+  }
+
+  var shadowSheet = ss.getSheetByName('🛡️ AUDITORIA SHADOW MODE');
+  var shadowBlocks = 0;
+  if (shadowSheet && shadowSheet.getLastRow() > 1) {
+    var evals = shadowSheet.getRange(2, 5, shadowSheet.getLastRow() - 1, 1).getValues();
+    for (var j = 0; j < evals.length; j++) {
+      if (String(evals[j][0]).includes('BLOQUEADO')) {
+        shadowBlocks++;
+      }
+    }
+  }
+
   sheet.getRange('A4:B4').merge().setValue('TOTAL DE DISPAROS REAIS').setFontWeight('bold').setBackground('#f1f5f9').setHorizontalAlignment('center');
-  sheet.getRange('A5:B5').merge().setFormula('=IFERROR(COUNTA(\'⚡ TRADES EXECUTADOS\'!A2:A), 0)').setFontSize(20).setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.getRange('A5:B5').merge().setValue(tradesCount).setFontSize(22).setFontWeight('bold').setHorizontalAlignment('center');
 
   sheet.getRange('C4:D4').merge().setValue('TRADES EXECUTADOS COM SUCESSO').setFontWeight('bold').setBackground('#dcfce7').setFontColor('#15803d').setHorizontalAlignment('center');
-  sheet.getRange('C5:D5').merge().setFormula('=IFERROR(COUNTIF(\'⚡ TRADES EXECUTADOS\'!I2:I, "EXECUTADO"), 0)').setFontSize(20).setFontWeight('bold').setFontColor('#15803d').setHorizontalAlignment('center');
+  sheet.getRange('C5:D5').merge().setValue(successCount).setFontSize(22).setFontWeight('bold').setFontColor('#15803d').setHorizontalAlignment('center');
 
   sheet.getRange('E4:F4').merge().setValue('BLOQUEIOS PREVENTIVOS SHADOW').setFontWeight('bold').setBackground('#fee2e2').setFontColor('#b91c1c').setHorizontalAlignment('center');
-  sheet.getRange('E5:F5').merge().setFormula('=IFERROR(COUNTIF(\'🛡️ AUDITORIA SHADOW MODE\'!E2:E, "*BLOQUEADO*"), 0)').setFontSize(20).setFontWeight('bold').setFontColor('#b91c1c').setHorizontalAlignment('center');
+  sheet.getRange('E5:F5').merge().setValue(shadowBlocks).setFontSize(22).setFontWeight('bold').setFontColor('#b91c1c').setHorizontalAlignment('center');
 
   sheet.setRowHeight(4, 25);
   sheet.setRowHeight(5, 40);
