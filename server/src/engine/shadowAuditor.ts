@@ -233,13 +233,13 @@ export function recordShadowOutcome(
   symbol: string,
   status: 'CLOSED_TP' | 'CLOSED_SL',
   pnlUsd: number,
-  rMultiple: number
-): { outcome: string; verdict: string; savedCapital: boolean } | null {
+  rMultiple: number,
+  pnlPct: number = 0
+): { outcome: string; verdict: string; savedCapital: boolean; pnlUsd: number; pnlPct: number; rMultiple: number } | null {
   const pending = pendingAudits.get(symbol);
   const isGreen = status === 'CLOSED_TP';
-  const outcomeText = isGreen 
-    ? `GREEN 🟢 (+${rMultiple > 0 ? rMultiple.toFixed(1) : '2.5'}R | +$${Math.abs(pnlUsd).toFixed(2)})` 
-    : `RED 🔴 (${rMultiple < 0 ? rMultiple.toFixed(1) : '-1.0'}R | -$${Math.abs(pnlUsd).toFixed(2)})`;
+  const finalPnlPct = pnlPct !== 0 ? pnlPct : (isGreen ? 2.50 : -1.00);
+  const outcomeText = isGreen ? 'GREEN 🟢' : 'RED 🔴';
 
   let safetyVerdict = '';
   let savedCapital = false;
@@ -247,21 +247,21 @@ export function recordShadowOutcome(
   if (pending) {
     const wasBlocked = pending.auditResult.newMode.includes('BLOQUEADO');
     if (wasBlocked && !isGreen) {
-      safetyVerdict = '🛡️ FILTRO SALVOU A BANCA (Bloqueou entrada que daria RED -1.0R)';
+      safetyVerdict = `🛡️ FILTRO SALVOU A BANCA (Bloqueou loss de -$${Math.abs(pnlUsd).toFixed(2)} | -${Math.abs(finalPnlPct).toFixed(2)}%)`;
       savedCapital = true;
     } else if (wasBlocked && isGreen) {
-      safetyVerdict = '⚠️ FALSO POSITIVO (Filtro bloqueou trade que foi GREEN +2.5R)';
+      safetyVerdict = `⚠️ FALSO POSITIVO (Filtro bloqueou ganho de +$${Math.abs(pnlUsd).toFixed(2)} | +${Math.abs(finalPnlPct).toFixed(2)}%)`;
     } else if (!wasBlocked && isGreen) {
-      safetyVerdict = '✅ CONFLUÊNCIA PERFEITA (Filtro aprovou entrada e deu GREEN +2.5R)';
+      safetyVerdict = `✅ CONFLUÊNCIA PERFEITA (Filtro aprovou e capturou +$${Math.abs(pnlUsd).toFixed(2)} | +${Math.abs(finalPnlPct).toFixed(2)}%)`;
     } else {
-      safetyVerdict = '❌ RISCO NÃO EVITADO (Filtro aprovou entrada mas bateu Stop Loss -1.0R)';
+      safetyVerdict = `❌ RISCO NÃO EVITADO (Filtro aprovou mas bateu loss de -$${Math.abs(pnlUsd).toFixed(2)} | -${Math.abs(finalPnlPct).toFixed(2)}%)`;
     }
   } else {
-    safetyVerdict = isGreen ? '✅ GREEN EXECUTADO (+2.5R)' : '❌ RED EXECUTADO (-1.0R)';
+    safetyVerdict = isGreen ? `✅ GREEN EXECUTADO (+${rMultiple.toFixed(1)}R)` : `❌ RED EXECUTADO (${rMultiple.toFixed(1)}R)`;
   }
 
   const timestamp = new Date().toISOString();
-  const outcomeLog = `[SHADOW OUTCOME] | Ativo: ${symbol} | Resultado: ${outcomeText} | Decisão Pré-Trade: ${pending?.auditResult.newMode || 'N/A'} | Veredito: ${safetyVerdict}`;
+  const outcomeLog = `[SHADOW OUTCOME] | Ativo: ${symbol} | Resultado: ${outcomeText} (${finalPnlPct > 0 ? '+' : ''}${finalPnlPct.toFixed(2)}% / $${pnlUsd.toFixed(2)}) | Decisão Pré-Trade: ${pending?.auditResult.newMode || 'N/A'} | Veredito: ${safetyVerdict}`;
 
   // Print no terminal com cor correspondente
   const color = isGreen ? '\x1b[32m' : '\x1b[31m';
@@ -275,7 +275,7 @@ export function recordShadowOutcome(
     console.error(`[SHADOW OUTCOME ERROR] Falha ao gravar log em disco: ${fsErr.message}`);
   }
 
-  // Enviar para a aba de auditoria da Planilha Google com colunas de resultado e veredito!
+  // Enviar para a aba de auditoria da Planilha Google com colunas estruturais
   GoogleSheetsService.logShadowAudit({
     symbol,
     side: pending?.auditResult.side || 'N/A',
@@ -285,10 +285,13 @@ export function recordShadowOutcome(
     spreadPips: pending?.auditResult.spreadPips || 0,
     usdExposureR: pending?.auditResult.usdExposureR || 0,
     outcome: outcomeText,
+    pnlUsd,
+    pnlPct: finalPnlPct,
+    rMultiple,
     safetyVerdict,
     timestamp
   });
 
   pendingAudits.delete(symbol);
-  return { outcome: outcomeText, verdict: safetyVerdict, savedCapital };
+  return { outcome: outcomeText, verdict: safetyVerdict, savedCapital, pnlUsd, pnlPct: finalPnlPct, rMultiple };
 }

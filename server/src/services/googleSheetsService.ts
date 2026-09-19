@@ -18,6 +18,10 @@ export interface TradeLogPayload {
   status: string;
   timestamp: string;
   clientName?: string;
+  outcome?: string;
+  pnlUsd?: number;
+  pnlPct?: number;
+  rMultiple?: number;
   errorMsg?: string;
 }
 
@@ -32,6 +36,9 @@ export interface ShadowAuditPayload {
   usdExposureR: number;
   timestamp: string;
   outcome?: string;
+  pnlUsd?: number;
+  pnlPct?: number;
+  rMultiple?: number;
   safetyVerdict?: string;
 }
 

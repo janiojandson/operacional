@@ -153,14 +153,26 @@ const paperTrading = new PaperTradingEngine((account, tradeEvent) => {
     // 📊 Registra as operações do Master Quant na Planilha Google em tempo real
     try {
       let statusStr = 'MASTER_ABERTO';
+      let outcomeLabel = 'EM ANDAMENTO ⏳';
       let details = tradeEvent.signalReason || 'Sinal Institucional Identificado';
+      let pnlUsd = 0;
+      let pnlPct = 0;
+      let rMultiple = 0;
 
       if (tradeEvent.status === 'CLOSED_TP') {
         statusStr = 'MASTER_WIN (+2.5R)';
-        details = `Take Profit atingido! P&L: +$${tradeEvent.pnlUsd?.toFixed(2) || '0.00'} (+${tradeEvent.pnlPct?.toFixed(2) || '0.00'}%)`;
+        outcomeLabel = 'GREEN 🟢';
+        pnlUsd = tradeEvent.pnlUsd || 0;
+        pnlPct = tradeEvent.pnlPct || 2.50;
+        rMultiple = tradeEvent.rMultiple || 2.5;
+        details = `Take Profit atingido! P&L: +$${pnlUsd.toFixed(2)} (+${pnlPct.toFixed(2)}%) | Retorno: +${rMultiple.toFixed(1)}R`;
       } else if (tradeEvent.status === 'CLOSED_SL') {
         statusStr = 'MASTER_LOSS (-1.0R)';
-        details = `Stop Loss institucional. P&L: -$${Math.abs(tradeEvent.pnlUsd || 0).toFixed(2)} (${tradeEvent.pnlPct?.toFixed(2) || '0.00'}%)`;
+        outcomeLabel = 'RED 🔴';
+        pnlUsd = tradeEvent.pnlUsd || 0;
+        pnlPct = tradeEvent.pnlPct || -1.00;
+        rMultiple = tradeEvent.rMultiple || -1.0;
+        details = `Stop Loss institucional. P&L: -$${Math.abs(pnlUsd).toFixed(2)} (${pnlPct.toFixed(2)}%) | Retorno: ${rMultiple.toFixed(1)}R`;
       }
 
       const approxQty = Number(((tradeEvent.powerMultiplier * 3000) / (tradeEvent.entryPrice || 1)).toFixed(4));
@@ -174,6 +186,10 @@ const paperTrading = new PaperTradingEngine((account, tradeEvent) => {
         stopLoss: tradeEvent.stopLoss,
         takeProfit: tradeEvent.takeProfit,
         status: statusStr,
+        outcome: outcomeLabel,
+        pnlUsd,
+        pnlPct,
+        rMultiple,
         timestamp: new Date().toISOString(),
         errorMsg: details
       });
@@ -208,7 +224,8 @@ const paperTrading = new PaperTradingEngine((account, tradeEvent) => {
           tradeEvent.symbol,
           tradeEvent.status,
           tradeEvent.pnlUsd || 0,
-          tradeEvent.rMultiple || (tradeEvent.status === 'CLOSED_TP' ? 2.5 : -1.0)
+          tradeEvent.rMultiple || (tradeEvent.status === 'CLOSED_TP' ? 2.5 : -1.0),
+          tradeEvent.pnlPct || (tradeEvent.status === 'CLOSED_TP' ? 2.50 : -1.00)
         );
         if (outcome) {
           io.emit('shadow_audit_outcome', outcome);
