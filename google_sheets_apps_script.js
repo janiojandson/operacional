@@ -137,6 +137,9 @@ function resetAllSheets(ss) {
 /**
  * Inicializa aba '⚡ TRADES EXECUTADOS'
  */
+/**
+ * Inicializa aba '⚡ TRADES EXECUTADOS'
+ */
 function initSheetTrades(ss, forceRefresh) {
   var name = '⚡ TRADES EXECUTADOS';
   var sheet = ss.getSheetByName(name);
@@ -156,7 +159,8 @@ function initSheetTrades(ss, forceRefresh) {
       'Take Profit ($)',
       'Status',
       'Resultado Real',
-      'Lucro / Prejuízo ($)',
+      'Lucro / Prejuízo Real ($)',
+      'Lucro Teórico (Shadow) ($)',
       'Retorno (%)',
       'R-Múltiplo',
       'Regra Institucional / Detalhes'
@@ -182,6 +186,40 @@ function logTrade(ss, data) {
   var pnlPctVal = Number(data.pnlPct || 0) / 100;
   var rMultipleVal = Number(data.rMultiple || 0);
 
+  // 🛡️ CÁLCULO DO LUCRO TEÓRICO COM SHADOW MODE:
+  // Se o robô enviou explicitamente shadowTheoreticalPnl, usa o valor.
+  // Caso contrário, calcula com base na decisão do Shadow Mode para este símbolo/trade:
+  var shadowTheoreticalPnl = 0;
+  if (data.shadowTheoreticalPnl !== undefined && data.shadowTheoreticalPnl !== null) {
+    shadowTheoreticalPnl = Number(data.shadowTheoreticalPnl);
+  } else {
+    var shadowModeDecision = (data.shadowDecision || '').toUpperCase();
+    
+    // Se não veio no payload, tenta cruzar com a última decisão registrada na aba Shadow Mode
+    if (!shadowModeDecision) {
+      var shadowSheet = ss.getSheetByName('🛡️ AUDITORIA SHADOW MODE');
+      if (shadowSheet && shadowSheet.getLastRow() > 1) {
+        var lastShadowRows = shadowSheet.getRange(Math.max(2, shadowSheet.getLastRow() - 20), 1, Math.min(20, shadowSheet.getLastRow() - 1), 5).getValues();
+        for (var k = lastShadowRows.length - 1; k >= 0; k--) {
+          if (String(lastShadowRows[k][1]).toUpperCase() === String(data.symbol || '').toUpperCase()) {
+            shadowModeDecision = String(lastShadowRows[k][4] || '').toUpperCase();
+            break;
+          }
+        }
+      }
+    }
+
+    if (shadowModeDecision.indexOf('BLOQUEADO') !== -1) {
+      // Se foi bloqueado pelo Shadow Mode:
+      // Se tomou RED, o Shadow poupou a banca (teórico = $0.00)
+      // Se deu GREEN, o Shadow filtrou a entrada (teórico = $0.00)
+      shadowTheoreticalPnl = 0.00;
+    } else {
+      // Se foi PERMITIDO (ou sem bloqueio), o Shadow executaria igual ao real
+      shadowTheoreticalPnl = pnlUsdVal;
+    }
+  }
+
   var row = [
     formattedDate,
     data.clientName || 'Cliente Real (Bybit)',
@@ -194,6 +232,7 @@ function logTrade(ss, data) {
     (data.status || 'EXECUTADO').toUpperCase(),
     data.outcome || (pnlUsdVal > 0 ? 'GREEN 🟢' : (pnlUsdVal < 0 ? 'RED 🔴' : 'EM ANDAMENTO ⏳')),
     pnlUsdVal,
+    shadowTheoreticalPnl,
     pnlPctVal,
     rMultipleVal,
     data.errorMsg || 'Executado via CCXT Bybit Linear Perpetuals'
@@ -236,11 +275,23 @@ function logTrade(ss, data) {
   sheet.getRange(lastRow, 5).setNumberFormat('$#,##0.00'); // Preço Entrada
   sheet.getRange(lastRow, 7).setNumberFormat('$#,##0.00'); // Stop Loss
   sheet.getRange(lastRow, 8).setNumberFormat('$#,##0.00'); // Take Profit
-  sheet.getRange(lastRow, 11).setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"'); // P&L $
-  sheet.getRange(lastRow, 12).setNumberFormat('+0.00%;-0.00%;0.00%'); // Retorno %
-  sheet.getRange(lastRow, 13).setNumberFormat('+0.0"R";-0.0"R";0.0"R"'); // R-Múltiplo
+  sheet.getRange(lastRow, 11).setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"'); // Lucro / Prejuízo Real $
+  
+  // Destaque para Lucro Teórico (Shadow)
+  var theoCell = sheet.getRange(lastRow, 12);
+  theoCell.setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"');
+  if (shadowTheoreticalPnl > pnlUsdVal) {
+    theoCell.setBackground('#f3e8ff').setFontColor('#7e22ce').setFontWeight('bold'); // Shadow salvou perda!
+  } else if (shadowTheoreticalPnl > 0) {
+    theoCell.setBackground('#dcfce7').setFontColor('#15803d').setFontWeight('bold');
+  } else if (shadowTheoreticalPnl < 0) {
+    theoCell.setBackground('#fee2e2').setFontColor('#b91c1c').setFontWeight('bold');
+  }
 
-  sheet.autoResizeColumns(1, 14);
+  sheet.getRange(lastRow, 13).setNumberFormat('+0.00%;-0.00%;0.00%'); // Retorno %
+  sheet.getRange(lastRow, 14).setNumberFormat('+0.0"R";-0.0"R";0.0"R"'); // R-Múltiplo
+
+  sheet.autoResizeColumns(1, 15);
 }
 
 /**
@@ -265,7 +316,8 @@ function initSheetShadow(ss, forceRefresh) {
       'Risco Global USDT (R)',
       'Desfecho Real',
       'Retorno (%)',
-      'Impacto Financeiro ($)',
+      'Impacto Real ($)',
+      'Lucro Teórico Shadow ($)',
       'R-Múltiplo',
       'Veredito Estrutural de Segurança'
     ];
@@ -290,6 +342,9 @@ function logShadowAudit(ss, data) {
   var pnlPctVal = Number(data.pnlPct || 0) / 100;
   var rMultipleVal = Number(data.rMultiple || 0);
 
+  var isBlocked = String(data.newMode || '').toUpperCase().indexOf('BLOQUEADO') !== -1;
+  var theoreticalPnl = isBlocked ? 0.00 : pnlUsdVal;
+
   var row = [
     formattedDate,
     data.symbol || '',
@@ -302,6 +357,7 @@ function logShadowAudit(ss, data) {
     data.outcome || (pnlUsdVal > 0 ? 'GREEN 🟢' : (pnlUsdVal < 0 ? 'RED 🔴' : 'EM ANDAMENTO ⏳')),
     pnlPctVal,
     pnlUsdVal,
+    theoreticalPnl,
     rMultipleVal,
     data.safetyVerdict || 'Monitorando saída...'
   ];
@@ -311,7 +367,7 @@ function logShadowAudit(ss, data) {
 
   // 1. Cor Decisão Pré-Trade (BLOQUEADO / PERMITIDO)
   var evalCell = sheet.getRange(lastRow, 5);
-  if (String(data.newMode).indexOf('BLOQUEADO') !== -1) {
+  if (isBlocked) {
     evalCell.setBackground('#fee2e2').setFontColor('#b91c1c').setFontWeight('bold');
   } else {
     evalCell.setBackground('#dcfce7').setFontColor('#15803d').setFontWeight('bold');
@@ -329,7 +385,7 @@ function logShadowAudit(ss, data) {
   }
 
   // 3. Cor Veredito Estrutural de Segurança
-  var verdictCell = sheet.getRange(lastRow, 13);
+  var verdictCell = sheet.getRange(lastRow, 14);
   var verdStr = String(data.safetyVerdict || '').toUpperCase();
   if (verdStr.indexOf('SALVOU') !== -1) {
     verdictCell.setBackground('#f3e8ff').setFontColor('#7e22ce').setFontWeight('bold'); // Roxo Realce: Salvou Capital!
@@ -343,10 +399,11 @@ function logShadowAudit(ss, data) {
 
   // 4. Formatações Numéricas
   sheet.getRange(lastRow, 10).setNumberFormat('+0.00%;-0.00%;0.00%'); // Retorno %
-  sheet.getRange(lastRow, 11).setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"'); // Impacto $
-  sheet.getRange(lastRow, 12).setNumberFormat('+0.0"R";-0.0"R";0.0"R"'); // R-Múltiplo
+  sheet.getRange(lastRow, 11).setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"'); // Impacto Real $
+  sheet.getRange(lastRow, 12).setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"'); // Teórico Shadow $
+  sheet.getRange(lastRow, 13).setNumberFormat('+0.0"R";-0.0"R";0.0"R"'); // R-Múltiplo
 
-  sheet.autoResizeColumns(1, 13);
+  sheet.autoResizeColumns(1, 14);
 }
 
 /**
@@ -390,25 +447,29 @@ function updateDashboard(ss) {
 
   var greenCount = 0;
   var redCount = 0;
-  var totalNetPnl = 0;
+  var totalRealPnl = 0;
+  var totalTheoreticalPnl = 0;
 
   if (tradesSheet && tradesCount > 0) {
-    var rows = tradesSheet.getRange(2, 1, tradesCount, 13).getValues();
+    var colsToRead = Math.max(12, tradesSheet.getLastColumn());
+    var rows = tradesSheet.getRange(2, 1, tradesCount, colsToRead).getValues();
     for (var i = 0; i < rows.length; i++) {
       var outcome = String(rows[i][9] || '').toUpperCase();
-      var pnl = Number(rows[i][10] || 0);
+      var realPnl = Number(rows[i][10] || 0);
+      var theoPnl = Number(rows[i][11] !== undefined && rows[i][11] !== '' ? rows[i][11] : realPnl);
 
-      if (outcome.indexOf('GREEN') !== -1 || pnl > 0) {
+      if (outcome.indexOf('GREEN') !== -1 || realPnl > 0) {
         greenCount++;
-      } else if (outcome.indexOf('RED') !== -1 || pnl < 0) {
+      } else if (outcome.indexOf('RED') !== -1 || realPnl < 0) {
         redCount++;
       }
-      totalNetPnl += pnl;
+      totalRealPnl += realPnl;
+      totalTheoreticalPnl += theoPnl;
     }
   }
 
   var closedTrades = greenCount + redCount;
-  var winRate = closedTrades > 0 ? (greenCount / closedTrades) * 100 : 0;
+  var winRateReal = closedTrades > 0 ? (greenCount / closedTrades) * 100 : 0;
 
   // Leitura e Cálculos Dinâmicos da Aba de Shadow Mode
   var shadowSheet = ss.getSheetByName('🛡️ AUDITORIA SHADOW MODE');
@@ -416,10 +477,11 @@ function updateDashboard(ss) {
   var capitalSaved = 0;
 
   if (shadowSheet && shadowSheet.getLastRow() > 1) {
-    var shadowRows = shadowSheet.getRange(2, 1, shadowSheet.getLastRow() - 1, 13).getValues();
+    var shadowCols = Math.max(13, shadowSheet.getLastColumn());
+    var shadowRows = shadowSheet.getRange(2, 1, shadowSheet.getLastRow() - 1, shadowCols).getValues();
     for (var j = 0; j < shadowRows.length; j++) {
       var decision = String(shadowRows[j][4] || '').toUpperCase();
-      var verdict = String(shadowRows[j][12] || '').toUpperCase();
+      var verdict = String(shadowRows[j][shadowRows[j].length - 1] || shadowRows[j][13] || shadowRows[j][12] || '').toUpperCase();
       var impact = Number(shadowRows[j][10] || 0);
 
       if (decision.indexOf('BLOQUEADO') !== -1) {
@@ -430,6 +492,9 @@ function updateDashboard(ss) {
       }
     }
   }
+
+  // Alpha gerado pelo Shadow Mode ($ e %)
+  var shadowAlpha = totalTheoreticalPnl - totalRealPnl;
 
   // ── LINHA 1 DE CARTÕES: FLUXO OPERACIONAL ──
   sheet.getRange('A4:B4').merge().setValue('TOTAL DE OPERAÇÕES').setFontWeight('bold').setBackground('#f1f5f9').setHorizontalAlignment('center');
@@ -444,42 +509,64 @@ function updateDashboard(ss) {
   sheet.setRowHeight(4, 24);
   sheet.setRowHeight(5, 38);
 
-  // ── LINHA 2 DE CARTÕES: EFICIÊNCIA & PROTEÇÃO SHADOW ──
-  sheet.getRange('A7:B7').merge().setValue('TAXA DE ACERTO (WIN RATE)').setFontWeight('bold').setBackground('#f1f5f9').setHorizontalAlignment('center');
-  sheet.getRange('A8:B8').merge().setValue(winRate.toFixed(1) + '%').setFontSize(22).setFontWeight('bold').setHorizontalAlignment('center')
-    .setFontColor(winRate >= 50 ? '#15803d' : '#b91c1c');
+  // ── LINHA 2 DE CARTÕES: SALDO REAL vs SALDO TEÓRICO SHADOW ──
+  // Card 1: Win Rate & Operações
+  sheet.getRange('A7:B7').merge().setValue('TAXA DE ACERTO REAL').setFontWeight('bold').setBackground('#f1f5f9').setHorizontalAlignment('center');
+  sheet.getRange('A8:B8').merge().setValue(winRateReal.toFixed(1) + '%').setFontSize(22).setFontWeight('bold').setHorizontalAlignment('center')
+    .setFontColor(winRateReal >= 50 ? '#15803d' : '#b91c1c');
 
-  sheet.getRange('C7:D7').merge().setValue('LUCRO LÍQUIDO ACUMULADO ($)').setFontWeight('bold').setBackground('#dcfce7').setFontColor('#15803d').setHorizontalAlignment('center');
-  var pnlCell = sheet.getRange('C8:D8').merge();
-  pnlCell.setValue(totalNetPnl).setFontSize(22).setFontWeight('bold').setHorizontalAlignment('center');
-  pnlCell.setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"');
-  if (totalNetPnl >= 0) pnlCell.setFontColor('#15803d'); else pnlCell.setFontColor('#b91c1c');
+  // Card 2: Saldo Real Acumulado
+  sheet.getRange('C7:D7').merge().setValue('SALDO REAL ACUMULADO ($)').setFontWeight('bold').setBackground('#e2e8f0').setFontColor('#0f172a').setHorizontalAlignment('center');
+  var realCell = sheet.getRange('C8:D8').merge();
+  realCell.setValue(totalRealPnl).setFontSize(22).setFontWeight('bold').setHorizontalAlignment('center');
+  realCell.setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"');
+  realCell.setFontColor(totalRealPnl >= 0 ? '#15803d' : '#b91c1c');
 
-  sheet.getRange('E7:F7').merge().setValue('CAPITAL SALVO PELO SHADOW MODE').setFontWeight('bold').setBackground('#f3e8ff').setFontColor('#7e22ce').setHorizontalAlignment('center');
-  var savedCell = sheet.getRange('E8:F8').merge();
-  savedCell.setValue(capitalSaved).setFontSize(22).setFontWeight('bold').setFontColor('#7e22ce').setHorizontalAlignment('center');
-  savedCell.setNumberFormat('$#,##0.00');
+  // Card 3: Saldo Teórico com Shadow Mode
+  sheet.getRange('E7:F7').merge().setValue('SALDO TEÓRICO COM SHADOW ($)').setFontWeight('bold').setBackground('#f3e8ff').setFontColor('#7e22ce').setHorizontalAlignment('center');
+  var theoCell = sheet.getRange('E8:F8').merge();
+  theoCell.setValue(totalTheoreticalPnl).setFontSize(22).setFontWeight('bold').setHorizontalAlignment('center');
+  theoCell.setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"');
+  theoCell.setFontColor(totalTheoreticalPnl >= 0 ? '#7e22ce' : '#b91c1c');
 
   sheet.setRowHeight(7, 24);
   sheet.setRowHeight(8, 38);
 
+  // ── LINHA 3 DE CARTÕES: EFICIÊNCIA DO SHADOW MODE & CAPITAL POUPADO ──
+  sheet.getRange('A10:B10').merge().setValue('SINAIS BLOQUEADOS PELO SHADOW').setFontWeight('bold').setBackground('#fee2e2').setFontColor('#b91c1c').setHorizontalAlignment('center');
+  sheet.getRange('A11:B11').merge().setValue(shadowBlocks).setFontSize(20).setFontWeight('bold').setFontColor('#b91c1c').setHorizontalAlignment('center');
+
+  sheet.getRange('C10:D10').merge().setValue('CAPITAL SALVO / PERDAS EVITADAS').setFontWeight('bold').setBackground('#dcfce7').setFontColor('#15803d').setHorizontalAlignment('center');
+  var savedCell = sheet.getRange('C11:D11').merge();
+  savedCell.setValue(capitalSaved).setFontSize(20).setFontWeight('bold').setFontColor('#15803d').setHorizontalAlignment('center');
+  savedCell.setNumberFormat('$#,##0.00');
+
+  sheet.getRange('E10:F10').merge().setValue('DIFERENCIAL ALPHA SHADOW ($)').setFontWeight('bold').setBackground('#ede9fe').setFontColor('#6d28d9').setHorizontalAlignment('center');
+  var alphaCell = sheet.getRange('E11:F11').merge();
+  alphaCell.setValue(shadowAlpha).setFontSize(20).setFontWeight('bold').setHorizontalAlignment('center');
+  alphaCell.setNumberFormat('+$#,##0.00;-$#,##0.00;"$0.00"');
+  alphaCell.setFontColor(shadowAlpha >= 0 ? '#15803d' : '#b91c1c');
+
+  sheet.setRowHeight(10, 24);
+  sheet.setRowHeight(11, 36);
+
   // Bloco de Parametrização Institucional
-  sheet.getRange('A10:F10').merge().setValue('PARAMETRIZAÇÃO QUANTITATIVA ATIVA NO SERVIDOR (BYBIT LINEAR)').setFontWeight('bold').setBackground('#334155').setFontColor('#ffffff').setHorizontalAlignment('center');
-  sheet.setRowHeight(10, 26);
+  sheet.getRange('A13:F13').merge().setValue('PARAMETRIZAÇÃO QUANTITATIVA ATIVA NO SERVIDOR (BYBIT LINEAR)').setFontWeight('bold').setBackground('#334155').setFontColor('#ffffff').setHorizontalAlignment('center');
+  sheet.setRowHeight(13, 26);
 
   var params = [
     ['Corretora Oficial', 'Bybit Contratos Perpétuos Lineares (USDT)', 'Modo de Margem', 'Isolada (Isolated 10x)'],
     ['Pares Cripto Ativos', 'BTC/USDT, ETH/USDT, SOL/USDT, BNB/USDT, XRP/USDT', 'Risco por Trade', '1.0% Risco Travado na Banca Real'],
     ['Stop Loss Técnico', '1.00% (Protegido de ruídos e spreads)', 'Take Profit (Alvo)', '2.50% (Assimetria Positiva de 2.5R)'],
-    ['Teto de Spread L2', '3.0 bps (0.030% máx na Bybit)', 'Shadow Mode Audit', 'ATIVO (Cruzamento de GREEN/RED em tempo real)']
+    ['Teto de Spread L2', '3.0 bps (0.030% máx na Bybit)', 'Shadow Mode Audit', 'ATIVO (Cruzamento de Saldo Real vs Teórico)']
   ];
 
   for (var r = 0; r < params.length; r++) {
-    sheet.getRange(11 + r, 1).setValue(params[r][0]).setFontWeight('bold').setBackground('#f8fafc');
-    sheet.getRange(11 + r, 2, 1, 2).merge().setValue(params[r][1]).setBackground('#ffffff');
-    sheet.getRange(11 + r, 4).setValue(params[r][2]).setFontWeight('bold').setBackground('#f8fafc');
-    sheet.getRange(11 + r, 5, 1, 2).merge().setValue(params[r][3]).setBackground('#ffffff');
-    sheet.setRowHeight(11 + r, 24);
+    sheet.getRange(14 + r, 1).setValue(params[r][0]).setFontWeight('bold').setBackground('#f8fafc');
+    sheet.getRange(14 + r, 2, 1, 2).merge().setValue(params[r][1]).setBackground('#ffffff');
+    sheet.getRange(14 + r, 4).setValue(params[r][2]).setFontWeight('bold').setBackground('#f8fafc');
+    sheet.getRange(14 + r, 5, 1, 2).merge().setValue(params[r][3]).setBackground('#ffffff');
+    sheet.setRowHeight(14 + r, 24);
   }
 
   sheet.autoResizeColumns(1, 6);

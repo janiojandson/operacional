@@ -22,6 +22,8 @@ export interface TradeLogPayload {
   pnlUsd?: number;
   pnlPct?: number;
   rMultiple?: number;
+  shadowTheoreticalPnl?: number;
+  shadowDecision?: string;
   errorMsg?: string;
 }
 
