@@ -79,6 +79,8 @@ function doPost(e) {
     }
 
     var data = JSON.parse(e.postData.contents);
+    var ss = getSpreadsheet();
+
     if (data.type === 'RESET_SESSION' || data.type === 'RESET') {
       resetAllSheets(ss);
       updateDashboard(ss);
@@ -120,18 +122,16 @@ function doPost(e) {
  */
 function resetAllSheets(ss) {
   var tradesSheet = ss.getSheetByName('⚡ TRADES EXECUTADOS');
-  if (tradesSheet && tradesSheet.getLastRow() > 1) {
-    tradesSheet.deleteRows(2, tradesSheet.getLastRow() - 1);
-  } else if (!tradesSheet) {
-    initSheetTrades(ss, true);
+  if (tradesSheet) {
+    tradesSheet.clear();
   }
+  initSheetTrades(ss, true);
 
   var shadowSheet = ss.getSheetByName('🛡️ AUDITORIA SHADOW MODE');
-  if (shadowSheet && shadowSheet.getLastRow() > 1) {
-    shadowSheet.deleteRows(2, shadowSheet.getLastRow() - 1);
-  } else if (!shadowSheet) {
-    initSheetShadow(ss, true);
+  if (shadowSheet) {
+    shadowSheet.clear();
   }
+  initSheetShadow(ss, true);
 }
 
 /**
