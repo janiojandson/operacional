@@ -1,4 +1,4 @@
-import { runShadowAudit } from './server/src/engine/shadowAuditor.js';
+import { runShadowAudit, recordShadowOutcome } from './server/src/engine/shadowAuditor.js';
 import fs from 'fs';
 
 async function test() {
@@ -42,9 +42,16 @@ async function test() {
     }
   );
 
-  console.log('\n--- LOG FILE VERIFICATION ---');
+  console.log('\n--- TEST 3: Desfecho Real do Trade 1 (SOL/USDT deu GREEN +2.5R) ---');
+  recordShadowOutcome('SOL/USDT', 'CLOSED_TP', 75.00, 2.5);
+
+  console.log('\n--- TEST 4: Desfecho Real do Trade 2 (ETH/USDT daria RED -1.0R mas foi BLOQUEADO) ---');
+  recordShadowOutcome('ETH/USDT', 'CLOSED_SL', -30.00, -1.0);
+
+  console.log('\n--- LOG FILE VERIFICATION (ÚLTIMAS LINHAS) ---');
   if (fs.existsSync('audit_shadow_mode.log')) {
-    console.log(fs.readFileSync('audit_shadow_mode.log', 'utf8'));
+    const lines = fs.readFileSync('audit_shadow_mode.log', 'utf8').trim().split('\n');
+    console.log(lines.slice(-4).join('\n'));
   }
 }
 

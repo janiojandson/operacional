@@ -31,6 +31,8 @@ export interface ShadowAuditPayload {
   spreadPips: number;
   usdExposureR: number;
   timestamp: string;
+  outcome?: string;
+  safetyVerdict?: string;
 }
 
 export class GoogleSheetsService {

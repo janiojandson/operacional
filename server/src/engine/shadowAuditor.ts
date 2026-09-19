@@ -20,9 +20,15 @@ export interface ShadowAuditResult {
   newMode: string;
   reasons: string[];
   spreadPips?: number;
+  spreadBps?: number;
   usdExposureR?: number;
+  outcome?: string;
+  safetyVerdict?: string;
   timestamp: string;
 }
+
+// Armazena auditorias ativas para cruzar com o desfecho do trade (GREEN / RED)
+const pendingAudits = new Map<string, { auditResult: ShadowAuditResult; entryTime: number }>();
 
 /**
  * Executa avaliação quantitativa em Shadow Mode (Modo Fantasma).
@@ -47,7 +53,7 @@ export async function runShadowAudit(
     const reasons: string[] = [];
     let isBlockedNewMode = false;
     let currentUsdExposureR = 0;
-    let calculatedSpreadPips = 0;
+    let calculatedSpreadBps = 0;
 
     // ──────────────────────────────────────────────────────────
     // 1. FILTRO A: ANTI-CORRELAÇÃO DIRECIONAL (USD CLUMPING)
@@ -109,15 +115,14 @@ export async function runShadowAudit(
       const totalProjectedUsdExposure = currentUsdExposureR + proposedRiskR;
       if (totalProjectedUsdExposure > RISK_CONFIG.MAX_USD_EXPOSURE) {
         isBlockedNewMode = true;
-        reasons.push(`Exposição em USD excede ${RISK_CONFIG.MAX_USD_EXPOSURE.toFixed(1)}R (Projetada: ${totalProjectedUsdExposure.toFixed(1)}R)`);
+        reasons.push(`Exposição direcional em USDT excede teto de ${RISK_CONFIG.MAX_USD_EXPOSURE.toFixed(1)}R (Projetada: ${totalProjectedUsdExposure.toFixed(1)}R)`);
       }
     } catch (corrErr: any) {
-      // Falha na checagem de correlação é capturada silenciosamente
       console.error(`\x1b[31m[SHADOW AUDIT WARNING] Falha ao verificar correlação: ${corrErr.message}\x1b[0m`);
     }
 
     // ──────────────────────────────────────────────────────────
-    // 2. FILTRO B: TRAVA DE SPREAD DINÂMICO & ORDERBOOK L2
+    // 2. FILTRO B: TRAVA DE SPREAD DINÂMICO & ORDERBOOK L2 CRIPTO (BPS)
     // ──────────────────────────────────────────────────────────
     try {
       let orderbook: any = null;
@@ -146,17 +151,14 @@ export async function runShadowAudit(
 
         if (bestBid > 0 && bestAsk > 0) {
           const rawSpread = bestAsk - bestBid;
+          // Spread em Basis Points (1 bps = 0.01%) e Percentual
+          const spreadPct = (rawSpread / bestBid) * 100;
+          calculatedSpreadBps = Number((spreadPct * 100).toFixed(2));
 
-          // Conversão de Pips conforme classe do ativo (Cripto Bybit)
-          const pipMultiplier = bestBid > 100 
-            ? bestBid * 0.0001 // Para BTC, ETH, SOL, BNB: 1 pip = 0.01%
-            : (bestBid > 5 ? 0.001 : 0.0001); // Para XRP: 1 pip = $0.0001
-
-          calculatedSpreadPips = Number((rawSpread / pipMultiplier).toFixed(2));
-
-          if (calculatedSpreadPips > RISK_CONFIG.MAX_SPREAD_PIPS) {
+          const maxAllowedBps = RISK_CONFIG.MAX_SPREAD_BPS || 3.0;
+          if (calculatedSpreadBps > maxAllowedBps) {
             isBlockedNewMode = true;
-            reasons.push(`Spread atual de ${calculatedSpreadPips} pips > ${RISK_CONFIG.MAX_SPREAD_PIPS} pips`);
+            reasons.push(`Spread L2 Bybit de ${calculatedSpreadBps} bps (${spreadPct.toFixed(3)}%) > Teto seguro de ${maxAllowedBps} bps`);
           }
         }
       } else {
@@ -173,7 +175,7 @@ export async function runShadowAudit(
     const newModeText = isBlockedNewMode ? 'BLOQUEADO 🛑' : 'PERMITIDO 🟢';
     const reasonText = reasons.length > 0 
       ? reasons.join(' / ') 
-      : 'Confluência aprovada (Exposição USD dentro do teto & Spread L2 ótimo)';
+      : 'Confluência aprovada (Exposição USDT dentro do teto & Spread L2 ótimo)';
 
     const logLine = `[SHADOW AUDIT] | Ativo: ${symbol} (${side}) | Modo Antigo: ${oldModeText} | Modo Novo: ${newModeText} | Motivo: ${reasonText}`;
 
@@ -188,30 +190,105 @@ export async function runShadowAudit(
       console.error(`\x1b[31m[SHADOW AUDIT FILE ERROR] Falha ao gravar log em disco: ${fsErr.message}\x1b[0m`);
     }
 
+    const auditResult: ShadowAuditResult = {
+      symbol,
+      side,
+      oldMode: oldModeText,
+      newMode: newModeText,
+      reasons,
+      spreadPips: calculatedSpreadBps,
+      spreadBps: calculatedSpreadBps,
+      usdExposureR: currentUsdExposureR,
+      timestamp
+    };
+
+    // Armazena para correlação com o encerramento da ordem (GREEN / RED)
+    pendingAudits.set(symbol, { auditResult, entryTime: Date.now() });
+
     GoogleSheetsService.logShadowAudit({
       symbol,
       side,
       oldMode: oldModeText,
       newMode: newModeText,
       reasons: reasonText,
-      spreadPips: calculatedSpreadPips,
+      spreadPips: calculatedSpreadBps,
       usdExposureR: currentUsdExposureR,
+      outcome: 'EM ANDAMENTO ⏳',
+      safetyVerdict: 'Monitorando saída da posição...',
       timestamp
     });
 
-    return {
-      symbol,
-      side,
-      oldMode: oldModeText,
-      newMode: newModeText,
-      reasons,
-      spreadPips: calculatedSpreadPips,
-      usdExposureR: currentUsdExposureR,
-      timestamp
-    };
+    return auditResult;
   } catch (fatalErr: any) {
-    // Tratamento estrito: nenhum erro nesta camada pode vazar ou derrubar o processo
     console.error(`\x1b[31m[SHADOW AUDIT ERROR] Erro silencioso no shadow auditor: ${fatalErr.message}\x1b[0m`);
     return null;
   }
+}
+
+/**
+ * Registra o desfecho real da operação (GREEN ou RED) e cruza com a decisão do Modo Fantasma
+ * Permite identificar se o filtro salvou a banca de um RED ou se aprovou um GREEN seguro!
+ */
+export function recordShadowOutcome(
+  symbol: string,
+  status: 'CLOSED_TP' | 'CLOSED_SL',
+  pnlUsd: number,
+  rMultiple: number
+): { outcome: string; verdict: string; savedCapital: boolean } | null {
+  const pending = pendingAudits.get(symbol);
+  const isGreen = status === 'CLOSED_TP';
+  const outcomeText = isGreen 
+    ? `GREEN 🟢 (+${rMultiple > 0 ? rMultiple.toFixed(1) : '2.5'}R | +$${Math.abs(pnlUsd).toFixed(2)})` 
+    : `RED 🔴 (${rMultiple < 0 ? rMultiple.toFixed(1) : '-1.0'}R | -$${Math.abs(pnlUsd).toFixed(2)})`;
+
+  let safetyVerdict = '';
+  let savedCapital = false;
+
+  if (pending) {
+    const wasBlocked = pending.auditResult.newMode.includes('BLOQUEADO');
+    if (wasBlocked && !isGreen) {
+      safetyVerdict = '🛡️ FILTRO SALVOU A BANCA (Bloqueou entrada que daria RED -1.0R)';
+      savedCapital = true;
+    } else if (wasBlocked && isGreen) {
+      safetyVerdict = '⚠️ FALSO POSITIVO (Filtro bloqueou trade que foi GREEN +2.5R)';
+    } else if (!wasBlocked && isGreen) {
+      safetyVerdict = '✅ CONFLUÊNCIA PERFEITA (Filtro aprovou entrada e deu GREEN +2.5R)';
+    } else {
+      safetyVerdict = '❌ RISCO NÃO EVITADO (Filtro aprovou entrada mas bateu Stop Loss -1.0R)';
+    }
+  } else {
+    safetyVerdict = isGreen ? '✅ GREEN EXECUTADO (+2.5R)' : '❌ RED EXECUTADO (-1.0R)';
+  }
+
+  const timestamp = new Date().toISOString();
+  const outcomeLog = `[SHADOW OUTCOME] | Ativo: ${symbol} | Resultado: ${outcomeText} | Decisão Pré-Trade: ${pending?.auditResult.newMode || 'N/A'} | Veredito: ${safetyVerdict}`;
+
+  // Print no terminal com cor correspondente
+  const color = isGreen ? '\x1b[32m' : '\x1b[31m';
+  console.log(`${color}${outcomeLog}\x1b[0m`);
+
+  // Gravar no arquivo audit_shadow_mode.log
+  try {
+    const logFilePath = path.resolve(process.cwd(), RISK_CONFIG.LOG_FILE_PATH);
+    fs.appendFileSync(logFilePath, `[${timestamp}] ${outcomeLog}\n`, 'utf8');
+  } catch (fsErr: any) {
+    console.error(`[SHADOW OUTCOME ERROR] Falha ao gravar log em disco: ${fsErr.message}`);
+  }
+
+  // Enviar para a aba de auditoria da Planilha Google com colunas de resultado e veredito!
+  GoogleSheetsService.logShadowAudit({
+    symbol,
+    side: pending?.auditResult.side || 'N/A',
+    oldMode: 'FINALIZADO',
+    newMode: pending?.auditResult.newMode || (isGreen ? 'PERMITIDO 🟢' : 'BLOQUEADO 🛑'),
+    reasons: safetyVerdict,
+    spreadPips: pending?.auditResult.spreadPips || 0,
+    usdExposureR: pending?.auditResult.usdExposureR || 0,
+    outcome: outcomeText,
+    safetyVerdict,
+    timestamp
+  });
+
+  pendingAudits.delete(symbol);
+  return { outcome: outcomeText, verdict: safetyVerdict, savedCapital };
 }

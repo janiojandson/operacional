@@ -206,8 +206,10 @@ function initSheetShadow(ss) {
       'Modo Padrão',
       'Decisão Shadow Mode',
       'Regra Institucional / Motivo',
-      'Spread L2 (Pips)',
-      'Risco Global USD (R)'
+      'Spread L2 (Bps)',
+      'Risco Global USDT (R)',
+      'Resultado Real (GREEN / RED)',
+      'Veredito de Segurança'
     ];
     sheet.appendRow(headers);
     formatHeaderRow(sheet, '#1e1b4b', '#a855f7');
@@ -216,7 +218,7 @@ function initSheetShadow(ss) {
 }
 
 /**
- * Registra avaliação quantitativa na aba '🛡️ AUDITORIA SHADOW MODE'
+ * Registra avaliação quantitativa e desfecho na aba '🛡️ AUDITORIA SHADOW MODE'
  */
 function logShadowAudit(ss, data) {
   var sheet = initSheetShadow(ss);
@@ -230,12 +232,15 @@ function logShadowAudit(ss, data) {
     data.newMode || 'PERMITIDO',
     data.reasons || 'Confluência de Absorção L2 aprovada',
     Number(data.spreadPips || 0),
-    Number(data.usdExposureR || 0)
+    Number(data.usdExposureR || 0),
+    data.outcome || 'EM ANDAMENTO ⏳',
+    data.safetyVerdict || 'Monitorando saída...'
   ];
 
   sheet.appendRow(row);
   var lastRow = sheet.getLastRow();
 
+  // Cor Decisão Pré-Trade (BLOQUEADO / PERMITIDO)
   var evalCell = sheet.getRange(lastRow, 5);
   if (String(data.newMode).includes('BLOQUEADO')) {
     evalCell.setBackground('#fee2e2').setFontColor('#b91c1c').setFontWeight('bold');
@@ -243,7 +248,31 @@ function logShadowAudit(ss, data) {
     evalCell.setBackground('#dcfce7').setFontColor('#15803d').setFontWeight('bold');
   }
 
-  sheet.autoResizeColumns(1, 8);
+  // Cor Resultado Real (GREEN / RED)
+  var outcomeCell = sheet.getRange(lastRow, 9);
+  var outStr = String(data.outcome || '').toUpperCase();
+  if (outStr.includes('GREEN') || outStr.includes('WIN')) {
+    outcomeCell.setBackground('#dcfce7').setFontColor('#15803d').setFontWeight('bold');
+  } else if (outStr.includes('RED') || outStr.includes('LOSS')) {
+    outcomeCell.setBackground('#fee2e2').setFontColor('#b91c1c').setFontWeight('bold');
+  } else {
+    outcomeCell.setBackground('#fef3c7').setFontColor('#92400e').setFontWeight('bold');
+  }
+
+  // Cor Veredito de Segurança
+  var verdictCell = sheet.getRange(lastRow, 10);
+  var verdStr = String(data.safetyVerdict || '').toUpperCase();
+  if (verdStr.includes('SALVOU')) {
+    verdictCell.setBackground('#f3e8ff').setFontColor('#7e22ce').setFontWeight('bold'); // Roxo destaque: Salvou a banca!
+  } else if (verdStr.includes('PERFEITA')) {
+    verdictCell.setBackground('#dcfce7').setFontColor('#15803d').setFontWeight('bold');
+  } else if (verdStr.includes('FALSO POSITIVO') || verdStr.includes('RISCO NÃO EVITADO')) {
+    verdictCell.setBackground('#fee2e2').setFontColor('#b91c1c').setFontWeight('bold');
+  } else {
+    verdictCell.setBackground('#f1f5f9').setFontColor('#475569');
+  }
+
+  sheet.autoResizeColumns(1, 10);
 }
 
 /**

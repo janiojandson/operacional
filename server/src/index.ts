@@ -21,7 +21,7 @@ import { ClientProtectionEngine } from './engine/clientProtectionEngine.js';
 import { FlowSignal, OrderBookData, CandleData } from '../../shared/types.js';
 import { ClientAccountConfig } from '../../shared/clientTypes.js';
 import { GoogleSheetsService } from './services/googleSheetsService.js';
-import { runShadowAudit } from './engine/shadowAuditor.js';
+import { runShadowAudit, recordShadowOutcome } from './engine/shadowAuditor.js';
 import { RISK_CONFIG } from './config/riskConfig.js';
 // SaaS: Autenticação e Rotas
 import { authRouter } from './auth/authRoutes.js';
@@ -202,6 +202,20 @@ const paperTrading = new PaperTradingEngine((account, tradeEvent) => {
       }).catch(auditErr => {
         console.error('[ShadowAuditor] Erro no shadow mode do Master:', auditErr.message);
       });
+    } else if (tradeEvent.status === 'CLOSED_TP' || tradeEvent.status === 'CLOSED_SL') {
+      try {
+        const outcome = recordShadowOutcome(
+          tradeEvent.symbol,
+          tradeEvent.status,
+          tradeEvent.pnlUsd || 0,
+          tradeEvent.rMultiple || (tradeEvent.status === 'CLOSED_TP' ? 2.5 : -1.0)
+        );
+        if (outcome) {
+          io.emit('shadow_audit_outcome', outcome);
+        }
+      } catch (err: any) {
+        console.error('[ShadowAuditor] Erro ao registrar desfecho do trade:', err.message);
+      }
     }
   }
   recalculateAllPairs();
