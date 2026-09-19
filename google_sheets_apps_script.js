@@ -162,9 +162,12 @@ function logTrade(ss, data) {
   var lastRow = sheet.getLastRow();
 
   // Cores dinâmicas de Status
+  var stUpper = String(data.status || '').toUpperCase();
   var statusCell = sheet.getRange(lastRow, 9);
-  if (String(data.status).toUpperCase() === 'EXECUTADO' || String(data.status).toUpperCase() === 'OK') {
+  if (stUpper.indexOf('WIN') !== -1 || stUpper === 'EXECUTADO' || stUpper === 'OK' || stUpper.indexOf('SUCESSO') !== -1) {
     statusCell.setBackground('#dcfce7').setFontColor('#15803d').setFontWeight('bold');
+  } else if (stUpper.indexOf('ABERTO') !== -1) {
+    statusCell.setBackground('#e0f2fe').setFontColor('#0369a1').setFontWeight('bold');
   } else {
     statusCell.setBackground('#fee2e2').setFontColor('#b91c1c').setFontWeight('bold');
   }
@@ -287,7 +290,7 @@ function updateDashboard(ss) {
     var statuses = tradesSheet.getRange(2, 9, tradesCount, 1).getValues();
     for (var i = 0; i < statuses.length; i++) {
       var st = String(statuses[i][0]).toUpperCase();
-      if (st === 'EXECUTADO' || st === 'OK' || st.includes('SUCESSO')) {
+      if (st === 'EXECUTADO' || st === 'OK' || st.indexOf('SUCESSO') !== -1 || st.indexOf('WIN') !== -1 || st.indexOf('ABERTO') !== -1) {
         successCount++;
       }
     }

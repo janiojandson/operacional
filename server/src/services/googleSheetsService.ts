@@ -17,6 +17,7 @@ export interface TradeLogPayload {
   takeProfit?: number;
   status: string;
   timestamp: string;
+  clientName?: string;
   errorMsg?: string;
 }
 

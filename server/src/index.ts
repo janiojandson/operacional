@@ -20,6 +20,7 @@ import { AutonomousPairScanner } from './engine/autonomousPairScanner.js';
 import { ClientProtectionEngine } from './engine/clientProtectionEngine.js';
 import { FlowSignal, OrderBookData, CandleData } from '../../shared/types.js';
 import { ClientAccountConfig } from '../../shared/clientTypes.js';
+import { GoogleSheetsService } from './services/googleSheetsService.js';
 // SaaS: Autenticação e Rotas
 import { authRouter } from './auth/authRoutes.js';
 import { adminRouter } from './routes/adminRoutes.js';
@@ -146,6 +147,37 @@ const paperTrading = new PaperTradingEngine((account, tradeEvent) => {
     clientCopyTrader.replicateTrade(tradeEvent, power).catch((err) => {
       console.error('[PaperTradingEngine] Erro ao replicar trade nos clientes:', err.message);
     });
+
+    // 📊 Registra as operações do Master Quant na Planilha Google em tempo real
+    try {
+      let statusStr = 'MASTER_ABERTO';
+      let details = tradeEvent.signalReason || 'Sinal Institucional Identificado';
+
+      if (tradeEvent.status === 'CLOSED_TP') {
+        statusStr = 'MASTER_WIN (+2.5R)';
+        details = `Take Profit atingido! P&L: +$${tradeEvent.pnlUsd?.toFixed(2) || '0.00'} (+${tradeEvent.pnlPct?.toFixed(2) || '0.00'}%)`;
+      } else if (tradeEvent.status === 'CLOSED_SL') {
+        statusStr = 'MASTER_LOSS (-1.0R)';
+        details = `Stop Loss institucional. P&L: -$${Math.abs(tradeEvent.pnlUsd || 0).toFixed(2)} (${tradeEvent.pnlPct?.toFixed(2) || '0.00'}%)`;
+      }
+
+      const approxQty = Number(((tradeEvent.powerMultiplier * 3000) / (tradeEvent.entryPrice || 1)).toFixed(4));
+
+      GoogleSheetsService.logTradeExecution({
+        clientName: '👑 Master Quant (Estratégia)',
+        symbol: tradeEvent.symbol,
+        side: tradeEvent.type,
+        entryPrice: tradeEvent.entryPrice,
+        qty: approxQty,
+        stopLoss: tradeEvent.stopLoss,
+        takeProfit: tradeEvent.takeProfit,
+        status: statusStr,
+        timestamp: new Date().toISOString(),
+        errorMsg: details
+      });
+    } catch (sheetErr: any) {
+      console.error('[GoogleSheets] Erro ao enviar trade do Master:', sheetErr.message);
+    }
   }
   recalculateAllPairs();
 });
