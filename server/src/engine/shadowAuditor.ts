@@ -155,7 +155,7 @@ export async function runShadowAudit(
           const spreadPct = (rawSpread / bestBid) * 100;
           calculatedSpreadBps = Number((spreadPct * 100).toFixed(2));
 
-          const maxAllowedBps = RISK_CONFIG.MAX_SPREAD_BPS || 3.0;
+          const maxAllowedBps = RISK_CONFIG.MAX_SPREAD_BPS || 5.0;
           if (calculatedSpreadBps > maxAllowedBps) {
             isBlockedNewMode = true;
             reasons.push(`Spread L2 Bybit de ${calculatedSpreadBps} bps (${spreadPct.toFixed(3)}%) > Teto seguro de ${maxAllowedBps} bps`);

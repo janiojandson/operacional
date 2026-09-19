@@ -98,7 +98,8 @@ export class MarketDataManager {
 
   private generateRealisticBook(symbol: string, currentPrice: number, category: 'crypto' | 'forex'): OrderBookData {
     const decimals = currentPrice < 5 ? 4 : (currentPrice < 100 ? 3 : 2);
-    const step = Math.max(0.0001, Number((currentPrice * 0.0003).toFixed(decimals)));
+    // Passo institucional Bybit Linear Perpétuos (~1.6 bps de spread natural)
+    const step = Math.max(0.0001, Number((currentPrice * 0.00008).toFixed(decimals)));
     const bids = [];
     const asks = [];
     let bidTotal = 0;
