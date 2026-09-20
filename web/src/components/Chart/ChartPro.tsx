@@ -1,45 +1,45 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { createChart, IChartApi, ISeriesApi, CandlestickData, HistogramData, SeriesMarker } from 'lightweight-charts';
-import { CandleData, FlowSignal } from '../../../shared/types';
-import { SimulatedTrade } from '../../../shared/paperTypes';
-import { Eye, EyeOff, Activity, ShieldAlert } from 'lucide-react';
+import { createChart } from 'lightweight-charts';
+import type { IChartApi, ISeriesApi, CandlestickData, HistogramData, SeriesMarker } from 'lightweight-charts';
+import type { CandleData, FlowSignal } from '../../../../shared/types';
+import { Eye, EyeOff, Activity } from 'lucide-react';
 
 interface ChartProProps {
   symbol: string;
   candles: CandleData[];
   activeCandle: CandleData | null;
   signals: FlowSignal[];
-  openPosition?: SimulatedTrade;
+  openPosition?: any;
 }
 
-export const ChartPro: React.FC<ChartProProps> = ({ 
-  symbol, 
-  candles, 
-  activeCandle, 
-  signals,
-  openPosition 
+export const ChartPro: React.FC<ChartProProps> = ({
+  symbol,
+  candles = [],
+  activeCandle,
+  signals = [],
+  openPosition
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+
   const entryLineRef = useRef<any>(null);
   const tpLineRef = useRef<any>(null);
   const slLineRef = useRef<any>(null);
+  const trailingTriggerLineRef = useRef<any>(null);
+  const trailingStopLineRef = useRef<any>(null);
 
   const [showFlowMarkers, setShowFlowMarkers] = useState(true);
-  const [showVolumeProfile, setShowVolumeProfile] = useState(true);
   const [selectedTf, setSelectedTf] = useState<'1m' | '3m' | '5m' | '15m' | '1h' | '4h' | '1D'>('1m');
 
-  // Cálculo da barra de pressão institucional em tempo real
-  const buyRatio = activeCandle 
+  const buyRatio = activeCandle
     ? Math.max(0.05, Math.min(0.95, (activeCandle.buyVolume || 1) / Math.max(1, (activeCandle.buyVolume + activeCandle.sellVolume) || 1)))
     : 0.55;
   const buyPressurePct = Math.round(buyRatio * 100);
   const sellPressurePct = 100 - buyPressurePct;
   const dominantSide = buyPressurePct > 55 ? 'BUY' : sellPressurePct > 55 ? 'SELL' : 'NEUTRAL';
 
-  // Initialize Chart
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
@@ -109,14 +109,11 @@ export const ChartPro: React.FC<ChartProProps> = ({
     };
   }, []);
 
-  // Update Candles and Timeframe fetch
   useEffect(() => {
     let isCancelled = false;
 
     const loadTimeframeData = async () => {
       if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
-
-      console.log("Buscando TF:", selectedTf);
 
       try {
         const token = localStorage.getItem('mfp_token') || localStorage.getItem('token');
@@ -127,10 +124,8 @@ export const ChartPro: React.FC<ChartProProps> = ({
         if (res.ok) {
           const data = await res.json();
           const rawCandles = Array.isArray(data) ? data : (Array.isArray(data.candles) ? data.candles : []);
-          
-          if (!isCancelled && rawCandles.length > 0) {
-            console.log("Candles renderizados:", rawCandles.length);
 
+          if (!isCancelled && rawCandles.length > 0) {
             const chartCandles: CandlestickData[] = rawCandles.map((c: any) => ({
               time: c.time as any,
               open: Number(c.open),
@@ -152,12 +147,10 @@ export const ChartPro: React.FC<ChartProProps> = ({
           }
         }
       } catch (err) {
-        console.warn('Erro ao buscar klines para timeframe:', err);
+        console.warn('Erro ao carregar klines para timeframe:', err);
       }
 
-      // Fallback: usar candles recebidos via props apenas se estiver no timeframe 1m
       if (!isCancelled && selectedTf === '1m' && candles && candles.length > 0) {
-        console.log("Candles renderizados:", candles.length);
         const chartCandles: CandlestickData[] = candles.map(c => ({
           time: c.time as any,
           open: Number(c.open),
@@ -184,7 +177,6 @@ export const ChartPro: React.FC<ChartProProps> = ({
     };
   }, [symbol, selectedTf, candles]);
 
-  // Update Live Candle (apenas no timeframe 1m para não distorcer candles agregados de tempos maiores)
   useEffect(() => {
     if (!activeCandle || !candleSeriesRef.current || !volumeSeriesRef.current) return;
 
@@ -205,7 +197,6 @@ export const ChartPro: React.FC<ChartProProps> = ({
     }
   }, [activeCandle, selectedTf]);
 
-  // Non-Repainting Flow Signal Markers on Chart
   useEffect(() => {
     if (!candleSeriesRef.current) return;
 
@@ -232,96 +223,130 @@ export const ChartPro: React.FC<ChartProProps> = ({
     }
 
     try {
-      markers.sort((a, b) => (a.time as number) - (b.time as number));
+      markers.sort((a, b) => (Number(a.time) || 0) - (Number(b.time) || 0));
       candleSeriesRef.current.setMarkers(markers);
-    } catch (e) {
-      // ignore sorting sync edge
-    }
+    } catch { }
   }, [signals, symbol, showFlowMarkers]);
 
-  // Draw Price Lines for Simulated Open Trades (Entry, TP, SL)
   useEffect(() => {
     if (!candleSeriesRef.current) return;
 
-    // Clear old lines
-    if (entryLineRef.current) {
-      candleSeriesRef.current.removePriceLine(entryLineRef.current);
-      entryLineRef.current = null;
-    }
-    if (tpLineRef.current) {
-      candleSeriesRef.current.removePriceLine(tpLineRef.current);
-      tpLineRef.current = null;
-    }
-    if (slLineRef.current) {
-      candleSeriesRef.current.removePriceLine(slLineRef.current);
-      slLineRef.current = null;
-    }
+    try {
+      if (entryLineRef.current) { candleSeriesRef.current.removePriceLine(entryLineRef.current); entryLineRef.current = null; }
+      if (tpLineRef.current) { candleSeriesRef.current.removePriceLine(tpLineRef.current); tpLineRef.current = null; }
+      if (slLineRef.current) { candleSeriesRef.current.removePriceLine(slLineRef.current); slLineRef.current = null; }
+      if (trailingTriggerLineRef.current) { candleSeriesRef.current.removePriceLine(trailingTriggerLineRef.current); trailingTriggerLineRef.current = null; }
+      if (trailingStopLineRef.current) { candleSeriesRef.current.removePriceLine(trailingStopLineRef.current); trailingStopLineRef.current = null; }
+    } catch { }
 
     if (openPosition && openPosition.symbol === symbol) {
-      entryLineRef.current = candleSeriesRef.current.createPriceLine({
-        price: openPosition.entryPrice,
-        color: '#6366f1',
-        lineWidth: 2,
-        lineStyle: 0, // Solid
-        axisLabelVisible: true,
-        title: `POSIÇÃO (${openPosition.type === 'BUY' ? 'COMPRA' : 'VENDA'})`,
-      });
+      const isPosLong = String(openPosition.type || openPosition.side || '').toUpperCase().includes('BUY');
+      const entryVal = Number(openPosition.entryPrice || 0);
+      const tpVal = Number(openPosition.takeProfit || 0);
+      const slVal = Number(openPosition.stopLoss || 0);
 
-      tpLineRef.current = candleSeriesRef.current.createPriceLine({
-        price: openPosition.takeProfit,
-        color: '#0ECB81',
-        lineWidth: 1,
-        lineStyle: 2, // Dashed
-        axisLabelVisible: true,
-        title: `TAKE PROFIT (ALVO)`,
-      });
+      if (entryVal > 0) {
+        entryLineRef.current = candleSeriesRef.current.createPriceLine({
+          price: entryVal,
+          color: '#6366f1',
+          lineWidth: 2,
+          lineStyle: 0,
+          axisLabelVisible: true,
+          title: `POSIÇÃO (${isPosLong ? 'COMPRA' : 'VENDA'})`,
+        });
+      }
 
-      slLineRef.current = candleSeriesRef.current.createPriceLine({
-        price: openPosition.stopLoss,
-        color: '#F6465D',
-        lineWidth: 1,
-        lineStyle: 2, // Dashed
-        axisLabelVisible: true,
-        title: `STOP LOSS (PROTEÇÃO)`,
-      });
+      if (tpVal > 0) {
+        tpLineRef.current = candleSeriesRef.current.createPriceLine({
+          price: tpVal,
+          color: '#0ECB81',
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: 'TAKE PROFIT (ALVO)',
+        });
+      }
+
+      const calculatedTrigger = openPosition.trailingTriggerPrice
+        ? Number(openPosition.trailingTriggerPrice)
+        : (isPosLong ? entryVal + (tpVal - entryVal) * 0.80 : entryVal - (entryVal - tpVal) * 0.80);
+
+      if (calculatedTrigger > 0) {
+        trailingTriggerLineRef.current = candleSeriesRef.current.createPriceLine({
+          price: calculatedTrigger,
+          color: '#f59e0b',
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: 'GATILHO TRAILING (80%)',
+        });
+      }
+
+      if (openPosition.trailingActive && openPosition.trailingStopPrice) {
+        trailingStopLineRef.current = candleSeriesRef.current.createPriceLine({
+          price: Number(openPosition.trailingStopPrice),
+          color: '#a855f7',
+          lineWidth: 2,
+          lineStyle: 0,
+          axisLabelVisible: true,
+          title: 'TRAILING STOP ATIVO 🚀',
+        });
+      } else if (slVal > 0) {
+        slLineRef.current = candleSeriesRef.current.createPriceLine({
+          price: slVal,
+          color: '#F6465D',
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: 'STOP LOSS (PROTEÇÃO)',
+        });
+      }
     }
   }, [openPosition, symbol]);
 
+  const currentTrade = Boolean(openPosition && openPosition.symbol === symbol) ? openPosition : null;
+  const isTradeLong = currentTrade ? String(currentTrade.type || currentTrade.side || '').toUpperCase().includes('BUY') : false;
+  const tradeEntryPrice = currentTrade ? Number(currentTrade.entryPrice || 0) : 0;
+  const tradeTpPrice = currentTrade ? Number(currentTrade.takeProfit || 0) : 0;
+  const tradePnlValue = currentTrade ? Number(currentTrade.pnlUsd || 0) : 0;
+  const tradePnlPercentage = currentTrade ? Number(currentTrade.pnlPct || 0) : 0;
+  const isTsRunning = currentTrade ? Boolean(currentTrade.trailingActive) : false;
+  const runningTsPrice = currentTrade && currentTrade.trailingStopPrice ? Number(currentTrade.trailingStopPrice) : null;
+  const triggerToDisplay = currentTrade
+    ? (currentTrade.trailingTriggerPrice
+      ? Number(currentTrade.trailingTriggerPrice)
+      : (isTradeLong ? tradeEntryPrice + (tradeTpPrice - tradeEntryPrice) * 0.8 : tradeEntryPrice - (tradeEntryPrice - tradeTpPrice) * 0.8))
+    : 0;
+
   return (
     <div className="relative w-full h-full flex flex-col bg-bg-panel select-none">
-      {/* Chart Top Bar with Pro Indicator Toggles, Timeframe & Flow Pressure */}
       <div className="flex flex-col border-b border-border-panel bg-bg-panel">
-        {/* Top Control Bar */}
         <div className="flex items-center justify-between px-3 py-1.5">
           <div className="flex items-center space-x-2.5">
             <span className="font-mono font-bold text-sm text-text-primary tracking-wider">{symbol}</span>
-            
-            {/* Timeframe Selector */}
+
             <div className="flex items-center bg-bg-app p-0.5 rounded border border-border-panel text-[11px] font-mono">
               {(['1m', '3m', '5m', '15m', '1h', '4h', '1D'] as const).map((tf) => (
                 <button
                   key={tf}
                   onClick={() => setSelectedTf(tf)}
-                  className={`px-2 py-0.5 rounded transition-all ${
-                    selectedTf === tf
+                  className={`px-2 py-0.5 rounded transition-all ${selectedTf === tf
                       ? 'bg-accent text-white font-bold shadow-sm'
                       : 'text-text-muted hover:text-text-primary hover:bg-surface-hover'
-                  }`}
+                    }`}
                 >
                   {tf}
                 </button>
               ))}
             </div>
 
-            {/* Indicator Toggles */}
             <div className="flex items-center space-x-2 ml-1">
               <button
                 onClick={() => setShowFlowMarkers(!showFlowMarkers)}
-                className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-mono border transition-all ${
-                  showFlowMarkers
+                className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-mono border transition-all ${showFlowMarkers
                     ? 'bg-trade-green/15 text-trade-green border-trade-green/40'
                     : 'bg-bg-app text-text-muted border-border-panel'
-                }`}
+                  }`}
               >
                 {showFlowMarkers ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                 <span>Gatilhos de Fluxo</span>
@@ -329,7 +354,6 @@ export const ChartPro: React.FC<ChartProProps> = ({
             </div>
           </div>
 
-          {/* Delta & CVD HUD */}
           <div className="flex items-center space-x-4 text-xs font-mono">
             <div className="flex items-center space-x-1.5">
               <span className="text-text-muted">Delta CVD:</span>
@@ -340,25 +364,23 @@ export const ChartPro: React.FC<ChartProProps> = ({
           </div>
         </div>
 
-        {/* 📊 BARRA DE PRESSÃO DE FLUXO INSTITUCIONAL (Buy/Sell Pressure) */}
         <div className="px-3 py-1 bg-bg-app/60 border-t border-border-panel/60 flex items-center space-x-3 text-[11px] font-mono">
           <div className="flex items-center space-x-1.5 shrink-0 text-text-primary font-semibold text-[10px]">
             <Activity className="w-3 h-3 text-accent animate-pulse" />
             <span>PRESSÃO INSTITUCIONAL:</span>
           </div>
 
-          {/* Visual Dual-Colored Pressure Bar */}
           <div className="flex-1 flex items-center space-x-2">
             <span className="text-trade-green font-bold text-[10px] w-12 text-right">
               {buyPressurePct}% BUY
             </span>
-            
+
             <div className="flex-1 h-2 bg-bg-app rounded-full overflow-hidden flex border border-border-panel p-0.5">
-              <div 
+              <div
                 className="h-full bg-trade-green rounded-l-full transition-all duration-300"
                 style={{ width: `${buyPressurePct}%` }}
               />
-              <div 
+              <div
                 className="h-full bg-trade-red rounded-r-full transition-all duration-300"
                 style={{ width: `${sellPressurePct}%` }}
               />
@@ -369,48 +391,51 @@ export const ChartPro: React.FC<ChartProProps> = ({
             </span>
           </div>
 
-          <div className={`px-2 py-0.2 rounded text-[10px] font-bold shrink-0 border ${
-            dominantSide === 'BUY'
+          <div className={`px-2 py-0.2 rounded text-[10px] font-bold shrink-0 border ${dominantSide === 'BUY'
               ? 'bg-trade-green/15 text-trade-green border-trade-green/40'
               : dominantSide === 'SELL'
-              ? 'bg-trade-red/15 text-trade-red border-trade-red/40'
-              : 'bg-bg-app text-text-muted border-border-panel'
-          }`}>
+                ? 'bg-trade-red/15 text-trade-red border-trade-red/40'
+                : 'bg-bg-app text-text-muted border-border-panel'
+            }`}>
             {dominantSide === 'BUY' ? '🔥 ABSORÇÃO / COMPRA' : dominantSide === 'SELL' ? '⚠️ PRESSÃO / VENDA' : '⚖️ EQUILÍBRIO'}
           </div>
         </div>
       </div>
 
-      {/* Floating Active Trade Box if In Position */}
-      {openPosition && openPosition.symbol === symbol && (
-        <div className="absolute top-20 left-4 z-20 bg-bg-panel/95 border border-accent/50 rounded-md p-2.5 backdrop-blur-md shadow-xl text-xs font-mono flex items-center space-x-4 animate-pulse">
+      {currentTrade && (
+        <div className="absolute top-20 left-4 z-20 bg-bg-panel/95 border border-accent/50 rounded-md p-2.5 backdrop-blur-md shadow-xl text-xs font-mono flex items-center space-x-4">
           <div className="flex items-center space-x-2">
-            <span className={`px-2 py-0.5 rounded font-bold ${openPosition.type === 'BUY' ? 'bg-trade-green text-black' : 'bg-trade-red text-white'}`}>
-              {openPosition.type}
+            <span className={`px-2 py-0.5 rounded font-bold ${isTradeLong ? 'bg-trade-green text-black' : 'bg-trade-red text-white'}`}>
+              {currentTrade.type || currentTrade.side || 'TRADE'}
             </span>
             <div>
               <div className="text-[10px] text-text-muted">ENTRADA EM CURSO</div>
-              <div className="text-text-primary font-bold">${openPosition.entryPrice.toLocaleString()}</div>
+              <div className="text-text-primary font-bold">${tradeEntryPrice.toLocaleString()}</div>
             </div>
           </div>
 
           <div className="border-l border-border-panel pl-3">
             <div className="text-[10px] text-text-muted">LUCRO / PREJUÍZO (P&L)</div>
-            <div className={`font-bold ${openPosition.pnlUsd >= 0 ? 'text-trade-green' : 'text-trade-red'}`}>
-              {openPosition.pnlUsd >= 0 ? `+$${openPosition.pnlUsd}` : `-$${Math.abs(openPosition.pnlUsd)}`} ({openPosition.pnlPct}%)
+            <div className={`font-bold ${tradePnlValue >= 0 ? 'text-trade-green' : 'text-trade-red'}`}>
+              {tradePnlValue >= 0 ? `+$${tradePnlValue.toFixed(2)}` : `-$${Math.abs(tradePnlValue).toFixed(2)}`} ({tradePnlPercentage.toFixed(2)}%)
             </div>
           </div>
 
-          <div className="border-l border-border-panel pl-3 text-[10px] text-text-muted">
-            <div>TP: <span className="text-trade-green font-semibold">${openPosition.takeProfit.toLocaleString()}</span></div>
-            <div>SL: <span className="text-trade-red font-semibold">${openPosition.stopLoss.toLocaleString()}</span></div>
+          <div className="border-l border-border-panel pl-3 text-[10px] space-y-0.5">
+            <div>TP: <span className="text-trade-green font-semibold">${tradeTpPrice.toLocaleString()}</span></div>
+            {isTsRunning && runningTsPrice ? (
+              <div className="text-purple-400 font-bold flex items-center gap-1 animate-pulse">
+                <span>TS: ${runningTsPrice.toLocaleString()}</span>
+                <span>🚀</span>
+              </div>
+            ) : (
+              <div>Gatilho TS: <span className="text-amber-400 font-semibold">${triggerToDisplay.toFixed(2)}</span></div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Chart Canvas */}
       <div ref={chartContainerRef} className="w-full flex-1" />
     </div>
   );
 };
-

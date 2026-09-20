@@ -49,7 +49,26 @@ export default function TradingTerminal() {
   } = useMarketData(activeSymbol);
 
   const activePosition = paperAccount?.openPositions?.find((p: any) => p.symbol === activeSymbol);
-  const currentBalance = paperAccount?.balance || 10000;
+
+  // ─── 4. CÁLCULO DA BANCA VIVA (LIVE EQUITY EM TEMPO REAL) ────────────────
+  const walletBalance = Number(paperAccount?.balance || 10000);
+  const openPositionsList = paperAccount?.openPositions || [];
+  const totalUnrealizedPnl = openPositionsList.reduce(
+    (acc: number, pos: any) => acc + Number(pos.pnlUsd || pos.unrealizedPnl || 0),
+    0
+  );
+  // Banca Viva = Caixa + Soma do PnL flutuante de todas as posições abertas
+  const liveEquity = Number((walletBalance + totalUnrealizedPnl).toFixed(2));
+
+  // ─── 3. MONITORAMENTO DE PERDA MÁXIMA DIÁRIA & PISO DE BANCA ─────────────
+  useEffect(() => {
+    const maxDailyLoss = 150.0;     // Teto de perda aberta diária (-$150)
+    const minEquityFloor = 9500.0;   // Piso de proteção da banca ($9.500)
+
+    if (totalUnrealizedPnl <= -maxDailyLoss || liveEquity <= minEquityFloor) {
+      console.warn(`[CIRCUIT BREAKER VISUAL] ⚠️ Alerta de Risco: PnL Aberto (-$${Math.abs(totalUnrealizedPnl).toFixed(2)}) atingiu o teto diário!`);
+    }
+  }, [totalUnrealizedPnl, liveEquity]);
 
   useEffect(() => {
     fetch('/api/admin/config/toggles', {
@@ -124,7 +143,7 @@ export default function TradingTerminal() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('mfp_token') || ''}`
         },
-        body: JSON.stringify({ initialBalance: currentBalance })
+        body: JSON.stringify({ initialBalance: walletBalance })
       });
     } catch (e) {
       console.error('Failed to reset paper data:', e);
@@ -133,6 +152,7 @@ export default function TradingTerminal() {
 
   return (
     <div className="flex flex-col h-screen w-screen bg-bg-app text-text-primary font-sans overflow-hidden select-none">
+      {/* Cabeçalho com Banca Viva e PnL ao Vivo */}
       <AssetSelector
         assets={assets}
         activeSymbol={activeSymbol}
@@ -141,7 +161,9 @@ export default function TradingTerminal() {
         onOpenAdvisor={() => setIsAdvisorOpen(true)}
         onOpenQuantHealth={() => setIsQuantHealthOpen(true)}
         onOpenShadowAudit={() => setIsShadowAuditOpen(true)}
-        currentBalance={currentBalance}
+        currentBalance={liveEquity}
+        walletBalance={walletBalance}
+        openPnl={totalUnrealizedPnl}
         onUpdateBalance={handleUpdateBalance}
         onResetData={handleResetData}
       />

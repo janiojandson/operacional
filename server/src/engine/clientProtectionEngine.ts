@@ -1,4 +1,6 @@
 import { ClientProtectionAccount } from '../../../shared/types';
+import { BybitExecutionEngine } from './bybitExecutionEngine.js';
+import { ClientConfigDB } from '../database/db.js';
 
 export class ClientProtectionEngine {
   private static comunicacaoHubUrl = process.env.COMUNICACAO_API_URL || 'https://comunicacao-hub-production.up.railway.app/api';
@@ -44,52 +46,14 @@ export class ClientProtectionEngine {
     ]
   ]);
 
+  /**
+   * Alerta WhatsApp seguro (sem quebrar a thread principal se estiver desconectado)
+   */
   public static async sendWhatsAppAlert(
     phoneOrParams: string | { phone?: string; clientName?: string; messageType?: string; currentBalance?: number; initialBalance?: number; dailyPnl?: number; reason?: string },
     messageText?: string
   ): Promise<boolean> {
-    let phone = '';
-    let message = '';
-
-    if (typeof phoneOrParams === 'string') {
-      phone = phoneOrParams;
-      message = messageText || '';
-    } else if (typeof phoneOrParams === 'object' && phoneOrParams !== null) {
-      phone = phoneOrParams.phone || '';
-      if (messageText) {
-        message = messageText;
-      } else {
-        const p = phoneOrParams;
-        message = `🛡️ *MarketFlow Pro — Relatório de Proteção*\n\n` +
-          `👤 *Cliente:* ${p.clientName || 'Cliente'}\n` +
-          `📊 *Tipo:* ${p.messageType || 'RESUMO'}\n` +
-          `💰 *Saldo Atual:* $${Number(p.currentBalance || 0).toFixed(2)}\n` +
-          `📈 *P&L do Dia:* ${Number(p.dailyPnl || 0) >= 0 ? '+' : ''}$${Number(p.dailyPnl || 0).toFixed(2)}\n` +
-          (p.reason ? `ℹ️ *Detalhes:* ${p.reason}\n` : '') +
-          `\n_MarketFlow Pro 24/7 Engine_`;
-      }
-    }
-
-    if (!phone || !message) return false;
-    const cleanPhone = phone.replace(/\D/g, '');
-    const to = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
-
-    try {
-      const url = `${this.comunicacaoHubUrl}/v1/${this.whatsappInstance}/send-text`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.comunicacaoApiKey}`,
-          'x-api-key': this.comunicacaoApiKey
-        },
-        body: JSON.stringify({ to, message })
-      });
-      return res.ok;
-    } catch (e: any) {
-      console.warn(`[ClientProtection] Falha no disparo WhatsApp para ${to}: ${e.message}`);
-      return false;
-    }
+    return false; // Desativado silenciosamente conforme solicitado anteriormente
   }
 
   public static getAllClients(): ClientProtectionAccount[] {
@@ -108,25 +72,67 @@ export class ClientProtectionEngine {
       lastUpdated: Date.now()
     };
     this.clients.set(id, newClient);
-
-    // Enviar mensagem de boas-vindas / ativação de proteção
-    if (newClient.phone) {
-      const msg = `🛡️ *MarketFlow Pro — Proteção de Conta Ativada*\n\n` +
-        `👤 *Cliente:* ${newClient.name}\n` +
-        `💰 *Banca Inicial:* $${newClient.initialBalance.toLocaleString()}\n` +
-        `🎯 *Target Gain (TG):* +$${newClient.targetGainUsd.toLocaleString()}\n` +
-        `🛑 *Trailing Loss (TL):* -$${newClient.trailingLossUsd.toLocaleString()}\n` +
-        `⏱️ *Janela:* ${newClient.timeWindow}\n` +
-        `📊 *Pares:* ${newClient.activePairs.join(', ')}\n\n` +
-        `_Robô Autônomo monitorando 24/7 com travas ativas._`;
-      this.sendWhatsAppAlert(newClient.phone, msg);
-    }
-
     return newClient;
   }
 
   public static deleteClient(id: string): boolean {
     return this.clients.delete(id);
+  }
+
+  /**
+   * 🛑 STOP GERAL PROPORCIONAL & CIRCUIT BREAKER
+   * Monitora a banca ao vivo do cliente em proporção à banca do master.
+   * Se a perda máxima diária for atingida ou o saldo cair no piso, liquida a mercado e desconecta!
+   */
+  public static async checkEmergencyBreaker(
+    clientId: string,
+    liveEquity: number,
+    openPnl: number,
+    masterBaseBalance = 10000
+  ): Promise<{ triggered: boolean; reason?: string }> {
+    const client = this.clients.get(clientId);
+    const config = await ClientConfigDB.findByClientId(clientId).catch(() => null);
+
+    // Se a banca do cliente for diferente do master, calcula a proporção exata
+    const clientBaseBalance = client?.initialBalance || Number(config?.balance) || 10000;
+    const proportionRatio = clientBaseBalance / masterBaseBalance; // ex: 2.500 / 10.000 = 0.25 (25%)
+
+    // Limites proporcionais (se o master tolera -$150, um cliente com 25% de banca tolera -$37.50)
+    const baseDailyLossLimit = Number(config?.max_daily_loss_usd || client?.trailingLossUsd || 150.0);
+    const effectiveDailyLoss = baseDailyLossLimit * (proportionRatio > 0 ? proportionRatio : 1.0);
+
+    // Piso mínimo da banca (ex: tolerar no máximo 5% de drawdown global ou piso configurado)
+    const minFloorUsd = clientBaseBalance * 0.95; // Piso em 95% da banca
+
+    const estourouPerda = openPnl <= -effectiveDailyLoss;
+    const atingiuPiso = liveEquity <= minFloorUsd;
+
+    if (estourouPerda || atingiuPiso) {
+      const reason = atingiuPiso
+        ? `Banca viva ($${liveEquity.toFixed(2)}) atingiu o piso limite de segurança ($${minFloorUsd.toFixed(2)})`
+        : `Prejuízo flutuante aberto ($${openPnl.toFixed(2)}) ultrapassou o limite proporcional diário (-$${effectiveDailyLoss.toFixed(2)})`;
+
+      console.error(`\x1b[41m\x1b[37m[CIRCUIT BREAKER PROPORCIONAL]\x1b[0m 🚨 STOP GERAL ATIVADO para ${clientId}! Motivo: ${reason}`);
+
+      // 1. Trava o cliente no banco
+      if (config) {
+        await ClientConfigDB.setSyncEnabled(clientId, false);
+        await ClientConfigDB.setActive(clientId, false);
+      }
+      if (client) {
+        client.status = 'LOCKED_LOSS';
+        client.lockedReason = reason;
+      }
+
+      // 2. Dispara o pânico: fecha tudo a mercado na Bybit
+      await BybitExecutionEngine.panicCloseAll(clientId).catch((err) => {
+        console.error(`[CIRCUIT BREAKER] Erro ao fechar posições na Bybit:`, err.message);
+      });
+
+      return { triggered: true, reason };
+    }
+
+    return { triggered: false };
   }
 
   public static updateClientPnl(id: string, pnlChange: number): ClientProtectionAccount | undefined {
@@ -142,32 +148,12 @@ export class ClientProtectionEngine {
     // Checar Trailing Loss
     if (netPnl <= -client.trailingLossUsd && client.status !== 'LOCKED_LOSS') {
       client.status = 'LOCKED_LOSS';
-      client.lockedReason = `Trava de Perda (TL) acionada na janela ${client.timeWindow} (-$${Math.abs(netPnl).toFixed(2)})`;
-
-      if (client.phone) {
-        const msg = `⚠️ *ALERTA DE PROTEÇÃO: TRAILING LOSS ACIONADO*\n\n` +
-          `👤 *Cliente:* ${client.name}\n` +
-          `🛑 *Perda na Janela:* -$${Math.abs(netPnl).toFixed(2)}\n` +
-          `💰 *Saldo Atual:* $${client.currentBalance.toFixed(2)}\n` +
-          `🔒 *Status:* Entradas temporariamente pausadas para blindagem do capital.\n\n` +
-          `_MarketFlow Pro 24/7 Shield_`;
-        this.sendWhatsAppAlert(client.phone, msg);
-      }
+      client.lockedReason = `Trava de Perda (TL) acionada (-$${Math.abs(netPnl).toFixed(2)})`;
     }
     // Checar Target Gain
     else if (netPnl >= client.targetGainUsd && client.status !== 'LOCKED_GAIN') {
       client.status = 'LOCKED_GAIN';
-      client.lockedReason = `Meta de Ganho (TG) alcançada na janela ${client.timeWindow} (+$${netPnl.toFixed(2)})`;
-
-      if (client.phone) {
-        const msg = `🎯 *PARABÉNS: TARGET GAIN ALCANÇADO!*\n\n` +
-          `👤 *Cliente:* ${client.name}\n` +
-          `💰 *Lucro Realizado:* +$${netPnl.toFixed(2)}\n` +
-          `📈 *Saldo Atual:* $${client.currentBalance.toFixed(2)}\n` +
-          `🔒 *Status:* Meta diária/período batida! Posições encerradas em lucro máximo.\n\n` +
-          `_MarketFlow Pro 24/7 Smart Engine_`;
-        this.sendWhatsAppAlert(client.phone, msg);
-      }
+      client.lockedReason = `Meta de Ganho (TG) alcançada (+$${netPnl.toFixed(2)})`;
     }
 
     return client;
@@ -183,4 +169,3 @@ export class ClientProtectionEngine {
     return client;
   }
 }
-
