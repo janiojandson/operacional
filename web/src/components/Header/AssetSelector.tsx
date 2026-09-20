@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import type { AssetSummary } from '../../../../shared/types';
 import {
   TrendingUp,
   TrendingDown,
@@ -13,8 +12,17 @@ import {
 } from 'lucide-react';
 import { TenantSelector } from './TenantSelector';
 
+export interface AssetSummary {
+  symbol: string;
+  lastPrice: number;
+  change24h: number;
+  high24h?: number;
+  low24h?: number;
+  volume24h?: number;
+}
+
 interface AssetSelectorProps {
-  assets: AssetSummary[];
+  assets?: AssetSummary[];
   activeSymbol: string;
   onSelect: (symbol: string) => void;
   isConnected: boolean;

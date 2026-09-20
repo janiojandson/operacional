@@ -1,14 +1,35 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createChart } from 'lightweight-charts';
-import type { IChartApi, ISeriesApi, CandlestickData, HistogramData, SeriesMarker } from 'lightweight-charts';
-import type { CandleData, FlowSignal } from '../../../../shared/types';
 import { Eye, EyeOff, Activity } from 'lucide-react';
+
+export interface CandleData {
+  time: any;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+  buyVolume?: number;
+  sellVolume?: number;
+  cvd?: number;
+}
+
+export interface FlowSignal {
+  id?: string;
+  symbol: string;
+  type: string;
+  side?: string;
+  price?: number;
+  volume?: number;
+  timestamp: number;
+  message: string;
+}
 
 interface ChartProProps {
   symbol: string;
-  candles: CandleData[];
-  activeCandle: CandleData | null;
-  signals: FlowSignal[];
+  candles?: CandleData[];
+  activeCandle?: CandleData | null;
+  signals?: FlowSignal[];
   openPosition?: any;
 }
 
@@ -20,9 +41,9 @@ export const ChartPro: React.FC<ChartProProps> = ({
   openPosition
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
-  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const chartRef = useRef<any>(null);
+  const candleSeriesRef = useRef<any>(null);
+  const volumeSeriesRef = useRef<any>(null);
 
   const entryLineRef = useRef<any>(null);
   const tpLineRef = useRef<any>(null);
@@ -61,6 +82,11 @@ export const ChartPro: React.FC<ChartProProps> = ({
       rightPriceScale: {
         borderColor: '#2B3139',
         autoScale: true,
+        // Margem vertical para garantir que as linhas de Take Profit e Gatilho fiquem visíveis
+        scaleMargins: {
+          top: 0.20,
+          bottom: 0.20,
+        },
       },
       timeScale: {
         borderColor: '#2B3139',
@@ -126,16 +152,16 @@ export const ChartPro: React.FC<ChartProProps> = ({
           const rawCandles = Array.isArray(data) ? data : (Array.isArray(data.candles) ? data.candles : []);
 
           if (!isCancelled && rawCandles.length > 0) {
-            const chartCandles: CandlestickData[] = rawCandles.map((c: any) => ({
-              time: c.time as any,
+            const chartCandles = rawCandles.map((c: any) => ({
+              time: c.time,
               open: Number(c.open),
               high: Number(c.high),
               low: Number(c.low),
               close: Number(c.close)
             }));
 
-            const chartVolume: HistogramData[] = rawCandles.map((c: any) => ({
-              time: c.time as any,
+            const chartVolume = rawCandles.map((c: any) => ({
+              time: c.time,
               value: Number(c.volume || 0),
               color: Number(c.close) >= Number(c.open) ? 'rgba(14, 203, 129, 0.4)' : 'rgba(246, 70, 93, 0.4)'
             }));
@@ -151,16 +177,16 @@ export const ChartPro: React.FC<ChartProProps> = ({
       }
 
       if (!isCancelled && selectedTf === '1m' && candles && candles.length > 0) {
-        const chartCandles: CandlestickData[] = candles.map(c => ({
-          time: c.time as any,
+        const chartCandles = candles.map(c => ({
+          time: c.time,
           open: Number(c.open),
           high: Number(c.high),
           low: Number(c.low),
           close: Number(c.close)
         }));
 
-        const chartVolume: HistogramData[] = candles.map(c => ({
-          time: c.time as any,
+        const chartVolume = candles.map(c => ({
+          time: c.time,
           value: Number(c.volume || 0),
           color: Number(c.close) >= Number(c.open) ? 'rgba(14, 203, 129, 0.4)' : 'rgba(246, 70, 93, 0.4)'
         }));
@@ -182,7 +208,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
     if (selectedTf === '1m') {
       candleSeriesRef.current.update({
-        time: activeCandle.time as any,
+        time: activeCandle.time,
         open: Number(activeCandle.open),
         high: Number(activeCandle.high),
         low: Number(activeCandle.low),
@@ -190,7 +216,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
       });
 
       volumeSeriesRef.current.update({
-        time: activeCandle.time as any,
+        time: activeCandle.time,
         value: Number(activeCandle.volume || 0),
         color: Number(activeCandle.close) >= Number(activeCandle.open) ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'
       });
@@ -205,7 +231,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
       return;
     }
 
-    const markers: SeriesMarker<any>[] = [];
+    const markers: any[] = [];
     const symbolSignals = signals.filter(s => s.symbol === symbol).slice(0, 15);
 
     for (const sig of symbolSignals) {
@@ -213,7 +239,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
       const isBuy = sig.type === 'ABSORPTION_SELL' || (sig.type === 'BOOK_IMBALANCE' && sig.message.includes('Compradores'));
 
       markers.push({
-        time: timeSec as any,
+        time: timeSec,
         position: isBuy ? 'belowBar' : 'aboveBar',
         color: isBuy ? '#0ECB81' : '#F6465D',
         shape: isBuy ? 'arrowUp' : 'arrowDown',
@@ -228,6 +254,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
     } catch { }
   }, [signals, symbol, showFlowMarkers]);
 
+  // ─── PLOTAGEM DAS LINHAS COM O COEFICIENTE EXATO DO ATIVO ────────────────
   useEffect(() => {
     if (!candleSeriesRef.current) return;
 
@@ -245,6 +272,18 @@ export const ChartPro: React.FC<ChartProProps> = ({
       const tpVal = Number(openPosition.takeProfit || 0);
       const slVal = Number(openPosition.stopLoss || 0);
 
+      // Coeficientes específicos do par
+      const coinTps: Record<string, number> = {
+        'BTC/USDT': 0.0200,
+        'ETH/USDT': 0.0250,
+        'SOL/USDT': 0.0350,
+        'BNB/USDT': 0.0225,
+        'XRP/USDT': 0.0300
+      };
+      const cleanKey = symbol.replace(':USDT', '').trim();
+      const tpRate = coinTps[cleanKey] || 0.0250;
+
+      // 1. Linha de Entrada (Azul Sólida)
       if (entryVal > 0) {
         entryLineRef.current = candleSeriesRef.current.createPriceLine({
           price: entryVal,
@@ -256,6 +295,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
         });
       }
 
+      // 2. Linha de Take Profit (Verde Tracejada)
       if (tpVal > 0) {
         tpLineRef.current = candleSeriesRef.current.createPriceLine({
           price: tpVal,
@@ -267,9 +307,10 @@ export const ChartPro: React.FC<ChartProProps> = ({
         });
       }
 
+      // 3. Linha do Gatilho do Trailing Stop (80% do Alvo - Âmbar Tracejada)
       const calculatedTrigger = openPosition.trailingTriggerPrice
         ? Number(openPosition.trailingTriggerPrice)
-        : (isPosLong ? entryVal + (tpVal - entryVal) * 0.80 : entryVal - (entryVal - tpVal) * 0.80);
+        : (isPosLong ? entryVal * (1 + 0.80 * tpRate) : entryVal * (1 - 0.80 * tpRate));
 
       if (calculatedTrigger > 0) {
         trailingTriggerLineRef.current = candleSeriesRef.current.createPriceLine({
@@ -282,6 +323,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
         });
       }
 
+      // 4. Trailing Stop Ativo vs Stop Loss Inicial
       if (openPosition.trailingActive && openPosition.trailingStopPrice) {
         trailingStopLineRef.current = candleSeriesRef.current.createPriceLine({
           price: Number(openPosition.trailingStopPrice),
@@ -315,7 +357,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
   const triggerToDisplay = currentTrade
     ? (currentTrade.trailingTriggerPrice
       ? Number(currentTrade.trailingTriggerPrice)
-      : (isTradeLong ? tradeEntryPrice + (tradeTpPrice - tradeEntryPrice) * 0.8 : tradeEntryPrice - (tradeEntryPrice - tradeTpPrice) * 0.8))
+      : (isTradeLong ? tradeEntryPrice * 1.016 : tradeEntryPrice * 0.984))
     : 0;
 
   return (
@@ -331,8 +373,8 @@ export const ChartPro: React.FC<ChartProProps> = ({
                   key={tf}
                   onClick={() => setSelectedTf(tf)}
                   className={`px-2 py-0.5 rounded transition-all ${selectedTf === tf
-                      ? 'bg-accent text-white font-bold shadow-sm'
-                      : 'text-text-muted hover:text-text-primary hover:bg-surface-hover'
+                    ? 'bg-accent text-white font-bold shadow-sm'
+                    : 'text-text-muted hover:text-text-primary hover:bg-surface-hover'
                     }`}
                 >
                   {tf}
@@ -344,8 +386,8 @@ export const ChartPro: React.FC<ChartProProps> = ({
               <button
                 onClick={() => setShowFlowMarkers(!showFlowMarkers)}
                 className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-mono border transition-all ${showFlowMarkers
-                    ? 'bg-trade-green/15 text-trade-green border-trade-green/40'
-                    : 'bg-bg-app text-text-muted border-border-panel'
+                  ? 'bg-trade-green/15 text-trade-green border-trade-green/40'
+                  : 'bg-bg-app text-text-muted border-border-panel'
                   }`}
               >
                 {showFlowMarkers ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
@@ -354,12 +396,18 @@ export const ChartPro: React.FC<ChartProProps> = ({
             </div>
           </div>
 
+          {/* Delta & CVD HUD */}
           <div className="flex items-center space-x-4 text-xs font-mono">
             <div className="flex items-center space-x-1.5">
               <span className="text-text-muted">Delta CVD:</span>
-              <span className={`font-semibold ${activeCandle && activeCandle.cvd >= 0 ? 'text-trade-green' : 'text-trade-red'}`}>
-                {activeCandle ? (activeCandle.cvd >= 0 ? `+${activeCandle.cvd.toLocaleString()}` : activeCandle.cvd.toLocaleString()) : '0'}
-              </span>
+              {(() => {
+                const cvdVal = Number(activeCandle?.cvd ?? 0);
+                return (
+                  <span className={`font-semibold ${cvdVal >= 0 ? 'text-trade-green' : 'text-trade-red'}`}>
+                    {cvdVal >= 0 ? `+${cvdVal.toLocaleString()}` : cvdVal.toLocaleString()}
+                  </span>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -392,10 +440,10 @@ export const ChartPro: React.FC<ChartProProps> = ({
           </div>
 
           <div className={`px-2 py-0.2 rounded text-[10px] font-bold shrink-0 border ${dominantSide === 'BUY'
-              ? 'bg-trade-green/15 text-trade-green border-trade-green/40'
-              : dominantSide === 'SELL'
-                ? 'bg-trade-red/15 text-trade-red border-trade-red/40'
-                : 'bg-bg-app text-text-muted border-border-panel'
+            ? 'bg-trade-green/15 text-trade-green border-trade-green/40'
+            : dominantSide === 'SELL'
+              ? 'bg-trade-red/15 text-trade-red border-trade-red/40'
+              : 'bg-bg-app text-text-muted border-border-panel'
             }`}>
             {dominantSide === 'BUY' ? '🔥 ABSORÇÃO / COMPRA' : dominantSide === 'SELL' ? '⚠️ PRESSÃO / VENDA' : '⚖️ EQUILÍBRIO'}
           </div>

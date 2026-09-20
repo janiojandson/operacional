@@ -50,6 +50,20 @@ export interface SizingResult {
   stopDistPct: number;
 }
 
+// ─── COEFICIENTES INSTITUCIONAIS ESPECÍFICOS POR PAR DA ESTRATÉGIA ─────────
+export const COIN_RISK_PROFILES: Record<string, { sl: number; tp: number }> = {
+  'BTC/USDT': { sl: 0.0080, tp: 0.0200 }, // 0.8% SL / 2.0% TP
+  'BTCUSDT': { sl: 0.0080, tp: 0.0200 },
+  'ETH/USDT': { sl: 0.0100, tp: 0.0250 }, // 1.0% SL / 2.5% TP
+  'ETHUSDT': { sl: 0.0100, tp: 0.0250 },
+  'SOL/USDT': { sl: 0.0140, tp: 0.0350 }, // 1.4% SL / 3.5% TP
+  'SOLUSDT': { sl: 0.0140, tp: 0.0350 },
+  'BNB/USDT': { sl: 0.0090, tp: 0.0225 }, // 0.9% SL / 2.25% TP
+  'BNBUSDT': { sl: 0.0090, tp: 0.0225 },
+  'XRP/USDT': { sl: 0.0120, tp: 0.0300 }, // 1.2% SL / 3.0% TP
+  'XRPUSDT': { sl: 0.0120, tp: 0.0300 }
+};
+
 function toBybitLinear(symbol: string): string {
   if (symbol.includes(':')) return symbol;
   const [base, quote] = symbol.split('/');
@@ -388,7 +402,7 @@ export class BybitExecutionEngine {
   }
 
   /**
-   * Executa ordem de cópia com proteção contra NaN, suporte a Maker, Trailing Stop e Shadow Filter Ativo
+   * Executa ordem de cópia com proteção contra NaN, suporte a Maker, Trailing Stop e Coeficientes de Cada Moeda
    */
   static async executeCopyTrade(clientId: string, payload: TradePayload): Promise<{ success: boolean; orderId?: string; sizing?: SizingResult; error?: string }> {
     const config = await ClientConfigDB.findByClientId(clientId);
@@ -435,7 +449,6 @@ export class BybitExecutionEngine {
         symbol: payload.symbol
       });
 
-      // Validação estrita de lote contra NaN
       const cleanQty = Number(exchange.amountToPrecision(ccxtSymbol, sizing.qty));
       if (isNaN(cleanQty) || cleanQty <= 0) {
         throw new Error(`Quantidade calculada resultou em valor inválido (${cleanQty}). Operação abortada para proteção.`);
@@ -443,7 +456,7 @@ export class BybitExecutionEngine {
 
       await exchange.setLeverage(sizing.leverage, ccxtSymbol).catch(() => { });
 
-      // ─── 🛡️ BOTÃO SHADOW MODE EXECUTOR (FILTRO ATIVO) ───────────────────
+      // ─── 🛡️ SHADOW MODE EXECUTOR (FILTRO DE ENTRADA RUIM) ────────────────
       const isShadowFilterAtivo = Number(config.shadow_filter_active ?? 0) === 1;
       if (isShadowFilterAtivo) {
         const auditResult: any = await runShadowAudit(exchange, ccxtSymbol, payload.side).catch(() => null);
@@ -465,16 +478,14 @@ export class BybitExecutionEngine {
             errorMsg: `Entrada filtrada: ${auditResult.reasons}`
           });
 
-          return { success: false, error: `Ordem bloqueada pelo filtro de liquidez Shadow Mode: ${auditResult.reasons}` };
+          return { success: false, error: `Ordem bloqueada pelo filtro Shadow Mode: ${auditResult.reasons}` };
         }
       } else {
-        // Shadow mode opera em modo fantasma paralelo
         runShadowAudit(exchange, ccxtSymbol, payload.side).catch((err) => {
           console.error(`\x1b[31m[SHADOW ERROR] ${err?.message || err}\x1b[0m`);
         });
       }
 
-      // Configuração Ordem Maker vs Market
       const isMaker = payload.isMaker || payload.orderType === 'LIMIT';
       const orderType = isMaker ? 'limit' : 'market';
       const orderPrice = isMaker ? Number(exchange.priceToPrecision(ccxtSymbol, validEntryPrice)) : undefined;
@@ -487,14 +498,18 @@ export class BybitExecutionEngine {
         orderParams['postOnly'] = true;
       }
 
-      // ─── 🚀 BOTÃO TRAILING STOP ──────────────────────────────────────────
+      // ─── 🚀 TRAILING STOP COM COEFICIENTE EXATO DO PAR ESCOLHIDO ──────────
       const trailingAtivo = payload.trailingStopAtivo !== undefined
         ? payload.trailingStopAtivo
         : Number(config.trailing_stop_enabled ?? 1) === 1;
 
-      const alvoLucroPct = 0.025;      // 2.5% alvo
-      const gatilhoPct = 0.80;         // 80% do alvo
-      const distanciaPct = 0.20;       // 20% de recuo
+      // Resgata o coeficiente institucional do par (ex: BTC = 2.0%, SOL = 3.5%, etc.)
+      const cleanKey = payload.symbol.replace(':USDT', '').trim();
+      const profile = COIN_RISK_PROFILES[cleanKey] || COIN_RISK_PROFILES[payload.symbol] || { sl: 0.0100, tp: 0.0250 };
+
+      const alvoLucroPct = profile.tp; // Meta institucional de lucro do ativo
+      const gatilhoPct = 0.80;        // Ativação em 80% do alvo
+      const distanciaPct = 0.20;      // Recuo tolerado de 20% do alvo
 
       if (validStopLoss > 0) {
         orderParams.stopLoss = {
@@ -510,7 +525,7 @@ export class BybitExecutionEngine {
         };
       }
 
-      // Envio da ordem principal
+      // Disparo da ordem principal
       const order = await exchange.createOrder(
         ccxtSymbol,
         orderType,
@@ -520,7 +535,7 @@ export class BybitExecutionEngine {
         orderParams
       );
 
-      // Se trailing ativo, configura no endpoint nativo da Bybit
+      // Armar Trailing Stop nativo na Bybit com os parâmetros do par
       if (trailingAtivo) {
         try {
           const rawSymbol = ccxtSymbol.replace('/', '').split(':')[0];
@@ -532,21 +547,32 @@ export class BybitExecutionEngine {
               : validEntryPrice * (1 - (gatilhoPct * alvoLucroPct))
           ));
 
-          await exchange.privatePostV5PositionSetTradingStop({
-            category: 'linear',
-            symbol: rawSymbol,
-            trailingStop: callbackDistance.toString(),
-            activePrice: activationPrice.toString(),
-            positionIdx: 0
-          }).catch((tsErr: any) => {
-            console.warn(`[BybitEngine] Aviso ao registrar Trailing Stop: ${tsErr?.message || tsErr}`);
-          });
+          // Compatibilidade com One-Way Mode (0) ou Hedge Mode (1 Buy / 2 Sell)
+          try {
+            await exchange.privatePostV5PositionSetTradingStop({
+              category: 'linear',
+              symbol: rawSymbol,
+              trailingStop: callbackDistance.toString(),
+              activePrice: activationPrice.toString(),
+              positionIdx: 0
+            });
+          } catch (posIdxErr: any) {
+            if (posIdxErr?.message?.includes('position idx') || posIdxErr?.message?.includes('10001')) {
+              const hedgeIdx = payload.side === 'BUY' ? 1 : 2;
+              await exchange.privatePostV5PositionSetTradingStop({
+                category: 'linear',
+                symbol: rawSymbol,
+                trailingStop: callbackDistance.toString(),
+                activePrice: activationPrice.toString(),
+                positionIdx: hedgeIdx
+              }).catch(() => { });
+            }
+          }
         } catch (e: any) {
-          console.warn(`[BybitEngine] Falha ao programar Trailing Stop: ${e?.message}`);
+          console.warn(`[BybitEngine] Falha ao programar Trailing Stop nativo: ${e?.message}`);
         }
       }
 
-      // Registro no banco
       const tradeId = `trade-${clientId}-${Date.now()}`;
       await TradeHistoryDB.insert({
         id: tradeId,
@@ -563,7 +589,6 @@ export class BybitExecutionEngine {
         entry_time: Date.now()
       });
 
-      // Registro na Planilha com cast seguro (sem erro de tipagem TS)
       (GoogleSheetsService.logTradeExecution as any)({
         symbol: payload.symbol,
         side: payload.side,
@@ -574,7 +599,7 @@ export class BybitExecutionEngine {
         status: 'EXECUTADO',
         orderType: orderType.toUpperCase(),
         trailingStopAtivo: trailingAtivo ? 'SIM' : 'NÃO',
-        pnlTeoricoSemTrailing: 'Alvo Fixo: +2.50% | SL: -1.00%',
+        pnlTeoricoSemTrailing: `Alvo Fixo: +${(alvoLucroPct * 100).toFixed(2)}% | SL: -${(profile.sl * 100).toFixed(2)}%`,
         timestamp: new Date().toISOString()
       });
 
