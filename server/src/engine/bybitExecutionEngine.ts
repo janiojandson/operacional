@@ -30,7 +30,7 @@ export interface BybitPosition {
 }
 
 export interface TradePayload {
-  symbol: string;         // ex: BTC/USDT:USDT (formato CCXT)
+  symbol: string;
   side: 'BUY' | 'SELL';
   entryPrice: number;
   stopLoss: number;
@@ -50,7 +50,6 @@ export interface SizingResult {
   stopDistPct: number;
 }
 
-// ─── COEFICIENTES INSTITUCIONAIS ESPECÍFICOS POR PAR DA ESTRATÉGIA ─────────
 export const COIN_RISK_PROFILES: Record<string, { sl: number; tp: number }> = {
   'BTC/USDT': { sl: 0.0080, tp: 0.0200 }, // 0.8% SL / 2.0% TP
   'BTCUSDT': { sl: 0.0080, tp: 0.0200 },
@@ -402,7 +401,7 @@ export class BybitExecutionEngine {
   }
 
   /**
-   * Executa ordem de cópia com proteção contra NaN, suporte a Maker, Trailing Stop e Coeficientes de Cada Moeda
+   * Executa ordem de cópia com suporte nativo Bybit V5 (sem objetos no stopLoss/takeProfit)
    */
   static async executeCopyTrade(clientId: string, payload: TradePayload): Promise<{ success: boolean; orderId?: string; sizing?: SizingResult; error?: string }> {
     const config = await ClientConfigDB.findByClientId(clientId);
@@ -503,26 +502,25 @@ export class BybitExecutionEngine {
         ? payload.trailingStopAtivo
         : Number(config.trailing_stop_enabled ?? 1) === 1;
 
-      // Resgata o coeficiente institucional do par (ex: BTC = 2.0%, SOL = 3.5%, etc.)
       const cleanKey = payload.symbol.replace(':USDT', '').trim();
       const profile = COIN_RISK_PROFILES[cleanKey] || COIN_RISK_PROFILES[payload.symbol] || { sl: 0.0100, tp: 0.0250 };
 
-      const alvoLucroPct = profile.tp; // Meta institucional de lucro do ativo
-      const gatilhoPct = 0.80;        // Ativação em 80% do alvo
-      const distanciaPct = 0.20;      // Recuo tolerado de 20% do alvo
+      const alvoLucroPct = profile.tp;
+      const gatilhoPct = 0.80;
+      const distanciaPct = 0.20;
 
+      // ─── CORREÇÃO DEFINITIVA: STOP LOSS COMO STRING DIRETA (NUNCA OBJETO) ───
       if (validStopLoss > 0) {
-        orderParams.stopLoss = {
-          type: 'market',
-          price: Number(exchange.priceToPrecision(ccxtSymbol, validStopLoss))
-        };
+        orderParams['stopLoss'] = exchange.priceToPrecision(ccxtSymbol, validStopLoss).toString();
+        orderParams['slOrderType'] = 'Market';
+        orderParams['tpslMode'] = 'Full';
       }
 
+      // Se o Trailing Stop estiver DESLIGADO, envia o Take Profit fixo como string direta
       if (!trailingAtivo && validTakeProfit > 0) {
-        orderParams.takeProfit = {
-          type: 'market',
-          price: Number(exchange.priceToPrecision(ccxtSymbol, validTakeProfit))
-        };
+        orderParams['takeProfit'] = exchange.priceToPrecision(ccxtSymbol, validTakeProfit).toString();
+        orderParams['tpOrderType'] = 'Market';
+        orderParams['tpslMode'] = 'Full';
       }
 
       // Disparo da ordem principal
@@ -535,7 +533,7 @@ export class BybitExecutionEngine {
         orderParams
       );
 
-      // Armar Trailing Stop nativo na Bybit com os parâmetros do par
+      // Se o Trailing Stop estiver ATIVADO, programa no endpoint nativo da Bybit
       if (trailingAtivo) {
         try {
           const rawSymbol = ccxtSymbol.replace('/', '').split(':')[0];
@@ -547,25 +545,26 @@ export class BybitExecutionEngine {
               : validEntryPrice * (1 - (gatilhoPct * alvoLucroPct))
           ));
 
-          // Compatibilidade com One-Way Mode (0) ou Hedge Mode (1 Buy / 2 Sell)
-          try {
-            await exchange.privatePostV5PositionSetTradingStop({
-              category: 'linear',
-              symbol: rawSymbol,
-              trailingStop: callbackDistance.toString(),
-              activePrice: activationPrice.toString(),
-              positionIdx: 0
-            });
-          } catch (posIdxErr: any) {
-            if (posIdxErr?.message?.includes('position idx') || posIdxErr?.message?.includes('10001')) {
-              const hedgeIdx = payload.side === 'BUY' ? 1 : 2;
+          if (!isNaN(callbackDistance) && callbackDistance > 0 && !isNaN(activationPrice) && activationPrice > 0) {
+            try {
               await exchange.privatePostV5PositionSetTradingStop({
                 category: 'linear',
                 symbol: rawSymbol,
                 trailingStop: callbackDistance.toString(),
                 activePrice: activationPrice.toString(),
-                positionIdx: hedgeIdx
-              }).catch(() => { });
+                positionIdx: 0
+              });
+            } catch (posIdxErr: any) {
+              if (posIdxErr?.message?.includes('position idx') || posIdxErr?.message?.includes('10001')) {
+                const hedgeIdx = payload.side === 'BUY' ? 1 : 2;
+                await exchange.privatePostV5PositionSetTradingStop({
+                  category: 'linear',
+                  symbol: rawSymbol,
+                  trailingStop: callbackDistance.toString(),
+                  activePrice: activationPrice.toString(),
+                  positionIdx: hedgeIdx
+                }).catch(() => { });
+              }
             }
           }
         } catch (e: any) {
