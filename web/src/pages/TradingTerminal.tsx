@@ -234,6 +234,7 @@ export default function TradingTerminal() {
               activeCandle={activeCandle}
               signals={signals}
               openPosition={activePosition}
+              trailingStopEnabled={trailingStopEnabled}
             />
           </div>
 
@@ -388,6 +389,7 @@ export default function TradingTerminal() {
                 activeCandle={activeCandle}
                 signals={signals}
                 openPosition={activePosition}
+                trailingStopEnabled={trailingStopEnabled}
               />
             </div>
           )}

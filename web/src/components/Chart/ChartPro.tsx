@@ -31,6 +31,7 @@ interface ChartProProps {
   activeCandle?: CandleData | null;
   signals?: FlowSignal[];
   openPosition?: any;
+  trailingStopEnabled?: boolean; // <-- Declaração da propriedade
 }
 
 export const ChartPro: React.FC<ChartProProps> = ({
@@ -38,7 +39,8 @@ export const ChartPro: React.FC<ChartProProps> = ({
   candles = [],
   activeCandle,
   signals = [],
-  openPosition
+  openPosition,
+  trailingStopEnabled = true // <-- Recebe o estado com valor padrão
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
@@ -54,8 +56,13 @@ export const ChartPro: React.FC<ChartProProps> = ({
   const [showFlowMarkers, setShowFlowMarkers] = useState(true);
   const [selectedTf, setSelectedTf] = useState<'1m' | '3m' | '5m' | '15m' | '1h' | '4h' | '1D'>('1m');
 
-  const buyRatio = activeCandle
-    ? Math.max(0.05, Math.min(0.95, (activeCandle.buyVolume || 1) / Math.max(1, (activeCandle.buyVolume + activeCandle.sellVolume) || 1)))
+  // Cálculo da pressão institucional blindado contra undefined e divisão por zero
+  const buyVol = Number(activeCandle?.buyVolume ?? 0);
+  const sellVol = Number(activeCandle?.sellVolume ?? 0);
+  const totalVol = buyVol + sellVol;
+
+  const buyRatio = activeCandle && totalVol > 0
+    ? Math.max(0.05, Math.min(0.95, buyVol / totalVol))
     : 0.55;
   const buyPressurePct = Math.round(buyRatio * 100);
   const sellPressurePct = 100 - buyPressurePct;
@@ -82,7 +89,6 @@ export const ChartPro: React.FC<ChartProProps> = ({
       rightPriceScale: {
         borderColor: '#2B3139',
         autoScale: true,
-        // Margem vertical para garantir que as linhas de Take Profit e Gatilho fiquem visíveis
         scaleMargins: {
           top: 0.20,
           bottom: 0.20,
@@ -254,7 +260,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
     } catch { }
   }, [signals, symbol, showFlowMarkers]);
 
-  // ─── PLOTAGEM DAS LINHAS COM O COEFICIENTE EXATO DO ATIVO ────────────────
+  // ─── DESENHO DAS LINHAS DE ORDEM E TRAILING STOP ──────────────────────────
   useEffect(() => {
     if (!candleSeriesRef.current) return;
 
@@ -307,12 +313,12 @@ export const ChartPro: React.FC<ChartProProps> = ({
         });
       }
 
-      // 3. Linha do Gatilho do Trailing Stop (80% do Alvo - Âmbar Tracejada)
+      // 3. Linha do Gatilho do Trailing Stop — Só desenha se o botão estiver ATIVO
       const calculatedTrigger = openPosition.trailingTriggerPrice
         ? Number(openPosition.trailingTriggerPrice)
         : (isPosLong ? entryVal * (1 + 0.80 * tpRate) : entryVal * (1 - 0.80 * tpRate));
 
-      if (calculatedTrigger > 0) {
+      if (trailingStopEnabled && calculatedTrigger > 0) {
         trailingTriggerLineRef.current = candleSeriesRef.current.createPriceLine({
           price: calculatedTrigger,
           color: '#f59e0b',
@@ -323,8 +329,8 @@ export const ChartPro: React.FC<ChartProProps> = ({
         });
       }
 
-      // 4. Trailing Stop Ativo vs Stop Loss Inicial
-      if (openPosition.trailingActive && openPosition.trailingStopPrice) {
+      // 4. Se o Trailing estiver ativo e ligado
+      if (trailingStopEnabled && openPosition.trailingActive && openPosition.trailingStopPrice) {
         trailingStopLineRef.current = candleSeriesRef.current.createPriceLine({
           price: Number(openPosition.trailingStopPrice),
           color: '#a855f7',
@@ -344,7 +350,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
         });
       }
     }
-  }, [openPosition, symbol]);
+  }, [openPosition, symbol, trailingStopEnabled]); // <-- Atualiza dinamicamente ao clicar no botão
 
   const currentTrade = Boolean(openPosition && openPosition.symbol === symbol) ? openPosition : null;
   const isTradeLong = currentTrade ? String(currentTrade.type || currentTrade.side || '').toUpperCase().includes('BUY') : false;
@@ -373,8 +379,8 @@ export const ChartPro: React.FC<ChartProProps> = ({
                   key={tf}
                   onClick={() => setSelectedTf(tf)}
                   className={`px-2 py-0.5 rounded transition-all ${selectedTf === tf
-                    ? 'bg-accent text-white font-bold shadow-sm'
-                    : 'text-text-muted hover:text-text-primary hover:bg-surface-hover'
+                      ? 'bg-accent text-white font-bold shadow-sm'
+                      : 'text-text-muted hover:text-text-primary hover:bg-surface-hover'
                     }`}
                 >
                   {tf}
@@ -386,8 +392,8 @@ export const ChartPro: React.FC<ChartProProps> = ({
               <button
                 onClick={() => setShowFlowMarkers(!showFlowMarkers)}
                 className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-mono border transition-all ${showFlowMarkers
-                  ? 'bg-trade-green/15 text-trade-green border-trade-green/40'
-                  : 'bg-bg-app text-text-muted border-border-panel'
+                    ? 'bg-trade-green/15 text-trade-green border-trade-green/40'
+                    : 'bg-bg-app text-text-muted border-border-panel'
                   }`}
               >
                 {showFlowMarkers ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
@@ -396,7 +402,6 @@ export const ChartPro: React.FC<ChartProProps> = ({
             </div>
           </div>
 
-          {/* Delta & CVD HUD */}
           <div className="flex items-center space-x-4 text-xs font-mono">
             <div className="flex items-center space-x-1.5">
               <span className="text-text-muted">Delta CVD:</span>
@@ -440,10 +445,10 @@ export const ChartPro: React.FC<ChartProProps> = ({
           </div>
 
           <div className={`px-2 py-0.2 rounded text-[10px] font-bold shrink-0 border ${dominantSide === 'BUY'
-            ? 'bg-trade-green/15 text-trade-green border-trade-green/40'
-            : dominantSide === 'SELL'
-              ? 'bg-trade-red/15 text-trade-red border-trade-red/40'
-              : 'bg-bg-app text-text-muted border-border-panel'
+              ? 'bg-trade-green/15 text-trade-green border-trade-green/40'
+              : dominantSide === 'SELL'
+                ? 'bg-trade-red/15 text-trade-red border-trade-red/40'
+                : 'bg-bg-app text-text-muted border-border-panel'
             }`}>
             {dominantSide === 'BUY' ? '🔥 ABSORÇÃO / COMPRA' : dominantSide === 'SELL' ? '⚠️ PRESSÃO / VENDA' : '⚖️ EQUILÍBRIO'}
           </div>
@@ -471,13 +476,17 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
           <div className="border-l border-border-panel pl-3 text-[10px] space-y-0.5">
             <div>TP: <span className="text-trade-green font-semibold">${tradeTpPrice.toLocaleString()}</span></div>
-            {isTsRunning && runningTsPrice ? (
-              <div className="text-purple-400 font-bold flex items-center gap-1 animate-pulse">
-                <span>TS: ${runningTsPrice.toLocaleString()}</span>
-                <span>🚀</span>
-              </div>
+            {trailingStopEnabled ? (
+              isTsRunning && runningTsPrice ? (
+                <div className="text-purple-400 font-bold flex items-center gap-1 animate-pulse">
+                  <span>TS: ${runningTsPrice.toLocaleString()}</span>
+                  <span>🚀</span>
+                </div>
+              ) : (
+                <div>Gatilho TS: <span className="text-amber-400 font-semibold">${triggerToDisplay.toFixed(2)}</span></div>
+              )
             ) : (
-              <div>Gatilho TS: <span className="text-amber-400 font-semibold">${triggerToDisplay.toFixed(2)}</span></div>
+              <div className="text-slate-400 font-semibold">Alvo Fixo (100%)</div>
             )}
           </div>
         </div>

@@ -17,7 +17,12 @@ export class PaperTradingEngine {
   private history: SimulatedTradeWithTrailing[] = [];
   private onUpdateCallback?: (account: PaperAccount, newTradeEvent?: SimulatedTrade) => void;
   private activePairs: Set<string> = new Set(['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT']);
-  private minTemperature: number = 1.5; // Temperatura mínima de trabalho a partir de 1.5x
+  private minTemperature: number = 1.5;
+  private trailingStopEnabled: boolean = true;
+
+  public setTrailingStopEnabled(enabled: boolean) {
+    this.trailingStopEnabled = enabled;
+  }
 
   constructor(onUpdate?: (account: PaperAccount, newTradeEvent?: SimulatedTrade) => void) {
     this.onUpdateCallback = onUpdate;
@@ -194,7 +199,8 @@ export class PaperTradingEngine {
     let closed = false;
 
     // ─── 1. VERIFICAÇÃO DO GATILHO E GESTÃO DO TRAILING STOP ─────────────────
-    if (progressRatio >= 0.80 || trade.trailingActive) {
+    // Só persegue o preço se o botão Trailing Stop estiver ATIVADO
+    if (this.trailingStopEnabled && (progressRatio >= 0.80 || trade.trailingActive)) {
       trade.trailingActive = true;
 
       if (trade.type === 'BUY') {
@@ -224,7 +230,7 @@ export class PaperTradingEngine {
         }
       }
     } else {
-      // ─── 2. ANTES DE 80%: STOP LOSS TÉCNICO INICIAL DE PROTEÇÃO ──────────────
+      // Se estiver DESATIVADO (FIXO), respeita apenas o Stop Loss inicial
       if (
         (trade.type === 'BUY' && currentPrice <= trade.stopLoss) ||
         (trade.type === 'SELL' && currentPrice >= trade.stopLoss)
