@@ -12,8 +12,8 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' && process.env.DATABASE_URL?.includes('railway.internal')
     ? false  // Conexão interna Railway não precisa de SSL
     : process.env.DATABASE_URL?.includes('railway.internal')
-    ? false
-    : { rejectUnauthorized: false } // Conexão externa (public URL) usa SSL
+      ? false
+      : { rejectUnauthorized: false } // Conexão externa usa SSL
 });
 
 pool.on('error', (err) => {
@@ -131,25 +131,28 @@ export async function initDatabase(): Promise<void> {
     )
   `);
 
-  // Migrações seguras (adicionar colunas se tabela já existia)
-  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS whatsapp TEXT`).catch(() => {});
-  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS whatsapp_validado INTEGER NOT NULL DEFAULT 0`).catch(() => {});
-  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS sync_enabled INTEGER NOT NULL DEFAULT 0`).catch(() => {});
-  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_active INTEGER NOT NULL DEFAULT 1`).catch(() => {});
-  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_expires_at BIGINT`).catch(() => {});
-  
-  // Suporte a armazenamento simultâneo de chaves Conta Real e Testnet
-  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_real_api_key_enc TEXT`).catch(() => {});
-  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_real_api_secret_enc TEXT`).catch(() => {});
-  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_real_connected INTEGER NOT NULL DEFAULT 0`).catch(() => {});
-  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_test_api_key_enc TEXT`).catch(() => {});
-  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_test_api_secret_enc TEXT`).catch(() => {});
-  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_test_connected INTEGER NOT NULL DEFAULT 0`).catch(() => {});
-  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS active_environment TEXT NOT NULL DEFAULT 'REAL'`).catch(() => {});
-  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS auto_config_enabled INTEGER NOT NULL DEFAULT 1`).catch(() => {});
+  // Migrações seguras de colunas
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS whatsapp TEXT`).catch(() => { });
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS whatsapp_validado INTEGER NOT NULL DEFAULT 0`).catch(() => { });
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS sync_enabled INTEGER NOT NULL DEFAULT 0`).catch(() => { });
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_active INTEGER NOT NULL DEFAULT 1`).catch(() => { });
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_expires_at BIGINT`).catch(() => { });
 
-  // Garantir que a constraint estrita de chave estrangeira não trave cadastros simultâneos ou chaves API
-  await query(`ALTER TABLE client_configs DROP CONSTRAINT IF EXISTS client_configs_user_id_fkey`).catch(() => {});
+  // Suporte a armazenamento simultâneo de chaves Real e Testnet
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_real_api_key_enc TEXT`).catch(() => { });
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_real_api_secret_enc TEXT`).catch(() => { });
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_real_connected INTEGER NOT NULL DEFAULT 0`).catch(() => { });
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_test_api_key_enc TEXT`).catch(() => { });
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_test_api_secret_enc TEXT`).catch(() => { });
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS bybit_test_connected INTEGER NOT NULL DEFAULT 0`).catch(() => { });
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS active_environment TEXT NOT NULL DEFAULT 'REAL'`).catch(() => { });
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS auto_config_enabled INTEGER NOT NULL DEFAULT 1`).catch(() => { });
+
+  // 🚀 Migrações dos Botões: Trailing Stop e Shadow Mode Executor
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS trailing_stop_enabled INTEGER NOT NULL DEFAULT 1`).catch(() => { });
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS shadow_filter_active INTEGER NOT NULL DEFAULT 0`).catch(() => { });
+
+  await query(`ALTER TABLE client_configs DROP CONSTRAINT IF EXISTS client_configs_user_id_fkey`).catch(() => { });
 
   // Índices para performance
   await query(`CREATE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email)`);
@@ -160,7 +163,7 @@ export async function initDatabase(): Promise<void> {
 
   console.log('[DB] ✅ Tabelas PostgreSQL inicializadas com sucesso.');
 
-  // Seed: criar admin padrão se não existir
+  // Seed: Admin padrão
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@marketflow.pro';
   const adminPassword = process.env.ADMIN_PASSWORD || 'MarketFlow@2026!';
 
@@ -175,14 +178,8 @@ export async function initDatabase(): Promise<void> {
     console.log(`[DB] ✅ Admin padrão criado: ${adminEmail}`);
   }
 
-  // Seed anúncio de boas-vindas se não houver
+  // Seed: Anúncio de boas-vindas
   const existingAnnouncements = await queryOne('SELECT id FROM announcements LIMIT 1');
-  if (!existingAnnouncements) {
-    await query(
-      `INSERT INTO announcements (id, title, message, type, is_active) VALUES ($1, $2, $3, $4, 1)`,
-      ['ann-welcome', '🚀 Bem-vindo ao MarketFlow Pro!', 'Conecte sua API da Bybit e configure seu perfil de risco na aba "Gerenciar Risco" para começar a operar.', 'INFO']
-    );
-  }
   if (!existingAnnouncements) {
     await query(
       `INSERT INTO announcements (id, title, message, type, is_active) VALUES ($1, $2, $3, $4, 1)`,
@@ -234,6 +231,8 @@ export interface ClientConfigRow {
   bybit_real_connected?: number;
   bybit_test_connected?: number;
   auto_config_enabled?: number;
+  trailing_stop_enabled?: number;
+  shadow_filter_active?: number;
   created_at: number;
 }
 
@@ -295,14 +294,14 @@ export const UserDB = {
       `INSERT INTO app_users (id, email, password_hash, role, client_id, name, whatsapp, whatsapp_validado, is_active) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
-        data.id, 
-        data.email, 
-        data.passwordHash, 
-        data.role, 
-        data.clientId || null, 
-        data.name || null, 
-        data.whatsapp || null, 
-        data.whatsappValidado ? 1 : 0, 
+        data.id,
+        data.email,
+        data.passwordHash,
+        data.role,
+        data.clientId || null,
+        data.name || null,
+        data.whatsapp || null,
+        data.whatsappValidado ? 1 : 0,
         data.planActive === false ? 0 : 1
       ]
     );
@@ -369,7 +368,6 @@ export const OtpDB = {
     query(`UPDATE password_reset_otps SET used = 1 WHERE id = $1`, [id])
 };
 
-
 // ─── Funções de Acesso — ClientConfigDB ───────────────────────────────────
 
 export const ClientConfigDB = {
@@ -379,18 +377,17 @@ export const ClientConfigDB = {
   findByUserId: (userId: string) =>
     queryOne<ClientConfigRow>('SELECT * FROM client_configs WHERE user_id = $1', [userId]),
 
-  create: async (data: { 
-    clientId: string; 
-    userId: string; 
-    name?: string; 
-    phone?: string; 
-    notificationPhone?: string; 
-    planType?: string; 
-    planActive?: boolean; 
-    planExpiresAt?: number | null; 
-    syncEnabled?: boolean 
+  create: async (data: {
+    clientId: string;
+    userId: string;
+    name?: string;
+    phone?: string;
+    notificationPhone?: string;
+    planType?: string;
+    planActive?: boolean;
+    planExpiresAt?: number | null;
+    syncEnabled?: boolean
   }) => {
-    // Garantir que user_id seja o id real e existente da tabela app_users
     let realUserId = data.userId;
     const user = await queryOne<{ id: string }>('SELECT id FROM app_users WHERE id = $1 OR client_id = $2 OR email = $1 LIMIT 1', [data.userId, data.clientId]);
     if (user) {
@@ -429,28 +426,28 @@ export const ClientConfigDB = {
     if (testnet) {
       await query(
         `UPDATE client_configs SET 
-          bybit_test_api_key_enc = $1, 
-          bybit_test_api_secret_enc = $2, 
-          bybit_test_connected = 0,
-          bybit_api_key_enc = $1,
-          bybit_api_secret_enc = $2,
-          bybit_testnet = 1,
-          api_connected = 0,
-          updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 
+           bybit_test_api_key_enc = $1, 
+           bybit_test_api_secret_enc = $2, 
+           bybit_test_connected = 0,
+           bybit_api_key_enc = $1,
+           bybit_api_secret_enc = $2,
+           bybit_testnet = 1,
+           api_connected = 0,
+           updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 
          WHERE client_id = $3`,
         [encryptedApiKey, encryptedApiSecret, clientId]
       );
     } else {
       await query(
         `UPDATE client_configs SET 
-          bybit_real_api_key_enc = $1, 
-          bybit_real_api_secret_enc = $2, 
-          bybit_real_connected = 0,
-          bybit_api_key_enc = $1,
-          bybit_api_secret_enc = $2,
-          bybit_testnet = 0,
-          api_connected = 0,
-          updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 
+           bybit_real_api_key_enc = $1, 
+           bybit_real_api_secret_enc = $2, 
+           bybit_real_connected = 0,
+           bybit_api_key_enc = $1,
+           bybit_api_secret_enc = $2,
+           bybit_testnet = 0,
+           api_connected = 0,
+           updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 
          WHERE client_id = $3`,
         [encryptedApiKey, encryptedApiSecret, clientId]
       );
@@ -461,37 +458,37 @@ export const ClientConfigDB = {
     if (env === 'TESTNET') {
       await query(
         `UPDATE client_configs SET 
-          bybit_test_api_key_enc = NULL, 
-          bybit_test_api_secret_enc = NULL, 
-          bybit_test_connected = 0,
-          updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 
+           bybit_test_api_key_enc = NULL, 
+           bybit_test_api_secret_enc = NULL, 
+           bybit_test_connected = 0,
+           updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 
          WHERE client_id = $1`,
         [clientId]
       );
     } else if (env === 'REAL') {
       await query(
         `UPDATE client_configs SET 
-          bybit_real_api_key_enc = NULL, 
-          bybit_real_api_secret_enc = NULL, 
-          bybit_real_connected = 0,
-          updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 
+           bybit_real_api_key_enc = NULL, 
+           bybit_real_api_secret_enc = NULL, 
+           bybit_real_connected = 0,
+           updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 
          WHERE client_id = $1`,
         [clientId]
       );
     } else {
       await query(
         `UPDATE client_configs SET 
-          bybit_api_key_enc = NULL, 
-          bybit_api_secret_enc = NULL, 
-          bybit_real_api_key_enc = NULL,
-          bybit_real_api_secret_enc = NULL,
-          bybit_test_api_key_enc = NULL,
-          bybit_test_api_secret_enc = NULL,
-          api_connected = 0, 
-          bybit_real_connected = 0,
-          bybit_test_connected = 0,
-          sync_enabled = 0, 
-          updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 
+           bybit_api_key_enc = NULL, 
+           bybit_api_secret_enc = NULL, 
+           bybit_real_api_key_enc = NULL, 
+           bybit_real_api_secret_enc = NULL, 
+           bybit_test_api_key_enc = NULL, 
+           bybit_test_api_secret_enc = NULL, 
+           api_connected = 0, 
+           bybit_real_connected = 0, 
+           bybit_test_connected = 0, 
+           sync_enabled = 0, 
+           updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 
          WHERE client_id = $1`,
         [clientId]
       );
@@ -526,6 +523,22 @@ export const ClientConfigDB = {
     );
   },
 
+  // 🚀 Botão Trailing Stop
+  setTrailingStop: async (clientId: string, enabled: boolean) => {
+    await query(
+      'UPDATE client_configs SET trailing_stop_enabled = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $2',
+      [enabled ? 1 : 0, clientId]
+    );
+  },
+
+  // 🚀 Botão Shadow Mode Ativo
+  setShadowFilter: async (clientId: string, active: boolean) => {
+    await query(
+      'UPDATE client_configs SET shadow_filter_active = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $2',
+      [active ? 1 : 0, clientId]
+    );
+  },
+
   updateBalance: async (clientId: string, balance: number) => {
     await query(
       'UPDATE client_configs SET balance = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $2',
@@ -534,8 +547,8 @@ export const ClientConfigDB = {
   },
 
   updatePlan: async (clientId: string, planType: string, planActive: boolean, planExpiresAt: number | null) => {
-    const expiresVal = planExpiresAt !== null && planExpiresAt !== undefined && !isNaN(Number(planExpiresAt)) 
-      ? Math.round(Number(planExpiresAt)) 
+    const expiresVal = planExpiresAt !== null && planExpiresAt !== undefined && !isNaN(Number(planExpiresAt))
+      ? Math.round(Number(planExpiresAt))
       : null;
     await query(
       'UPDATE client_configs SET plan_type = $1, plan_active = $2, plan_expires_at = $3, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $4',
@@ -543,7 +556,16 @@ export const ClientConfigDB = {
     );
   },
 
-  updateRiskConfig: async (clientId: string, config: { riskPct?: number; leverage?: number; maxDailyLossUsd?: number; maxDailyProfitUsd?: number; fixedLotUsd?: number; autoConfigEnabled?: boolean }) => {
+  updateRiskConfig: async (clientId: string, config: {
+    riskPct?: number;
+    leverage?: number;
+    maxDailyLossUsd?: number;
+    maxDailyProfitUsd?: number;
+    fixedLotUsd?: number;
+    autoConfigEnabled?: boolean;
+    trailingStopEnabled?: boolean;
+    shadowFilterActive?: boolean;
+  }) => {
     const fields: string[] = [];
     const values: any[] = [];
     let i = 1;
@@ -553,6 +575,8 @@ export const ClientConfigDB = {
     if (config.maxDailyProfitUsd !== undefined) { fields.push(`max_daily_profit_usd = $${i++}`); values.push(config.maxDailyProfitUsd); }
     if (config.fixedLotUsd !== undefined) { fields.push(`fixed_lot_usd = $${i++}`); values.push(config.fixedLotUsd); }
     if (config.autoConfigEnabled !== undefined) { fields.push(`auto_config_enabled = $${i++}`); values.push(config.autoConfigEnabled ? 1 : 0); }
+    if (config.trailingStopEnabled !== undefined) { fields.push(`trailing_stop_enabled = $${i++}`); values.push(config.trailingStopEnabled ? 1 : 0); }
+    if (config.shadowFilterActive !== undefined) { fields.push(`shadow_filter_active = $${i++}`); values.push(config.shadowFilterActive ? 1 : 0); }
     if (fields.length === 0) return;
     values.push(clientId);
     await query(`UPDATE client_configs SET ${fields.join(', ')}, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $${i}`, values);
@@ -629,5 +653,3 @@ export const TradeHistoryDB = {
 };
 
 export default pool;
-
-

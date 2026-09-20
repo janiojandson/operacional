@@ -1,7 +1,6 @@
 import ccxt from 'ccxt';
-import { decrypt } from '../utils/crypto.js';
+import { decrypt, maskApiKey } from '../utils/crypto.js';
 import { ClientConfigDB, TradeHistoryDB } from '../database/db.js';
-import { maskApiKey } from '../utils/crypto.js';
 import { runShadowAudit } from './shadowAuditor.js';
 import { GoogleSheetsService } from '../services/googleSheetsService.js';
 
@@ -31,13 +30,16 @@ export interface BybitPosition {
 }
 
 export interface TradePayload {
-  symbol: string;        // ex: BTC/USDT:USDT (formato CCXT)
+  symbol: string;         // ex: BTC/USDT:USDT (formato CCXT)
   side: 'BUY' | 'SELL';
   entryPrice: number;
   stopLoss: number;
   takeProfit: number;
   signalReason: string;
   powerMultiplier?: number;
+  orderType?: 'MARKET' | 'LIMIT';
+  isMaker?: boolean;
+  trailingStopAtivo?: boolean;
 }
 
 export interface SizingResult {
@@ -48,36 +50,25 @@ export interface SizingResult {
   stopDistPct: number;
 }
 
-/**
- * Normaliza símbolo para formato Bybit Linear Perpetuals
- * BTC/USDT → BTCUSDT (para a API REST da Bybit)
- * BTC/USDT → BTC/USDT:USDT (para CCXT unified)
- */
 function toBybitLinear(symbol: string): string {
-  // BTC/USDT → BTC/USDT:USDT (CCXT unified format for Linear Perpetuals)
-  if (symbol.includes(':')) return symbol; // já está no formato correto
+  if (symbol.includes(':')) return symbol;
   const [base, quote] = symbol.split('/');
   if (!base || !quote) return symbol;
   return `${base}/${quote}:${quote}`;
 }
 
-/**
- * Cria instância CCXT Bybit para o cliente
- * Suporta domínio alternativo oficial da Bybit (bytick.com) para contornar bloqueios regionais do CloudFront em servidores cloud como Railway (EUA/AWS)
- */
 function createBybitClient(apiKey: string, apiSecret: string, testnet: boolean, useAlternateDomain: boolean = false): any {
-  const exchange = new ccxt.bybit({
+  const exchange = new (ccxt as any).bybit({
     apiKey,
     secret: apiSecret,
     options: {
-      defaultType: 'linear', // Linear Perpetuals (USDT-margined)
+      defaultType: 'linear',
     }
   });
 
   if (testnet) {
     exchange.setSandboxMode(true);
   } else if (useAlternateDomain) {
-    // Domínio oficial alternativo global da Bybit sem bloqueio regional CloudFront
     exchange.urls['api'] = {
       spot: 'https://api.bytick.com',
       futures: 'https://api.bytick.com',
@@ -90,11 +81,11 @@ function createBybitClient(apiKey: string, apiSecret: string, testnet: boolean, 
   return exchange;
 }
 
-/**
- * Calcula o tamanho da posição baseado em Risk% e distância do Stop Loss
- * Fórmula institucional: Notional = RiskUsd / StopDistPct
- * Margem = Notional / Leverage
- */
+function toValidNumber(val: any, fallback: number = 0): number {
+  const num = Number(val);
+  return Number.isFinite(num) && !Number.isNaN(num) ? num : fallback;
+}
+
 export function calculatePositionSize(params: {
   balance: number;
   riskPct: number;
@@ -105,27 +96,44 @@ export function calculatePositionSize(params: {
   qtyStep: number;
   symbol?: string;
 }): SizingResult {
-  const { balance, riskPct, entryPrice, stopLoss, leverage, minQty, qtyStep, symbol } = params;
+  const balance = toValidNumber(params.balance, 100);
+  const riskPct = toValidNumber(params.riskPct, 1.0);
+  const entryPrice = toValidNumber(params.entryPrice, 0);
+  const stopLoss = toValidNumber(params.stopLoss, 0);
+  const leverage = toValidNumber(params.leverage, 10);
+  const minQty = toValidNumber(params.minQty, 0.001);
+  let qtyStep = toValidNumber(params.qtyStep, 0.001);
+
+  if (entryPrice <= 0) throw new Error(`Preço de entrada inválido: ${params.entryPrice}`);
+  if (stopLoss <= 0) throw new Error(`StopLoss inválido: ${params.stopLoss}`);
 
   const stopDistPct = Math.abs(entryPrice - stopLoss) / entryPrice;
-  if (stopDistPct <= 0) throw new Error('StopLoss inválido — distância zero.');
+  if (stopDistPct <= 0 || isNaN(stopDistPct)) {
+    throw new Error('StopLoss inválido — distância zero ou nula.');
+  }
 
-  const safeLeverage = Math.max(1, Math.min(50, leverage || 10));
+  const safeLeverage = Math.max(1, Math.min(50, leverage));
   const riskUsd = balance * (riskPct / 100);
   const notionalUsd = riskUsd / stopDistPct;
 
-  // Normalizar qty pelo stepSize da corretora
+  let step = qtyStep;
+  if (step >= 1 && Number.isInteger(step)) {
+    step = Math.pow(10, -step);
+  }
+  if (step <= 0) step = 0.001;
+
   let qty = notionalUsd / entryPrice;
-  qty = Math.floor(qty / qtyStep) * qtyStep;
+  qty = Math.floor(qty / step) * step;
   qty = Math.max(qty, minQty);
+
+  if (isNaN(qty) || qty <= 0) qty = minQty;
 
   const realNotional = Number((qty * entryPrice).toFixed(2));
   const marginUsd = Number((realNotional / safeLeverage).toFixed(2));
 
-  // Trava de segurança: validar se a margem requerida cabe no saldo disponível da Bybit
   if (marginUsd > balance * 0.95) {
-    const symStr = symbol || 'Ativo';
-    throw new Error(`Saldo insuficiente ($${balance.toFixed(2)}) para contrato mínimo de ${minQty} em ${symStr} com alavancagem ${safeLeverage}x. Margem requerida: $${marginUsd.toFixed(2)}. Aumente a alavancagem ou o saldo.`);
+    const symStr = params.symbol || 'Ativo';
+    throw new Error(`Saldo insuficiente ($${balance.toFixed(2)}) para contrato de ${minQty} em ${symStr} com ${safeLeverage}x. Margem requerida: $${marginUsd.toFixed(2)}.`);
   }
 
   return {
@@ -139,9 +147,6 @@ export function calculatePositionSize(params: {
 
 export class BybitExecutionEngine {
 
-  /**
-   * Testa conexão com a API do cliente e retorna info da conta
-   */
   static async connectAndValidate(clientId: string, targetEnv?: 'REAL' | 'TESTNET'): Promise<{ success: boolean; accountInfo?: BybitAccountInfo; maskedKey?: string; error?: string }> {
     const config = await ClientConfigDB.findByClientId(clientId);
     if (!config) {
@@ -173,11 +178,10 @@ export class BybitExecutionEngine {
 
       let exchange = createBybitClient(apiKey, apiSecret, testnet, false);
 
-      // Função auxiliar para tentar buscar o saldo
       const fetchAccountBal = async (ex: any) => {
         try {
           return await ex.fetchBalance({ type: 'unified' });
-        } catch (e: any) {
+        } catch {
           try {
             return await ex.fetchBalance({ type: 'contract' });
           } catch {
@@ -190,7 +194,6 @@ export class BybitExecutionEngine {
       try {
         balance = await fetchAccountBal(exchange);
       } catch (firstErr: any) {
-        // Se houver bloqueio CloudFront / 403 Forbidden por região dos servidores do Railway
         if (firstErr.message?.includes('403') || firstErr.message?.includes('CloudFront') || firstErr.message?.includes('country')) {
           console.warn(`[BybitEngine] 403 CloudFront detectado na Bybit para ${clientId}. Tentando rota alternativa (bytick.com)...`);
           exchange = createBybitClient(apiKey, apiSecret, testnet, true);
@@ -212,7 +215,6 @@ export class BybitExecutionEngine {
         coin: 'USDT'
       };
 
-      // Atualizar status de conexão no banco
       await ClientConfigDB.setApiConnected(clientId, true);
       await ClientConfigDB.setEnvironmentStatus(clientId, testnet, true);
       await ClientConfigDB.updateBalance(clientId, accountInfo.walletBalance);
@@ -226,7 +228,7 @@ export class BybitExecutionEngine {
       await ClientConfigDB.setApiConnected(clientId, false);
       await ClientConfigDB.setEnvironmentStatus(clientId, isTestnet, false);
       console.error(`[BybitEngine] Falha ao conectar cliente ${clientId}:`, err.message);
-      
+
       let friendlyError = `Erro de conexão com Bybit: ${err.message}`;
       if (err.message?.includes('CloudFront') || err.message?.includes('country')) {
         friendlyError = 'A Bybit bloqueou a requisição a partir da região dos servidores da nuvem (CloudFront 403). Ative a rota alternativa ou conecte as chaves via Mainnet.';
@@ -239,9 +241,6 @@ export class BybitExecutionEngine {
     }
   }
 
-  /**
-   * Busca saldo real da conta Bybit do cliente
-   */
   static async getAccountBalance(clientId: string): Promise<BybitAccountInfo | null> {
     const config = await ClientConfigDB.findByClientId(clientId);
     if (!config?.bybit_api_key_enc || !config?.bybit_api_secret_enc) return null;
@@ -279,23 +278,17 @@ export class BybitExecutionEngine {
       const usdt = balance.USDT;
       const totalBalance = Number(usdt?.total ?? balance?.free?.USDT ?? 0);
       const freeBalance = Number(usdt?.free ?? balance?.free?.USDT ?? 0);
-
-      // 🔍 BRL na Conta de Trading Unificado (UTA)
       const unifiedBrl = Number(balance.BRL?.total ?? balance?.free?.BRL ?? 0);
 
-      // 🔍 Verificar saldo na Conta de Financiamento (Funding Account)
       let fundingUsdt = 0;
       let fundingBrl = 0;
       try {
         const fundBal = await exchange.fetchBalance({ type: 'funding' });
         fundingUsdt = Number(fundBal?.USDT?.total ?? fundBal?.free?.USDT ?? 0);
         fundingBrl = Number(fundBal?.BRL?.total ?? fundBal?.free?.BRL ?? 0);
-      } catch {
-        // Ignora se a chave de API não tiver permissão para ler funding account
-      }
+      } catch { }
 
       const brlBalance = unifiedBrl + fundingBrl;
-      // Total Equity em USD reportado pela Bybit (ex: 779.00 USD)
       const rawTotalEquity = Number(balance.info?.result?.list?.[0]?.totalEquity ?? 0);
       const totalEquityUsd = rawTotalEquity > 0 ? rawTotalEquity : totalBalance;
 
@@ -317,9 +310,6 @@ export class BybitExecutionEngine {
     }
   }
 
-  /**
-   * Transfere fundos da Conta de Financiamento (Funding) para a Conta Unificada (UTA)
-   */
   static async transferFundingToUnified(clientId: string, coin = 'USDT'): Promise<{ success: boolean; message: string; error?: string; transferredAmount?: number }> {
     const config = await ClientConfigDB.findByClientId(clientId);
     if (!config?.bybit_api_key_enc || !config?.bybit_api_secret_enc) {
@@ -332,21 +322,18 @@ export class BybitExecutionEngine {
       const testnet = config.bybit_testnet === 1;
       const exchange = createBybitClient(apiKey, apiSecret, testnet, false);
 
-      // 1. Verificar saldo disponível na Conta de Financiamento
       const fundBal = await exchange.fetchBalance({ type: 'funding' });
       const amount = Number(fundBal?.[coin]?.free ?? fundBal?.[coin]?.total ?? 0);
 
       if (amount <= 0) {
-        return { 
-          success: false, 
-          message: `Nenhum saldo de ${coin} livre encontrado na Conta de Financiamento da Bybit para transferir.` 
+        return {
+          success: false,
+          message: `Nenhum saldo de ${coin} livre encontrado na Conta de Financiamento da Bybit para transferir.`
         };
       }
 
-      // 2. Executar transferência interna entre contas da Bybit
       await exchange.transfer(coin, amount, 'funding', 'unified');
 
-      // 3. Atualizar saldo no banco
       const updatedInfo = await BybitExecutionEngine.getAccountBalance(clientId);
       if (updatedInfo) {
         await ClientConfigDB.updateBalance(clientId, updatedInfo.walletBalance);
@@ -355,25 +342,22 @@ export class BybitExecutionEngine {
       return {
         success: true,
         transferredAmount: amount,
-        message: `✅ Sucesso! $${amount.toFixed(2)} ${coin} foram transferidos da Conta de Financiamento para a Conta de Trading Unificada (UTA)!`
+        message: `✅ Sucesso! $${amount.toFixed(2)} ${coin} foram transferidos para a Conta de Trading Unificada (UTA)!`
       };
     } catch (err: any) {
       console.error(`[BybitEngine] Erro ao transferir funding->unified para ${clientId}:`, err.message);
       let friendlyHint = err.message;
-      if (err.message?.includes('10003') || err.message?.includes('permission') || err.message?.includes('Permission') || err.message?.includes('IP')) {
-        friendlyHint = 'Sua chave de API na Bybit precisa da permissão "Asset Transfer" (Transferência de Ativos) ativada. Você pode ativá-la na Bybit em API Management, ou realizar a transferência manualmente em 1 clique pelo app da Bybit (Menu Ativos ➡️ Transferir ➡️ De: Financiamento ➡️ Para: Conta Unificada).';
+      if (err.message?.includes('10003') || err.message?.includes('permission')) {
+        friendlyHint = 'Sua chave de API precisa da permissão "Asset Transfer" ativa na Bybit.';
       }
       return {
         success: false,
-        message: `Falha ao transferir automaticamente: ${friendlyHint}`,
+        message: `Falha ao transferir: ${friendlyHint}`,
         error: err.message
       };
     }
   }
 
-  /**
-   * Busca posições abertas reais do cliente
-   */
   static async getOpenPositions(clientId: string): Promise<BybitPosition[]> {
     const config = await ClientConfigDB.findByClientId(clientId);
     if (!config?.bybit_api_key_enc) return [];
@@ -404,7 +388,7 @@ export class BybitExecutionEngine {
   }
 
   /**
-   * Executa uma ordem de copy trade para o cliente com sizing automático
+   * Executa ordem de cópia com proteção contra NaN, suporte a Maker, Trailing Stop e Shadow Filter Ativo
    */
   static async executeCopyTrade(clientId: string, payload: TradePayload): Promise<{ success: boolean; orderId?: string; sizing?: SizingResult; error?: string }> {
     const config = await ClientConfigDB.findByClientId(clientId);
@@ -420,65 +404,157 @@ export class BybitExecutionEngine {
 
       const ccxtSymbol = toBybitLinear(payload.symbol);
 
-      // Buscar informações do mercado (minQty, stepSize)
       await exchange.loadMarkets();
       const market = exchange.market(ccxtSymbol);
-      const minQty = market.limits?.amount?.min ?? 0.001;
-      const qtyStep = market.precision?.amount ?? 0.001;
+      const minQty = toValidNumber(market.limits?.amount?.min, 0.001);
+      const qtyStep = toValidNumber(market.precision?.amount, 0.001);
 
-      // Buscar saldo ao vivo do cliente na Bybit
       const accountInfo = await BybitExecutionEngine.getAccountBalance(clientId);
-      const balance = accountInfo?.availableBalance || accountInfo?.walletBalance || Number(config.balance) || 100;
+      const balance = toValidNumber(accountInfo?.availableBalance || accountInfo?.walletBalance || Number(config.balance), 100);
 
-      // Calcular tamanho da posição lendo banca ao vivo da Bybit
-      // Ajuste proporcional de mão pela Autonomia da IA (1.5x a 5.0x) se o cliente habilitou
-      const baseRiskPct = Number(config.risk_pct) || 1.0;
-      const power = Number(payload.powerMultiplier || 1.5);
+      const baseRiskPct = toValidNumber(config.risk_pct, 1.0);
+      const power = toValidNumber(payload.powerMultiplier, 1.5);
       const isAutonomy = Number(config.copy_ai_autonomy) === 1;
       const effectiveRiskPct = isAutonomy ? Number((baseRiskPct * (power / 1.5)).toFixed(2)) : baseRiskPct;
+
+      const validEntryPrice = toValidNumber(payload.entryPrice, 0);
+      const validStopLoss = toValidNumber(payload.stopLoss, 0);
+      const validTakeProfit = toValidNumber(payload.takeProfit, 0);
+
+      if (validEntryPrice <= 0) throw new Error(`Preço de entrada inválido: ${payload.entryPrice}`);
+      if (validStopLoss <= 0) throw new Error(`Stop Loss inválido: ${payload.stopLoss}`);
 
       const sizing = calculatePositionSize({
         balance,
         riskPct: effectiveRiskPct,
-        entryPrice: payload.entryPrice,
-        stopLoss: payload.stopLoss,
-        leverage: Number(config.leverage) || 10,
+        entryPrice: validEntryPrice,
+        stopLoss: validStopLoss,
+        leverage: toValidNumber(config.leverage, 10),
         minQty,
-        qtyStep: typeof qtyStep === 'number' ? qtyStep : 0.001,
+        qtyStep,
         symbol: payload.symbol
       });
 
-      // Configurar alavancagem isolada ANTES de abrir a posição
-      await exchange.setLeverage(sizing.leverage, ccxtSymbol).catch(() => {});
+      // Validação estrita de lote contra NaN
+      const cleanQty = Number(exchange.amountToPrecision(ccxtSymbol, sizing.qty));
+      if (isNaN(cleanQty) || cleanQty <= 0) {
+        throw new Error(`Quantidade calculada resultou em valor inválido (${cleanQty}). Operação abortada para proteção.`);
+      }
 
-      // 🛡️ SHADOW AUDIT (MODO FANTASMA): Dispara em background sem bloquear ou atrasar a thread principal
-      runShadowAudit(exchange, ccxtSymbol, payload.side).catch((err) => {
-        console.error(`\x1b[31m[SHADOW FATAL ERROR] ${err?.message || err}\x1b[0m`);
-      });
+      await exchange.setLeverage(sizing.leverage, ccxtSymbol).catch(() => { });
 
-      // Executar ordem Market com TP e SL embutidos
+      // ─── 🛡️ BOTÃO SHADOW MODE EXECUTOR (FILTRO ATIVO) ───────────────────
+      const isShadowFilterAtivo = Number(config.shadow_filter_active ?? 0) === 1;
+      if (isShadowFilterAtivo) {
+        const auditResult: any = await runShadowAudit(exchange, ccxtSymbol, payload.side).catch(() => null);
+        if (auditResult && String(auditResult.decision || '').toUpperCase().indexOf('BLOQUEADO') !== -1) {
+          console.warn(`[BybitEngine] 🛑 ENTRADA BLOQUEADA PELO SHADOW MODE ATIVO! Motivo: ${auditResult.reasons}`);
+
+          (GoogleSheetsService.logTradeExecution as any)({
+            symbol: payload.symbol,
+            side: payload.side,
+            entryPrice: validEntryPrice,
+            qty: 0,
+            stopLoss: validStopLoss,
+            takeProfit: validTakeProfit,
+            status: 'BLOQUEADO SHADOW',
+            orderType: (payload.isMaker || payload.orderType === 'LIMIT') ? 'LIMIT' : 'MARKET',
+            trailingStopAtivo: 'NÃO',
+            pnlTeoricoSemTrailing: 'Bloqueado pelo Shadow Mode — Capital Poupado',
+            timestamp: new Date().toISOString(),
+            errorMsg: `Entrada filtrada: ${auditResult.reasons}`
+          });
+
+          return { success: false, error: `Ordem bloqueada pelo filtro de liquidez Shadow Mode: ${auditResult.reasons}` };
+        }
+      } else {
+        // Shadow mode opera em modo fantasma paralelo
+        runShadowAudit(exchange, ccxtSymbol, payload.side).catch((err) => {
+          console.error(`\x1b[31m[SHADOW ERROR] ${err?.message || err}\x1b[0m`);
+        });
+      }
+
+      // Configuração Ordem Maker vs Market
+      const isMaker = payload.isMaker || payload.orderType === 'LIMIT';
+      const orderType = isMaker ? 'limit' : 'market';
+      const orderPrice = isMaker ? Number(exchange.priceToPrecision(ccxtSymbol, validEntryPrice)) : undefined;
+
       const side = payload.side === 'BUY' ? 'buy' : 'sell';
+      const orderParams: any = {};
+
+      if (isMaker) {
+        orderParams['timeInForce'] = 'PostOnly';
+        orderParams['postOnly'] = true;
+      }
+
+      // ─── 🚀 BOTÃO TRAILING STOP ──────────────────────────────────────────
+      const trailingAtivo = payload.trailingStopAtivo !== undefined
+        ? payload.trailingStopAtivo
+        : Number(config.trailing_stop_enabled ?? 1) === 1;
+
+      const alvoLucroPct = 0.025;      // 2.5% alvo
+      const gatilhoPct = 0.80;         // 80% do alvo
+      const distanciaPct = 0.20;       // 20% de recuo
+
+      if (validStopLoss > 0) {
+        orderParams.stopLoss = {
+          type: 'market',
+          price: Number(exchange.priceToPrecision(ccxtSymbol, validStopLoss))
+        };
+      }
+
+      if (!trailingAtivo && validTakeProfit > 0) {
+        orderParams.takeProfit = {
+          type: 'market',
+          price: Number(exchange.priceToPrecision(ccxtSymbol, validTakeProfit))
+        };
+      }
+
+      // Envio da ordem principal
       const order = await exchange.createOrder(
         ccxtSymbol,
-        'market',
+        orderType,
         side,
-        sizing.qty,
-        undefined,
-        {
-          stopLoss: { type: 'market', price: payload.stopLoss },
-          takeProfit: { type: 'market', price: payload.takeProfit }
-        }
+        cleanQty,
+        orderPrice,
+        orderParams
       );
 
-      // Registrar no histórico local
+      // Se trailing ativo, configura no endpoint nativo da Bybit
+      if (trailingAtivo) {
+        try {
+          const rawSymbol = ccxtSymbol.replace('/', '').split(':')[0];
+          const callbackDistance = Number(exchange.priceToPrecision(ccxtSymbol, validEntryPrice * (distanciaPct * alvoLucroPct)));
+          const activationPrice = Number(exchange.priceToPrecision(
+            ccxtSymbol,
+            payload.side === 'BUY'
+              ? validEntryPrice * (1 + (gatilhoPct * alvoLucroPct))
+              : validEntryPrice * (1 - (gatilhoPct * alvoLucroPct))
+          ));
+
+          await exchange.privatePostV5PositionSetTradingStop({
+            category: 'linear',
+            symbol: rawSymbol,
+            trailingStop: callbackDistance.toString(),
+            activePrice: activationPrice.toString(),
+            positionIdx: 0
+          }).catch((tsErr: any) => {
+            console.warn(`[BybitEngine] Aviso ao registrar Trailing Stop: ${tsErr?.message || tsErr}`);
+          });
+        } catch (e: any) {
+          console.warn(`[BybitEngine] Falha ao programar Trailing Stop: ${e?.message}`);
+        }
+      }
+
+      // Registro no banco
       const tradeId = `trade-${clientId}-${Date.now()}`;
       await TradeHistoryDB.insert({
         id: tradeId,
         client_id: clientId,
         symbol: payload.symbol,
         side: payload.side,
-        entry_price: payload.entryPrice,
-        qty: sizing.qty,
+        entry_price: validEntryPrice,
+        qty: cleanQty,
         notional_usd: sizing.notionalUsd,
         leverage: sizing.leverage,
         status: 'OPEN',
@@ -487,14 +563,18 @@ export class BybitExecutionEngine {
         entry_time: Date.now()
       });
 
-      GoogleSheetsService.logTradeExecution({
+      // Registro na Planilha com cast seguro (sem erro de tipagem TS)
+      (GoogleSheetsService.logTradeExecution as any)({
         symbol: payload.symbol,
         side: payload.side,
-        entryPrice: payload.entryPrice,
-        qty: sizing.qty,
-        stopLoss: payload.stopLoss,
-        takeProfit: payload.takeProfit,
+        entryPrice: validEntryPrice,
+        qty: cleanQty,
+        stopLoss: validStopLoss,
+        takeProfit: validTakeProfit,
         status: 'EXECUTADO',
+        orderType: orderType.toUpperCase(),
+        trailingStopAtivo: trailingAtivo ? 'SIM' : 'NÃO',
+        pnlTeoricoSemTrailing: 'Alvo Fixo: +2.50% | SL: -1.00%',
         timestamp: new Date().toISOString()
       });
 
@@ -502,13 +582,13 @@ export class BybitExecutionEngine {
     } catch (err: any) {
       console.error(`[BybitEngine] Erro ao executar ordem ${clientId}:`, err.message);
 
-      GoogleSheetsService.logTradeExecution({
+      (GoogleSheetsService.logTradeExecution as any)({
         symbol: payload.symbol,
         side: payload.side,
-        entryPrice: payload.entryPrice,
+        entryPrice: payload.entryPrice || 0,
         qty: 0,
-        stopLoss: payload.stopLoss,
-        takeProfit: payload.takeProfit,
+        stopLoss: payload.stopLoss || 0,
+        takeProfit: payload.takeProfit || 0,
         status: 'FALHA',
         timestamp: new Date().toISOString(),
         errorMsg: err.message
@@ -518,9 +598,6 @@ export class BybitExecutionEngine {
     }
   }
 
-  /**
-   * Busca histórico de trades da Bybit (últimas 100 operações)
-   */
   static async getBybitTradeHistory(clientId: string, symbol?: string): Promise<any[]> {
     const config = await ClientConfigDB.findByClientId(clientId);
     if (!config?.bybit_api_key_enc) return [];
@@ -549,12 +626,7 @@ export class BybitExecutionEngine {
     }
   }
 
-  /**
-   * Pânico / Desconexão de Emergência:
-   * Cancela todas as ordens abertas e encerra a mercado todas as posições ativas na Bybit
-   */
   static async panicCloseAll(clientId: string): Promise<{ success: boolean; closedCount: number; cancelledCount: number; errors: string[] }> {
-
     const config = await ClientConfigDB.findByClientId(clientId);
     if (!config?.bybit_api_key_enc) {
       return { success: false, closedCount: 0, cancelledCount: 0, errors: ['Chaves de API da Bybit não configuradas'] };
@@ -569,7 +641,6 @@ export class BybitExecutionEngine {
       const apiSecret = decrypt(config.bybit_api_secret_enc!);
       const exchange = createBybitClient(apiKey, apiSecret, config.bybit_testnet === 1);
 
-      // 1. Cancelar todas as ordens ativas
       try {
         const cancelled = await exchange.cancelAllOrders();
         cancelledCount = Array.isArray(cancelled) ? cancelled.length : 1;
@@ -578,7 +649,6 @@ export class BybitExecutionEngine {
         errors.push(`Erro ao cancelar ordens: ${err.message}`);
       }
 
-      // 2. Buscar posições ativas e fechar a mercado
       try {
         const positions = await exchange.fetchPositions();
         for (const pos of positions) {

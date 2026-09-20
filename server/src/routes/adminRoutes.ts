@@ -4,7 +4,6 @@ import { UserDB, ClientConfigDB, TradeHistoryDB, AnnouncementDB, query, queryOne
 import { BybitExecutionEngine } from '../engine/bybitExecutionEngine.js';
 import { sanitizeCsvField, escapeHtml } from '../utils/sanitizer.js';
 
-
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
 
@@ -60,12 +59,65 @@ adminRouter.get('/clients', async (_req: Request, res: Response) => {
   res.json(clients);
 });
 
-// GET /api/admin/overview — Métricas consolidadas do SaaS (Clientes Ativos vs Inativos, Bybit Health, Performance do Dia)
+// ─── ROTAS DOS NOVOS BOTÕES (HEADER STATUS) ────────────────────────────────
+
+// GET para carregar o status atual dos botões ao abrir o painel
+adminRouter.get('/config/toggles', async (req: Request, res: Response) => {
+  try {
+    const clientId = (req.query.clientId as string) || 'master-client';
+    const config = await ClientConfigDB.findByClientId(clientId);
+    return res.json({
+      success: true,
+      trailingStopEnabled: Number(config?.trailing_stop_enabled ?? 1) === 1,
+      shadowFilterActive: Number(config?.shadow_filter_active ?? 0) === 1
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 1. Rota para alternar o Trailing Stop (Ativo / Inativo)
+adminRouter.post('/config/trailing-stop', async (req: Request, res: Response) => {
+  try {
+    const { clientId, enabled } = req.body;
+    const targetClient = clientId || 'master-client';
+
+    await ClientConfigDB.setTrailingStop(targetClient, Boolean(enabled));
+
+    return res.json({
+      success: true,
+      trailingStopEnabled: Boolean(enabled),
+      message: `Trailing Stop ${enabled ? 'ATIVADO (Gatilho 80% / Recuo 20%)' : 'DESATIVADO (Alvo Fixo 100%)'}`
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2. Rota para alternar o Shadow Mode (Executor Real / Auditor Fantasma)
+adminRouter.post('/config/shadow-filter', async (req: Request, res: Response) => {
+  try {
+    const { clientId, active } = req.body;
+    const targetClient = clientId || 'master-client';
+
+    await ClientConfigDB.setShadowFilter(targetClient, Boolean(active));
+
+    return res.json({
+      success: true,
+      shadowFilterActive: Boolean(active),
+      message: `Shadow Mode alterado para: ${active ? 'EXECUTOR REAL (Bloqueia ordens ruins)' : 'MODO FANTASMA (Apenas auditoria)'}`
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/admin/overview — Métricas consolidadas do SaaS
 adminRouter.get('/overview', async (_req: Request, res: Response) => {
   const users = await UserDB.listClients();
   const configs = await ClientConfigDB.listAll();
   const now = Date.now();
-  
+
   const totalClients = users.length;
   const activePlanClients = configs.filter(c => {
     const isExp = c.plan_expires_at ? Number(c.plan_expires_at) < now : false;
@@ -76,7 +128,6 @@ adminRouter.get('/overview', async (_req: Request, res: Response) => {
   const connectedApis = configs.filter(c => Number(c.api_connected) === 1).length;
   const syncActiveCount = configs.filter(c => Number(c.sync_enabled) === 1 && Number(c.api_connected) === 1).length;
 
-  // Performance Global do Dia
   const todayMidnight = new Date();
   todayMidnight.setHours(0, 0, 0, 0);
   const todayTimestamp = todayMidnight.getTime();
@@ -114,11 +165,11 @@ adminRouter.get('/overview', async (_req: Request, res: Response) => {
   });
 });
 
-// POST /api/admin/clients/:id/force-disconnect — Força desconexão e zera posições a mercado na Bybit (Pânico)
+// POST /api/admin/clients/:id/force-disconnect — Força desconexão e zera posições
 adminRouter.post('/clients/:id/force-disconnect', async (req: Request, res: Response) => {
   const id = String(req.params.id);
   let clientId = id;
-  
+
   let current = await ClientConfigDB.findByClientId(id);
   if (!current) {
     const user = await UserDB.findById(id);
@@ -129,10 +180,7 @@ adminRouter.post('/clients/:id/force-disconnect', async (req: Request, res: Resp
   }
   if (!current) return res.status(404).json({ error: 'Cliente não encontrado.' });
 
-  // 1. Desliga sincronização imediatamente
   await ClientConfigDB.setSyncEnabled(clientId, false);
-
-  // 2. Executa Pânico na Bybit
   const result = await BybitExecutionEngine.panicCloseAll(clientId);
 
   res.json({
@@ -142,52 +190,45 @@ adminRouter.post('/clients/:id/force-disconnect', async (req: Request, res: Resp
   });
 });
 
-// POST, PUT, PATCH /api/admin/clients/:id/plan — gerenciar plano, validade e modalidades (Vitalício, Vitrine, Ativo com dias)
+// POST, PUT, PATCH /api/admin/clients/:id/plan — gerenciar plano
 const handlePlanUpdate = async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id).trim();
     const { planType, daysToAdd, customExpiry, planActive, isVitalicio } = req.body;
-    console.log(`[Admin] 📝 Recebida solicitação de plano para ID '${id}':`, JSON.stringify(req.body));
 
-    // 1. Localizar o usuário em app_users por id, client_id ou email
     let user = await queryOne<UserRow>(
       'SELECT * FROM app_users WHERE id = $1 OR client_id = $1 OR email = $1 LIMIT 1',
       [id]
     );
 
-    // 2. Localizar a configuração existente em client_configs por client_id ou user_id
     let current = await queryOne<ClientConfigRow>(
       'SELECT * FROM client_configs WHERE client_id = $1 OR user_id = $1 LIMIT 1',
       [id]
     );
 
-    // Se encontramos a config mas não o user, buscar user pelo current.user_id
     if (!user && current?.user_id) {
       user = await queryOne<UserRow>('SELECT * FROM app_users WHERE id = $1 LIMIT 1', [current.user_id]);
     }
 
     if (!user) {
-      console.warn(`[Admin] ⚠️ Usuário não encontrado no banco para ID '${id}'`);
       return res.status(404).json({ error: `Cliente não encontrado no sistema (ID: ${id}).` });
     }
 
-    // 3. Garantir client_id consistente no app_users
     let clientId = user.client_id || current?.client_id || `cli-${user.id.replace(/^usr-/, '')}`;
     if (user.client_id !== clientId) {
       await query('UPDATE app_users SET client_id = $1 WHERE id = $2', [clientId, user.id]);
       user.client_id = clientId;
     }
 
-    // 4. Se não existe client_configs para este client_id, criar agora com o user.id garantido
     if (!current) {
       current = await ClientConfigDB.findByClientId(clientId);
       if (!current) {
-        await ClientConfigDB.create({ 
-          clientId, 
-          userId: user.id, 
+        await ClientConfigDB.create({
+          clientId,
+          userId: user.id,
           name: user.name || undefined,
           phone: user.whatsapp || undefined,
-          planType: planType || 'VITRINE', 
+          planType: planType || 'VITRINE',
           planActive: false,
           syncEnabled: false
         });
@@ -202,7 +243,7 @@ const handlePlanUpdate = async (req: Request, res: Response) => {
     if (isVitalicio || planType === 'VITALICIO') {
       newPlanType = 'VITALICIO';
       newPlanActive = true;
-      expiresAt = null; // null = sem expiração
+      expiresAt = null;
     } else if (planType === 'VITRINE') {
       newPlanType = 'VITRINE';
       newPlanActive = false;
@@ -228,12 +269,6 @@ const handlePlanUpdate = async (req: Request, res: Response) => {
     await ClientConfigDB.setActive(clientId, newPlanType !== 'INACTIVE');
     await UserDB.setPlanActive(user.id, newPlanType !== 'INACTIVE');
 
-    console.log(`[Admin] ✅ Plano atualizado com sucesso para cliente ${clientId} (user: ${user.id}):`, { 
-      newPlanType, 
-      newPlanActive, 
-      expiresAt 
-    });
-
     return res.json({
       success: true,
       clientId,
@@ -244,7 +279,7 @@ const handlePlanUpdate = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error("ERRO AO SALVAR CLIENTE:", error);
-    return res.status(500).json({ error: error.message || 'Erro interno ao salvar configurações do plano do cliente.' });
+    return res.status(500).json({ error: error.message || 'Erro interno ao salvar configurações.' });
   }
 };
 
@@ -252,7 +287,7 @@ adminRouter.post('/clients/:id/plan', handlePlanUpdate);
 adminRouter.put('/clients/:id/plan', handlePlanUpdate);
 adminRouter.patch('/clients/:id/plan', handlePlanUpdate);
 
-// POST /api/admin/clients/:id/kill-switch — ativar/bloquear cliente (atualiza is_active e plan_active)
+// POST /api/admin/clients/:id/kill-switch
 adminRouter.post('/clients/:id/kill-switch', async (req: Request, res: Response) => {
   const id = String(req.params.id);
   const { active } = req.body;
@@ -280,14 +315,13 @@ adminRouter.post('/clients/:id/kill-switch', async (req: Request, res: Response)
   res.json({ success: true, clientId, active: isActive });
 });
 
-
-// GET /api/admin/announcements — listar anúncios do sistema
+// GET /api/admin/announcements
 adminRouter.get('/announcements', async (_req: Request, res: Response) => {
   const list = await AnnouncementDB.listAll();
   res.json(list);
 });
 
-// POST /api/admin/announcements — criar aviso em tela / banner
+// POST /api/admin/announcements
 adminRouter.post('/announcements', async (req: Request, res: Response) => {
   const { title, message, type = 'INFO', actionUrl, actionLabel } = req.body;
   if (!title || !message) {
@@ -299,7 +333,7 @@ adminRouter.post('/announcements', async (req: Request, res: Response) => {
   res.status(201).json({ success: true, id, title, message, type });
 });
 
-// DELETE /api/admin/announcements/:id — excluir aviso
+// DELETE /api/admin/announcements/:id
 adminRouter.delete('/announcements/:id', async (req: Request, res: Response) => {
   await AnnouncementDB.delete(String(req.params.id));
   res.json({ success: true, id: req.params.id });
@@ -335,7 +369,7 @@ adminRouter.get('/reports', async (req: Request, res: Response) => {
   });
 });
 
-// GET /api/admin/reports/download — download Planilha Excel (.xls) ou CSV
+// GET /api/admin/reports/download
 adminRouter.get('/reports/download', async (req: Request, res: Response) => {
   const { clientId, from, to, format = 'excel' } = req.query;
 
@@ -442,10 +476,10 @@ adminRouter.get('/reports/download', async (req: Request, res: Response) => {
   res.send('\uFEFF' + csvRows.join('\n'));
 });
 
-// DELETE /api/admin/clients/:id — excluir cliente e seus dados permanentemente
+// DELETE /api/admin/clients/:id
 adminRouter.delete('/clients/:id', async (req: Request, res: Response) => {
   const id = String(req.params.id);
-  
+
   let user = await UserDB.findById(id);
   if (!user) {
     user = await UserDB.findByClientId(id);
@@ -458,5 +492,3 @@ adminRouter.delete('/clients/:id', async (req: Request, res: Response) => {
   await UserDB.deleteClient(user.id, user.client_id);
   res.json({ success: true, message: `Cliente ${user.name || user.email} excluído com sucesso.` });
 });
-
-

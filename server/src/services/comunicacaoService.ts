@@ -13,10 +13,17 @@ export interface SendWhatsAppParams {
 
 export const ComunicacaoService = {
   /**
-   * Envia mensagem WhatsApp via serviço de Comunicação do Railway usando a instância "licitacoes" (número licitação)
+   * Envia mensagem WhatsApp via serviço de Comunicação do Railway
+   * (FUNÇÃO TEMPORARIAMENTE DESATIVADA)
    */
   async sendWhatsApp({ to, message, instance }: SendWhatsAppParams): Promise<{ success: boolean; data?: any; error?: string }> {
-    // Normalizar número (apenas dígitos)
+    // ⛔ DESATIVADO: Evita requisições pendentes e spam de logs com instâncias desconectadas
+    return {
+      success: true,
+      data: { status: 'disabled', message: 'Envio de WhatsApp temporariamente desativado.' }
+    };
+
+    /* Código original mantido como referência para reativação futura:
     const cleanPhone = to.replace(/\D/g, '');
     if (!cleanPhone || cleanPhone.length < 10) {
       return { success: false, error: 'Número de WhatsApp inválido.' };
@@ -53,6 +60,7 @@ export const ComunicacaoService = {
       console.error(`[ComunicacaoService] Erro de rede ao enviar WhatsApp para ${cleanPhone}:`, err.message);
       return { success: false, error: err.message };
     }
+    */
   },
 
   /**
