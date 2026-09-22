@@ -37,7 +37,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '../../');
 
-const PORT = process.env.PORT || 4000;
+const PORT = Number(process.env.PORT) || 4000;
 const app = express();
 
 // ─── Segurança Enterprise ──────────────────────────────────────────────────
@@ -87,7 +87,6 @@ app.use('/api/auth/login', authLimiter);
 
 // ─── Servir Frontend ───────────────────────────────────────────────────────
 const distPath = path.join(rootDir, 'web/dist');
-app.use(express.static(distPath));
 
 // ─── Servidor HTTP + WebSocket ────────────────────────────────────────────
 const server = http.createServer(app);
@@ -124,6 +123,21 @@ app.post('/api/webhooks/whatsapp', async (req, res) => {
     console.error('[Webhook WhatsApp] Erro ao processar:', err.message);
     res.status(500).json({ error: 'Erro ao processar webhook' });
   }
+});
+
+// --- SERVIÇO DE ARQUIVOS ESTÁTICOS (VITE BUILD) ---
+app.use(express.static(distPath));
+
+// Fallback para SPA React (posicionado estritamente após todas as rotas de API)
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  res.sendFile(path.join(distPath, 'index.html'), (err) => {
+    if (err) {
+      res.status(404).send('Interface Web em compilação ou arquivo index.html não localizado.');
+    }
+  });
 });
 
 // ─── Broadcast Helper ─────────────────────────────────────────────────────
@@ -765,14 +779,6 @@ app.get('/api/assets/:symbol/klines', requireAuth, (req, res) => {
 
 app.get('/api/signals', requireAuth, (req, res) => {
   res.json(flowEngine.getRecentSignals());
-});
-
-// Fallback SPA
-app.get('*', (req, res) => {
-  if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
-    return res.status(404).json({ error: 'Endpoint não encontrado' });
-  }
-  res.sendFile(path.join(distPath, 'index.html'));
 });
 
 // ─── WebSocket Connection Handling ────────────────────────────────────────
