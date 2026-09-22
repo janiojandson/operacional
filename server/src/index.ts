@@ -227,6 +227,9 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
         pnlUsd,
         pnlPct,
         rMultiple,
+        orderType: (tradeEvent as any).orderType === 'LIMIT' ? 'LIMIT' : 'MARKET',
+        trailingStopAtivo: (tradeEvent as any).trailingActive ? 'SIM' : 'NÃO',
+        feePaid: Number((tradeEvent as any).fee ?? 0),
         timestamp: new Date().toISOString(),
         errorMsg: details
       });

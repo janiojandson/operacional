@@ -182,6 +182,11 @@ export class PaperTradingEngine {
       trailingStopPrice: undefined
     };
 
+    const openNotional = Math.max(100, this.balance * 0.20) * (powerMultiplier / 1.5);
+    const openFee = Number((openNotional * 0.00055).toFixed(4));
+    newTrade.fee = openFee;
+    newTrade.netPnl = Number((-openFee).toFixed(4));
+
     this.openPositions.set(signal.symbol, newTrade);
     this.broadcastUpdate(newTrade);
   }
@@ -277,11 +282,17 @@ export class PaperTradingEngine {
       }
     }
 
-    // Se a posição encerrou, liquida e atualiza histórico
+    // Se a posição encerrou, liquida e atualiza histórico (com fee round-trip)
     if (closed) {
+      const closeNotional = Math.max(100, this.balance * 0.20) * (trade.powerMultiplier / 1.5);
+      const openFee = trade.fee ?? 0;
+      const closeFee = Number((closeNotional * 0.00055).toFixed(4));
+      trade.fee = Number((openFee + closeFee).toFixed(4));
+      trade.netPnl = Number((trade.pnlUsd - openFee - closeFee).toFixed(4));
+      const settlePnl = trade.netPnl;
       trade.closeTime = Math.floor(Date.now() / 1000);
-      this.realizedPnl += trade.pnlUsd;
-      this.balance += trade.pnlUsd;
+      this.realizedPnl += settlePnl;
+      this.balance += settlePnl;
       this.history.unshift(trade);
       if (this.history.length > 100) this.history.pop();
       this.openPositions.delete(symbol);

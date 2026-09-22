@@ -268,8 +268,10 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
                 Nenhuma operação finalizada na sessão.
               </div>
             ) : (
-              account.history.map((hist: { id: string; status: string; symbol: string; type: string; entryPrice: number; currentPrice: number; pnlUsd: number; pnlPct: number; powerMultiplier: number; temperature: string; signalReason: string }) => {
+              account.history.map((hist: { id: string; status: string; symbol: string; type: string; entryPrice: number; currentPrice: number; pnlUsd: number; netPnl?: number; fee?: number; pnlPct: number; powerMultiplier: number; temperature: string; signalReason: string }) => {
                 const isTp = hist.status === 'CLOSED_TP';
+                const netVal = hist.netPnl ?? hist.pnlUsd;
+                const feeVal = hist.fee ?? 0;
                 return (
                   <div key={hist.id} className="flex items-center justify-between py-1.5 px-2 hover:bg-surface-hover/40 text-[11px] rounded transition-colors">
                     <div className="flex items-center space-x-2">
@@ -285,8 +287,9 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
                     </div>
 
                     <div className="flex items-center space-x-2">
-                      <span className={`font-bold ${isTp ? 'text-trade-green' : 'text-trade-red'}`}>
-                        {isTp ? `+$${hist.pnlUsd.toFixed(2)}` : `-$${Math.abs(hist.pnlUsd).toFixed(2)}`}
+                      <span className="text-text-muted text-[9px] hidden sm:inline">fee ${feeVal.toFixed(2)}</span>
+                      <span className={`font-bold ${netVal >= 0 ? 'text-trade-green' : 'text-trade-red'}`}>
+                        {netVal >= 0 ? `+$${netVal.toFixed(2)}` : `-$${Math.abs(netVal).toFixed(2)}`}
                       </span>
                       <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${isTp ? 'bg-trade-green/20 text-trade-green' : 'bg-trade-red/20 text-trade-red'}`}>
                         {isTp ? 'TP' : 'SL'}

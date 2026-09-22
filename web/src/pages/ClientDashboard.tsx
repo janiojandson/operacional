@@ -676,47 +676,6 @@ export default function ClientDashboard() {
               </div>
             )}
 
-            {/* 💡 Banner Assistente: Saldo em BRL (Reais) detectado na Bybit */}
-            {((account?.brlBalance ?? 0) > 0 || (account?.fundingBrl ?? 0) > 0) && (
-              <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/40 flex items-start space-x-4 text-sm shadow-xl shadow-amber-500/5">
-                <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-400 shrink-0">
-                  <ArrowRightLeft className="w-6 h-6" />
-                </div>
-                <div className="space-y-2 flex-1">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                    <p className="font-bold text-white text-base">
-                      Saldo em Reais Identificado: <span className="text-amber-400 font-mono">R$ {((account?.brlBalance ?? 0) > 0 ? account?.brlBalance : account?.fundingBrl)?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span> <span className="text-xs text-slate-400 font-normal">(~${(((account?.brlBalance ?? 0) > 0 ? account?.brlBalance : account?.fundingBrl) ?? 0 / 5.15).toFixed(2)} USD)</span>
-                    </p>
-                    <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[10px] font-bold border border-amber-500/30 self-start sm:self-auto">
-                      CONVERSÃO NECESSÁRIA PARA FUTUROS
-                    </span>
-                  </div>
-                  <p className="text-slate-300 text-xs leading-relaxed">
-                    Identificamos seu saldo em Reais na Bybit! Como o robô opera contratos futuros em paridade com o dólar cripto, esse valor precisa ser convertido para <strong>USDT</strong>. Na sua tela da Bybit (em Trading Unificado), clique no botão <strong>"Converter"</strong> (no topo) para converter BRL em USDT instantaneamente com <strong>taxa zero</strong>.
-                  </p>
-                  <div className="pt-2 flex flex-wrap gap-2.5 items-center">
-                    <a
-                      href="https://www.bybit.com/trade/spot/USDT/BRL"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-all flex items-center space-x-1.5 shadow-lg shadow-amber-500/20 cursor-pointer"
-                    >
-                      <span>Abrir Conversor Bybit (BRL ➡️ USDT)</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                    <button
-                      onClick={handleRefreshBalance}
-                      disabled={refreshingBalance}
-                      className="px-4 py-2 rounded-xl bg-surface border border-border/60 hover:bg-white/10 text-white font-bold text-xs transition-all flex items-center space-x-1.5 cursor-pointer"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${refreshingBalance ? 'animate-spin' : ''}`} />
-                      <span>{refreshingBalance ? 'Sincronizando...' : 'Já converti na Bybit, Atualizar Saldo'}</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* ⚡ Banner Assistente: Saldo USDT na Conta de Financiamento pronto para mover */}
             {(account?.fundingUsdt ?? 0) > 0 && (
               <div className="p-5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-start space-x-4 text-sm">
@@ -776,11 +735,6 @@ export default function ClientDashboard() {
                 </div>
                 <div className="flex items-center justify-between text-xs text-slate-400 mt-1">
                   <span>USDT margem futuros</span>
-                  {((account?.brlBalance ?? 0) > 0 || (account?.fundingBrl ?? 0) > 0) && (
-                    <span className="text-[10px] text-amber-400 font-mono font-bold">
-                      + R$ {((account?.brlBalance ?? 0) > 0 ? account?.brlBalance : account?.fundingBrl)?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} BRL
-                    </span>
-                  )}
                 </div>
               </div>
 

@@ -50,6 +50,11 @@ export interface SizingResult {
   stopDistPct: number;
 }
 
+/** Bybit Linear VIP0: notional mínimo por ordem (USDT) */
+export const MIN_NOTIONAL_USD = 5.0;
+/** Spread (bps) a partir do qual priorizamos LIMIT Post-Only (taxa Maker) */
+const SPREAD_MAKER_THRESHOLD_BPS = 2.0;
+
 export const COIN_RISK_PROFILES: Record<string, { sl: number; tp: number }> = {
   'BTC/USDT': { sl: 0.0080, tp: 0.0200 }, // 0.8% SL / 2.0% TP
   'BTCUSDT': { sl: 0.0080, tp: 0.0200 },
@@ -141,7 +146,24 @@ export function calculatePositionSize(params: {
 
   if (isNaN(qty) || qty <= 0) qty = minQty;
 
-  const realNotional = Number((qty * entryPrice).toFixed(2));
+  let realNotional = Number((qty * entryPrice).toFixed(2));
+
+  // 🛡️ Guarda MIN_NOTIONAL (Bybit Linear exige ≥ 5 USDT por ordem)
+  if (realNotional > 0 && realNotional < MIN_NOTIONAL_USD) {
+    const bumpedQty = Math.ceil((MIN_NOTIONAL_USD / entryPrice) / step) * step;
+    const bumpedNotional = Number((bumpedQty * entryPrice).toFixed(2));
+    const bumpedMargin = Number((bumpedNotional / safeLeverage).toFixed(2));
+    const symStr = params.symbol || 'Ativo';
+
+    if (bumpedMargin <= balance * 0.95) {
+      qty = bumpedQty;
+      realNotional = bumpedNotional;
+      console.warn(`[BybitEngine] ⚠️ MIN_NOTIONAL: notional $${(bumpedNotional - MIN_NOTIONAL_USD).toFixed(2)} < 5 USDT em ${symStr} → forçado para $${bumpedNotional.toFixed(2)} (qty ${qty}).`);
+    } else {
+      throw new Error(`[SHADOW] Ordem abortada: capital insuficiente para min_notional de 5 USDT (par ${symStr} | notional calc. $${realNotional.toFixed(2)} | bump exigiria margem $${bumpedMargin.toFixed(2)} | saldo $${balance.toFixed(2)}).`);
+    }
+  }
+
   const marginUsd = Number((realNotional / safeLeverage).toFixed(2));
 
   if (marginUsd > balance * 0.95) {
@@ -453,16 +475,41 @@ export class BybitExecutionEngine {
         throw new Error(`Quantidade calculada resultou em valor inválido (${cleanQty}). Operação abortada para proteção.`);
       }
 
+      // 🛡️ Margem ISOLADA 10x (default do cliente) — falha silenciosa não aborta a ordem
+      await exchange.setMarginMode('isolated', ccxtSymbol).catch(() => { });
       await exchange.setLeverage(sizing.leverage, ccxtSymbol).catch(() => { });
+
+      // Pré-checagem de saldo (auditoria clara antes de qualquer envio à exchange)
+      if (balance < sizing.marginUsd) {
+        const abortMsg = `[SHADOW] Ordem abortada: capital insuficiente (saldo $${balance.toFixed(2)} < margem $${sizing.marginUsd.toFixed(2)} | ${payload.symbol} | ${sizing.leverage}x isolada).`;
+        console.warn(`\x1b[33m${abortMsg}\x1b[0m`);
+        (GoogleSheetsService.logTradeExecution as any)({
+          clientName: 'Bybit Linear (USD)',
+          symbol: payload.symbol,
+          side: payload.side,
+          entryPrice: validEntryPrice,
+          qty: 0,
+          stopLoss: validStopLoss,
+          takeProfit: validTakeProfit,
+          status: 'ABORTADO_SALDO',
+          orderType: (payload.isMaker || payload.orderType === 'LIMIT') ? 'LIMIT' : 'MARKET',
+          trailingStopAtivo: 'NÃO',
+          timestamp: new Date().toISOString(),
+          errorMsg: abortMsg
+        });
+        return { success: false, error: abortMsg };
+      }
 
       // ─── 🛡️ SHADOW MODE EXECUTOR (FILTRO DE ENTRADA RUIM) ────────────────
       const isShadowFilterAtivo = Number(config.shadow_filter_active ?? 0) === 1;
       if (isShadowFilterAtivo) {
         const auditResult: any = await runShadowAudit(exchange, ccxtSymbol, payload.side).catch(() => null);
-        if (auditResult && String(auditResult.decision || '').toUpperCase().indexOf('BLOQUEADO') !== -1) {
+        const shadowDecision = String(auditResult?.newMode || auditResult?.decision || '').toUpperCase();
+        if (auditResult && shadowDecision.indexOf('BLOQUEADO') !== -1) {
           console.warn(`[BybitEngine] 🛑 ENTRADA BLOQUEADA PELO SHADOW MODE ATIVO! Motivo: ${auditResult.reasons}`);
 
           (GoogleSheetsService.logTradeExecution as any)({
+            clientName: 'Bybit Linear (USD)',
             symbol: payload.symbol,
             side: payload.side,
             entryPrice: validEntryPrice,
@@ -472,9 +519,10 @@ export class BybitExecutionEngine {
             status: 'BLOQUEADO SHADOW',
             orderType: (payload.isMaker || payload.orderType === 'LIMIT') ? 'LIMIT' : 'MARKET',
             trailingStopAtivo: 'NÃO',
+            feePaid: 0,
             pnlTeoricoSemTrailing: 'Bloqueado pelo Shadow Mode — Capital Poupado',
             timestamp: new Date().toISOString(),
-            errorMsg: `Entrada filtrada: ${auditResult.reasons}`
+            errorMsg: `Entrada filtrada: ${(auditResult.reasons || []).join?.(' / ') || auditResult.reasons || shadowDecision}`
           });
 
           return { success: false, error: `Ordem bloqueada pelo filtro Shadow Mode: ${auditResult.reasons}` };
@@ -485,7 +533,27 @@ export class BybitExecutionEngine {
         });
       }
 
-      const isMaker = payload.isMaker || payload.orderType === 'LIMIT';
+      let isMaker = payload.isMaker || payload.orderType === 'LIMIT';
+
+      // 📈 Spread elevado → prioriza LIMIT Post-Only (Maker 0.02% vs Taker 0.055%)
+      if (!isMaker) {
+        try {
+          const ob = await Promise.race([
+            exchange.fetchOrderBook(ccxtSymbol, 5),
+            new Promise<any>((_, rej) => setTimeout(() => rej(new Error('ob-timeout')), 2000))
+          ]);
+          const bid = Number(ob?.bids?.[0]?.[0] || 0);
+          const ask = Number(ob?.asks?.[0]?.[0] || 0);
+          if (bid > 0 && ask > 0) {
+            const spreadBps = ((ask - bid) / bid) * 10000;
+            if (spreadBps > SPREAD_MAKER_THRESHOLD_BPS) {
+              isMaker = true;
+              console.log(`[BybitEngine] 📈 Spread ${spreadBps.toFixed(1)} bps > ${SPREAD_MAKER_THRESHOLD_BPS} bps → LIMIT Post-Only (Maker) em ${payload.symbol}`);
+            }
+          }
+        } catch { /* segue com MARKET */ }
+      }
+
       const orderType = isMaker ? 'limit' : 'market';
       const orderPrice = isMaker ? Number(exchange.priceToPrecision(ccxtSymbol, validEntryPrice)) : undefined;
 
@@ -588,7 +656,10 @@ export class BybitExecutionEngine {
         entry_time: Date.now()
       });
 
+      const feePaid = Number((sizing.notionalUsd * (isMaker ? 0.0004 : 0.0011)).toFixed(4));
+
       (GoogleSheetsService.logTradeExecution as any)({
+        clientName: 'Bybit Linear (USD)',
         symbol: payload.symbol,
         side: payload.side,
         entryPrice: validEntryPrice,
@@ -598,6 +669,7 @@ export class BybitExecutionEngine {
         status: 'EXECUTADO',
         orderType: orderType.toUpperCase(),
         trailingStopAtivo: trailingAtivo ? 'SIM' : 'NÃO',
+        feePaid,
         pnlTeoricoSemTrailing: `Alvo Fixo: +${(alvoLucroPct * 100).toFixed(2)}% | SL: -${(profile.sl * 100).toFixed(2)}%`,
         timestamp: new Date().toISOString()
       });
@@ -607,6 +679,7 @@ export class BybitExecutionEngine {
       console.error(`[BybitEngine] Erro ao executar ordem ${clientId}:`, err.message);
 
       (GoogleSheetsService.logTradeExecution as any)({
+        clientName: 'Bybit Linear (USD)',
         symbol: payload.symbol,
         side: payload.side,
         entryPrice: payload.entryPrice || 0,
@@ -614,6 +687,8 @@ export class BybitExecutionEngine {
         stopLoss: payload.stopLoss || 0,
         takeProfit: payload.takeProfit || 0,
         status: 'FALHA',
+        orderType: (payload.isMaker || payload.orderType === 'LIMIT') ? 'LIMIT' : 'MARKET',
+        trailingStopAtivo: 'NÃO',
         timestamp: new Date().toISOString(),
         errorMsg: err.message
       });

@@ -42,6 +42,8 @@ export interface MasterOrderRow {
   trailing_active: number;
   trailing_trigger_price: number | null;
   trailing_stop_price: number | null;
+  fee: number;
+  net_pnl: number;
 }
 
 // ─── Mirror Account Types ────────────────────────────────────────────────────
@@ -312,7 +314,9 @@ export async function hydrateMasterAccount(): Promise<PaperAccount> {
     signalReason: row.signal_reason,
     trailingActive: Boolean(row.trailing_active),
     trailingTriggerPrice: row.trailing_trigger_price !== null ? Number(row.trailing_trigger_price) : undefined,
-    trailingStopPrice: row.trailing_stop_price !== null ? Number(row.trailing_stop_price) : undefined
+    trailingStopPrice: row.trailing_stop_price !== null ? Number(row.trailing_stop_price) : undefined,
+    fee: Number(row.fee || 0),
+    netPnl: Number(row.net_pnl || row.pnl_usd || 0)
   });
 
   return {
@@ -428,7 +432,9 @@ export async function hydrateMirrorAccount(): Promise<PaperAccount> {
     signalReason: row.signal_reason,
     trailingActive: Boolean(row.trailing_active),
     trailingTriggerPrice: row.trailing_trigger_price !== null ? Number(row.trailing_trigger_price) : undefined,
-    trailingStopPrice: row.trailing_stop_price !== null ? Number(row.trailing_stop_price) : undefined
+    trailingStopPrice: row.trailing_stop_price !== null ? Number(row.trailing_stop_price) : undefined,
+    fee: Number(row.fee || 0),
+    netPnl: Number(row.net_pnl || row.pnl_usd || 0)
   });
 
   return {

@@ -25,6 +25,11 @@ export interface TradeLogPayload {
   shadowTheoreticalPnl?: number;
   shadowDecision?: string;
   errorMsg?: string;
+  /** Apps Script v3.1 (USD ONLY) */
+  orderType?: string;
+  trailingStopAtivo?: string;
+  feePaid?: number;
+  pnlTeoricoSemTrailing?: string;
 }
 
 export interface ShadowAuditPayload {
