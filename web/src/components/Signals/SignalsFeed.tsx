@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FlowSignal } from '../../../shared/types';
+import { FlowSignal } from '../../../../shared/types';
 import { Bell, ShieldAlert, Zap, Scale, Trash2 } from 'lucide-react';
 
 interface SignalsFeedProps {

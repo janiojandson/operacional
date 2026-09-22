@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { PaperAccount } from '../../../shared/paperTypes';
-import { PairPerformance } from '../../../../server/src/engine/pairPerformanceTracker';
-import { DynamicPairStatus } from '../../../../server/src/engine/autoPairSelectorEngine';
+import { PaperAccount } from '../../../../shared/paperTypes';
+import { PairPerformance, DynamicPairStatus } from '../../../../shared/types';
 import { Bot, Zap, Power, Flame, CheckCircle, XCircle } from 'lucide-react';
 
 interface PaperTradingPanelProps {
@@ -219,7 +218,7 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {account.openPositions.map((pos) => {
+              {account.openPositions.map((pos: { id: string; symbol: string; type: string; pnlUsd: number; pnlPct: number; entryPrice: number; takeProfit: number; stopLoss: number }) => {
                 const isBuy = pos.type === 'BUY';
                 const isProfit = pos.pnlUsd >= 0;
 
@@ -269,7 +268,7 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
                 Nenhuma operação finalizada na sessão.
               </div>
             ) : (
-              account.history.map((hist) => {
+              account.history.map((hist: { id: string; status: string; symbol: string; type: string; entryPrice: number; currentPrice: number; pnlUsd: number; pnlPct: number; powerMultiplier: number; temperature: string; signalReason: string }) => {
                 const isTp = hist.status === 'CLOSED_TP';
                 return (
                   <div key={hist.id} className="flex items-center justify-between py-1.5 px-2 hover:bg-surface-hover/40 text-[11px] rounded transition-colors">

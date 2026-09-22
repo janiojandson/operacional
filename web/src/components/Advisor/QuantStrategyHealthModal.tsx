@@ -18,7 +18,7 @@ import {
   ArrowUpRight,
   ArrowDownRight
 } from 'lucide-react';
-import { QuantStrategyHealthReport } from '../../../shared/paperTypes';
+import { QuantStrategyHealthReport } from '../../../../shared/paperTypes';
 
 interface QuantStrategyHealthModalProps {
   isOpen: boolean;
@@ -329,7 +329,7 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
                   <div className="p-4 rounded-xl bg-background/60 border border-border/80 space-y-3">
                     <span className="text-xs font-bold text-slate-300 block">DESEMPENHO POR REGIME DE MERCADO</span>
                     <div className="space-y-2">
-                      {report.sequences.regimeBreakdown.map((reg, idx) => (
+                      {report.sequences.regimeBreakdown.map((reg: { regime: string; tradesCount: number; winRate: number; profitFactor: number; pnlUsd: number }, idx: number) => (
                         <div key={idx} className="p-2.5 rounded-lg bg-surface/60 border border-border/60 flex items-center justify-between">
                           <div className="flex items-center space-x-2">
                             <span className="font-bold text-white text-xs">{reg.regime.replace('_', ' ')}</span>
@@ -390,7 +390,7 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
                   <div className="p-4 rounded-xl bg-background/60 border border-border/80 space-y-3">
                     <span className="text-xs font-bold text-slate-300 block">HISTOGRAMA DE DISTRIBUIÇÃO EM $R$</span>
                     <div className="space-y-2">
-                      {report.distribution.rDistribution.map((item, idx) => (
+                      {report.distribution.rDistribution.map((item: { range: string; count: number; pct: number }, idx: number) => (
                         <div key={idx} className="space-y-1">
                           <div className="flex justify-between text-xs font-mono">
                             <span className="text-slate-300">{item.range}</span>
@@ -420,7 +420,7 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
                         <span>POR PAR DE CRIPTOATIVO</span>
                       </span>
                       <div className="space-y-1.5">
-                        {report.segmentation.bySymbol.map((item, idx) => (
+                        {report.segmentation.bySymbol.map((item: { key: string; totalTrades: number; winRate: number; profitFactor: number; pnlUsd: number; mathExpectationR: number }, idx: number) => (
                           <div key={idx} className="p-2 rounded bg-background/60 border border-border/40 flex justify-between items-center text-xs">
                             <span className="font-bold text-white">{item.key}</span>
                             <span className="text-amber-400">{item.winRate}% WR</span>
@@ -439,7 +439,7 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
                         <span>POR SESSÃO GLOBAL</span>
                       </span>
                       <div className="space-y-1.5">
-                        {report.segmentation.bySession.map((item, idx) => (
+                        {report.segmentation.bySession.map((item: { key: string; totalTrades: number; winRate: number; profitFactor: number; pnlUsd: number; mathExpectationR: number }, idx: number) => (
                           <div key={idx} className="p-2 rounded bg-background/60 border border-border/40 flex justify-between items-center text-xs">
                             <span className="font-bold text-white">{item.key}</span>
                             <span className="text-amber-400">{item.winRate}% WR</span>
@@ -458,7 +458,7 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
                         <span>POR DIA DA SEMANA</span>
                       </span>
                       <div className="space-y-1.5">
-                        {report.segmentation.byDayOfWeek.map((item, idx) => (
+                        {report.segmentation.byDayOfWeek.map((item: { key: string; totalTrades: number; winRate: number; profitFactor: number; pnlUsd: number; mathExpectationR: number }, idx: number) => (
                           <div key={idx} className="p-2 rounded bg-background/60 border border-border/40 flex justify-between items-center text-xs">
                             <span className="font-bold text-white">{item.key}</span>
                             <span className="text-slate-400">{item.totalTrades} ops</span>
@@ -477,7 +477,7 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
                         <span>POR DIREÇÃO (LONG vs SHORT)</span>
                       </span>
                       <div className="space-y-1.5">
-                        {report.segmentation.byDirection.map((item, idx) => (
+                        {report.segmentation.byDirection.map((item: { key: string; totalTrades: number; winRate: number; profitFactor: number; pnlUsd: number; mathExpectationR: number }, idx: number) => (
                           <div key={idx} className="p-2 rounded bg-background/60 border border-border/40 flex justify-between items-center text-xs">
                             <span className={`font-bold ${item.key === 'BUY' ? 'text-buy' : 'text-sell'}`}>{item.key === 'BUY' ? 'LONG (COMPRA)' : 'SHORT (VENDA)'}</span>
                             <span className="text-amber-400">{item.winRate}% WR</span>
@@ -507,7 +507,7 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
                     </p>
 
                     <div className="space-y-2">
-                      {report.segmentation.byTemperature?.map((temp, idx) => (
+                      {report.segmentation.byTemperature?.map((temp: { label: string; totalTrades: number; winRate: number; profitFactor: number; netPnlUsd: number; avgPnlPerTrade: number; maxDrawdownUsd: number; healthVerdict: string }, idx: number) => (
                         <div key={idx} className="p-2.5 rounded-lg bg-background/70 border border-border/60 flex items-center justify-between text-xs">
                           <div>
                             <span className="font-bold text-white block">{temp.label}</span>
@@ -652,7 +652,7 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
                         {report.evolution.daily.length === 0 ? (
                           <span className="text-slate-500 text-[11px] block py-4 text-center">Nenhum registro diário fechado</span>
                         ) : (
-                          report.evolution.daily.map((d, idx) => {
+                          report.evolution.daily.map((d: { period: string; pnlUsd?: number; netPnlUsd?: number; returnPct?: number; tradesCount: number; winRate: number }, idx: number) => {
                             const pnl = typeof d.pnlUsd === 'number' && !isNaN(d.pnlUsd) ? d.pnlUsd : (d.netPnlUsd || 0);
                             const ret = typeof d.returnPct === 'number' && !isNaN(d.returnPct) ? d.returnPct : 0;
                             return (
@@ -687,7 +687,7 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
                         {report.evolution.weekly.length === 0 ? (
                           <span className="text-slate-500 text-[11px] block py-4 text-center">Nenhum registro semanal fechado</span>
                         ) : (
-                          report.evolution.weekly.map((w, idx) => {
+                          report.evolution.weekly.map((w: { period: string; pnlUsd?: number; netPnlUsd?: number; returnPct?: number; tradesCount: number; winRate: number }, idx: number) => {
                             const pnl = typeof w.pnlUsd === 'number' && !isNaN(w.pnlUsd) ? w.pnlUsd : (w.netPnlUsd || 0);
                             const ret = typeof w.returnPct === 'number' && !isNaN(w.returnPct) ? w.returnPct : 0;
                             return (
@@ -722,7 +722,7 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
                         {report.evolution.monthly.length === 0 ? (
                           <span className="text-slate-500 text-[11px] block py-4 text-center">Nenhum registro mensal fechado</span>
                         ) : (
-                          report.evolution.monthly.map((m, idx) => {
+                          report.evolution.monthly.map((m: { period: string; pnlUsd?: number; netPnlUsd?: number; returnPct?: number; tradesCount: number; winRate: number }, idx: number) => {
                             const pnl = typeof m.pnlUsd === 'number' && !isNaN(m.pnlUsd) ? m.pnlUsd : (m.netPnlUsd || 0);
                             const ret = typeof m.returnPct === 'number' && !isNaN(m.returnPct) ? m.returnPct : 0;
                             return (
@@ -753,7 +753,7 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
                   INSIGHTS QUANTITATIVOS DO ANALISTA 24/7:
                 </span>
                 <ul className="space-y-1 text-xs text-slate-300 font-sans list-disc list-inside">
-                  {report.actionableInsights.map((insight, idx) => (
+                  {report.actionableInsights.map((insight: string, idx: number) => (
                     <li key={idx}>{insight}</li>
                   ))}
                 </ul>

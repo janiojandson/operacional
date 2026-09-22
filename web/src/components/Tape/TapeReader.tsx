@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trade } from '../../../shared/types';
+import { Trade } from '../../../../shared/types';
 import { Activity, ShieldAlert } from 'lucide-react';
 
 interface TapeReaderProps {

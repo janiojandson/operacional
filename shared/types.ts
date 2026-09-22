@@ -103,6 +103,69 @@ export interface AssetSummary {
   cvd: number;
 }
 
+export interface PairPerformance {
+  symbol: string;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number;
+  realizedPnl: number;
+  profitFactor: number;
+  avgPnlPerTrade: number;
+  statusRecommendation: 'EXCELENTE' | 'ESTAVEL' | 'REVISAR' | 'DESATIVAR';
+}
+
+export type RegimeType = 'HIGH_TREND' | 'CHOPPY_RANGING' | 'LOW_LIQUIDITY' | 'EXPANSION_FLOW';
+
+export type TemperatureLevel = 
+  | 'COLD_DEFENSE'       // 0.0x / 0.5x (Defesa)
+  | 'NORMAL'             // 1.0x (Padrão)
+  | 'HOT_MAX_EXTRACT'    // 2.0x (Extração Máxima)
+  | 'SUPERNOVA_POWER'    // 3.0x (Extração Power)
+  | 'GALACTIC_SURGE'     // 4.0x (Extração Galáctica)
+  | 'DIVINE_CONFLUENCE'; // 5.0x (Extração Suprema / Deus)
+
+export interface DynamicPairStatus {
+  symbol: string;
+  isActiveForTrading: boolean;
+  regime: RegimeType;
+  efficiencyScore: number;
+  temperature: TemperatureLevel;
+  temperatureLabel: string;
+  powerMultiplier: number;
+  recommendedAllocationUsd: number;
+  actionReason: string;
+  spreadScore: 'TIGHT' | 'ACCEPTABLE' | 'WIDE';
+  liquidityScore: 'DEEP' | 'MEDIUM' | 'SHALLOW';
+}
+
+export interface ClientAccountConfig {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  planType: string;
+  planActive: boolean;
+  balance: number;
+  riskPct: number;
+  leverage: number;
+}
+
+export interface ClientTradeLog {
+  id: string;
+  clientId: string;
+  symbol: string;
+  side: string;
+  entryPrice: number;
+  qty: number;
+  status: string;
+  pnlUsd?: number;
+  pnlPct?: number;
+  rMultiple?: number;
+  timestamp: string;
+  errorMsg?: string;
+}
+
 export type SessionType = 'ASIA' | 'LONDON' | 'NY' | 'OFF_HOURS';
 export type MarketRegime = 
   | 'TRENDING_BULL' 

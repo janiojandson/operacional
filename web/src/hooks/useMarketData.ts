@@ -1,10 +1,17 @@
 import { useEffect, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { AssetSummary, Trade, OrderBookData, CandleData, FlowSignal } from '../../shared/types';
-import { PaperAccount } from '../../shared/paperTypes';
-import { PairPerformance } from '../../server/src/engine/pairPerformanceTracker';
-import { DynamicPairStatus } from '../../server/src/engine/autoPairSelectorEngine';
-import { ClientAccountConfig, ClientTradeLog } from '../../shared/clientTypes';
+import { 
+  AssetSummary, 
+  Trade, 
+  OrderBookData, 
+  CandleData, 
+  FlowSignal,
+  PairPerformance,
+  DynamicPairStatus,
+  ClientAccountConfig,
+  ClientTradeLog
+} from '../../../shared/types';
+import { PaperAccount } from '../../../shared/paperTypes';
 
 export function useMarketData(activeSymbol: string) {
   const [socket, setSocket] = useState<Socket | null>(null);

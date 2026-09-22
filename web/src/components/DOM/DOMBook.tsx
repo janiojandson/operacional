@@ -1,5 +1,5 @@
 import React from 'react';
-import { OrderBookData } from '../../../shared/types';
+import { OrderBookData } from '../../../../shared/types';
 import { Layers } from 'lucide-react';
 
 interface DOMBookProps {
@@ -82,7 +82,7 @@ export const DOMBook: React.FC<DOMBookProps> = ({ book }) => {
 
         {/* Bids (Compras) */}
         <div className="flex flex-col justify-start flex-1 overflow-hidden">
-          {bids.map((bid, idx) => {
+          {bids.map((bid: { price: number; amount: number; total: number }, idx: number) => {
             const depthPercent = Math.min(100, (bid.total / maxDepthTotal) * 100);
             return (
               <div key={`bid-${idx}`} className="relative flex justify-between items-center px-3 py-[2px] hover:bg-surface-hover/80 cursor-pointer">
