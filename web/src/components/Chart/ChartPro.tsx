@@ -239,9 +239,12 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
     const markers: any[] = [];
     const symbolSignals = signals.filter(s => s.symbol === symbol).slice(0, 15);
+    const usedTimes = new Set<number>();
 
     for (const sig of symbolSignals) {
-      const timeSec = Math.floor(sig.timestamp / 1000);
+      let timeSec = Math.floor(sig.timestamp / 1000);
+      if (usedTimes.has(timeSec)) continue;
+      usedTimes.add(timeSec);
       const isBuy = sig.type === 'ABSORPTION_SELL' || (sig.type === 'BOOK_IMBALANCE' && sig.message.includes('Compradores'));
 
       markers.push({

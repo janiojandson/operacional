@@ -311,6 +311,7 @@ const mirrorTrading = new MirrorTradingEngine(async (account, tradeEvent) => {
 });
 
 const flowEngine = new FlowEngine((signal: FlowSignal) => {
+  console.log('[Flow] sinal emitido:', signal.type, signal.symbol);
   io.emit('flow_signal', signal);
   const asset = marketManager.getSymbolState(signal.symbol);
   if (asset) {
@@ -721,12 +722,17 @@ app.get('/api/assets/:symbol/state', requireAuth, (req, res) => {
   });
 });
 
-app.get('/api/assets/:symbol/klines', requireAuth, (req, res) => {
+app.get('/api/assets/:symbol/klines', requireAuth, async (req, res) => {
   const symbol = decodeURIComponent(String(req.params.symbol));
   const tf = (req.query.tf as string) || '1m';
   const state = marketManager.getSymbolState(symbol);
   if (!state) {
     return res.status(404).json({ error: 'Ativo não encontrado' });
+  }
+
+  const direct = await marketManager.getKlines(symbol, tf, 400);
+  if (direct && direct.length > 0) {
+    return res.json({ symbol, tf, candles: direct });
   }
 
   const baseCandles = state.candles || [];

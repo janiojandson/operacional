@@ -38,6 +38,7 @@ export class MarketDataManager {
   private tickerInterval?: NodeJS.Timeout;
   private exchange: any;
   private isInitialized = false;
+  private processedTradeIds = new Map<string, Set<string>>();
 
   constructor(flowEngine: FlowEngine, onBroadcast?: (type: string, data: any) => void) {
     this.flowEngine = flowEngine;
@@ -57,11 +58,11 @@ export class MarketDataManager {
   }
 
   private async loadInitialData(): Promise<void> {
-    for (const symbol of DEFAULT_SYMBOLS) {
+    await Promise.all(DEFAULT_SYMBOLS.map(async (symbol) => {
       try {
         const ccxtSymbol = toBybitLinear(symbol);
         await this.exchange.loadMarkets();
-        
+
         const [ohlcv, ticker] = await Promise.all([
           this.exchange.fetchOHLCV(ccxtSymbol, '1m', undefined, 200),
           this.exchange.fetchTicker(ccxtSymbol)
@@ -70,6 +71,7 @@ export class MarketDataManager {
         const candles = this.normalizeCandles(ohlcv, symbol);
         const cvd = this.calculateCVD(candles);
         const book = await this.fetchOrderBook(ccxtSymbol, ticker.last);
+        book.symbol = symbol;
 
         this.symbols.set(symbol, {
           symbol,
@@ -89,7 +91,7 @@ export class MarketDataManager {
         console.warn(`[MarketData] Falha ao carregar ${symbol}:`, err.message);
         this.createFallbackState(symbol);
       }
-    }
+    }));
   }
 
   private createFallbackState(symbol: string): void {
@@ -173,7 +175,10 @@ export class MarketDataManager {
     for (const [symbol, state] of this.symbols.entries()) {
       try {
         const ccxtSymbol = toBybitLinear(symbol);
-        const ticker = await this.exchange.fetchTicker(ccxtSymbol);
+        const [ticker, rawTrades] = await Promise.all([
+          this.exchange.fetchTicker(ccxtSymbol),
+          this.exchange.fetchTrades(ccxtSymbol, undefined, 50).catch(() => [])
+        ]);
         if (!ticker.last) continue;
 
         const prevPrice = state.lastPrice;
@@ -183,26 +188,96 @@ export class MarketDataManager {
         state.volume24h = ticker.baseVolume || state.volume24h;
         state.change24h = ticker.percentage || state.change24h;
 
-        const trade: Trade = {
-          id: `${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          symbol,
-          price: ticker.last,
-          amount: 0,
-          side: ticker.last >= prevPrice ? 'buy' : 'sell',
-          timestamp: Date.now(),
-          cost: 0,
-          isWhale: false
-        };
+        let seenIds = this.processedTradeIds.get(symbol);
+        if (!seenIds) {
+          seenIds = new Set<string>();
+          this.processedTradeIds.set(symbol, seenIds);
+        }
+        for (const rt of rawTrades) {
+          const id = String(rt.id ?? `${rt.timestamp}-${rt.price}-${rt.amount}`);
+          if (seenIds.has(id)) continue;
+          seenIds.add(id);
+          if (seenIds.size > 500) {
+            let toDrop = 250;
+            for (const oldId of seenIds) {
+              if (toDrop-- <= 0) break;
+              seenIds.delete(oldId);
+            }
+          }
+          const trade: Trade = {
+            id,
+            symbol,
+            price: rt.price,
+            amount: rt.amount,
+            side: rt.side === 'buy' || rt.side === 'sell' ? rt.side : (rt.price >= prevPrice ? 'buy' : 'sell'),
+            timestamp: rt.timestamp,
+            cost: Number((rt.amount * rt.price).toFixed(2)),
+            isWhale: Number((rt.amount * rt.price)) >= 50000
+          };
+          state.trades.unshift(trade);
+          if (state.trades.length > 80) state.trades.pop();
+          if (this.onBroadcast) this.onBroadcast('trade', trade);
+          this.flowEngine.processTrade(trade, state.book);
+        }
 
-        state.trades.unshift(trade);
-        if (state.trades.length > 80) state.trades.pop();
+        if (state.trades.length === 0) {
+          const trade: Trade = {
+            id: `${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            symbol,
+            price: ticker.last,
+            amount: 0,
+            side: ticker.last >= prevPrice ? 'buy' : 'sell',
+            timestamp: Date.now(),
+            cost: 0,
+            isWhale: false
+          };
+          state.trades.unshift(trade);
+          if (state.trades.length > 80) state.trades.pop();
+          if (this.onBroadcast) this.onBroadcast('trade', trade);
+        }
 
-        if (this.onBroadcast) {
-          this.onBroadcast('trade', trade);
+        this.updateLiveCandle(state, ticker.last);
+
+        if (state.book && this.onBroadcast) {
+          state.book.timestamp = Date.now();
+          this.flowEngine.checkBookImbalance(state.book);
         }
       } catch (err: any) {
         console.debug(`[MarketData] Ticker update failed for ${symbol}:`, err.message);
       }
+    }
+  }
+
+  private updateLiveCandle(state: ActiveSymbolState, price: number): void {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const bucket = Math.floor(nowSec / 60) * 60;
+    let candle = state.candles[state.candles.length - 1];
+
+    if (!candle || candle.time !== bucket) {
+      candle = {
+        time: bucket,
+        open: price,
+        high: price,
+        low: price,
+        close: price,
+        volume: 0,
+        buyVolume: 0,
+        sellVolume: 0,
+        delta: 0,
+        cvd: state.cvd
+      };
+      state.candles.push(candle);
+      if (state.candles.length > 400) state.candles.shift();
+    }
+
+    candle.high = Math.max(candle.high, price);
+    candle.low = Math.min(candle.low, price);
+    candle.close = price;
+    candle.cvd = state.cvd;
+    state.currentCandle = candle;
+
+    if (this.onBroadcast) {
+      this.onBroadcast('candle_update', { symbol: state.symbol, candle });
     }
   }
 
@@ -216,8 +291,19 @@ export class MarketDataManager {
         ]);
 
         const newCandles = this.normalizeCandles(ohlcv, symbol);
+        const live = state.candles[state.candles.length - 1];
+        const lastRemote = newCandles[newCandles.length - 1];
+        if (live && lastRemote) {
+          if (live.time > lastRemote.time) {
+            newCandles.push(live);
+          } else if (live.time === lastRemote.time) {
+            newCandles[newCandles.length - 1] = live;
+          }
+          if (newCandles.length > 400) newCandles.shift();
+        }
         state.candles = newCandles;
         state.cvd = this.calculateCVD(newCandles);
+        book.symbol = symbol;
         state.book = book;
 
         const currentCandle = state.candles[state.candles.length - 1];
@@ -228,6 +314,18 @@ export class MarketDataManager {
       } catch (err: any) {
         console.debug(`[MarketData] Candles update failed for ${symbol}:`, err.message);
       }
+    }
+  }
+
+  public async getKlines(symbol: string, tf: string, limit = 400): Promise<CandleData[] | null> {
+    try {
+      const ccxtSymbol = toBybitLinear(symbol);
+      const ccxtTf = tf === '1D' ? '1d' : tf === '1W' ? '1w' : tf;
+      const ohlcv = await this.exchange.fetchOHLCV(ccxtSymbol, ccxtTf as any, undefined, limit);
+      if (!Array.isArray(ohlcv) || ohlcv.length === 0) return null;
+      return this.normalizeCandles(ohlcv, symbol);
+    } catch {
+      return null;
     }
   }
 
