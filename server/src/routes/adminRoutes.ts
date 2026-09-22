@@ -101,12 +101,33 @@ adminRouter.post('/config/shadow-filter', async (req: Request, res: Response) =>
     const targetClient = clientId || 'master-client';
 
     await ClientConfigDB.setShadowFilter(targetClient, Boolean(active));
-
-    return res.json({
+return res.json({
       success: true,
       shadowFilterActive: Boolean(active),
       message: `Shadow Mode alterado para: ${active ? 'EXECUTOR REAL (Bloqueia ordens ruins)' : 'MODO FANTASMA (Apenas auditoria)'}`
     });
+
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── SYNC ADMIN COM VARIÁVEIS DE AMBIENTE ──────────────────────────────────
+// Se alterou ADMIN_EMAIL ou ADMIN_PASSWORD no .env/Railway, chama isso para atualizar
+adminRouter.post('/sync-admin', async (_req: Request, res: Response) => {
+  try {
+    const result = await UserDB.syncAdminWithEnv();
+    return res.json({ success: true, ...result, message: 'Admin sincronizado com variáveis de ambiente atuais' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET para verificar email atual do admin
+adminRouter.get('/admin-info', async (_req: Request, res: Response) => {
+  try {
+    const admin = await queryOne<UserRow>('SELECT id, email, name, created_at FROM app_users WHERE role = $1 LIMIT 1', ['ADMIN']);
+    return res.json({ success: true, admin });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }

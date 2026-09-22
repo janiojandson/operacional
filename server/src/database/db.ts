@@ -163,11 +163,11 @@ export async function initDatabase(): Promise<void> {
 
   console.log('[DB] ✅ Tabelas PostgreSQL inicializadas com sucesso.');
 
-  // Seed: Admin padrão
+  // Seed: Admin padrão — sincroniza com variáveis de ambiente
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@marketflow.pro';
   const adminPassword = process.env.ADMIN_PASSWORD || 'MarketFlow@2026!';
 
-  const existingAdmin = await queryOne('SELECT id FROM app_users WHERE role = $1 LIMIT 1', ['ADMIN']);
+  const existingAdmin = await queryOne<UserRow>('SELECT * FROM app_users WHERE role = $1 LIMIT 1', ['ADMIN']);
   if (!existingAdmin) {
     const hash = await bcrypt.hash(adminPassword, 12);
     const adminId = `admin-${Date.now()}`;
@@ -176,6 +176,14 @@ export async function initDatabase(): Promise<void> {
       [adminId, adminEmail, hash]
     );
     console.log(`[DB] ✅ Admin padrão criado: ${adminEmail}`);
+  } else if (existingAdmin.email !== adminEmail) {
+    // Email mudou no .env/Railway — atualiza
+    const hash = await bcrypt.hash(adminPassword, 12);
+    await query(
+      `UPDATE app_users SET email = $1, password_hash = $2, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $3`,
+      [adminEmail, hash, existingAdmin.id]
+    );
+    console.log(`[DB] 🔄 Admin atualizado para novo email: ${adminEmail}`);
   }
 
   // Seed: Anúncio de boas-vindas
@@ -339,7 +347,32 @@ export const UserDB = {
     query<UserRow>("SELECT * FROM app_users WHERE role = 'CLIENT' ORDER BY created_at DESC"),
 
   deactivate: (id: string) =>
-    query('UPDATE app_users SET is_active = 0, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $1', [id])
+    query('UPDATE app_users SET is_active = 0, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $1', [id]),
+
+  // Sincroniza admin com variáveis de ambiente atuais (útil se mudou .env/Railway)
+  syncAdminWithEnv: async () => {
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@marketflow.pro';
+    const adminPassword = process.env.ADMIN_PASSWORD || 'MarketFlow@2026!';
+    const hash = await bcrypt.hash(adminPassword, 12);
+    
+    const existingAdmin = await queryOne<UserRow>('SELECT * FROM app_users WHERE role = $1 LIMIT 1', ['ADMIN']);
+    if (existingAdmin) {
+      await query(
+        `UPDATE app_users SET email = $1, password_hash = $2, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $3`,
+        [adminEmail, hash, existingAdmin.id]
+      );
+      console.log(`[DB] 🔄 Admin sincronizado com .env: ${adminEmail}`);
+      return { updated: true, email: adminEmail };
+    } else {
+      const adminId = `admin-${Date.now()}`;
+      await query(
+        `INSERT INTO app_users (id, email, password_hash, role, name) VALUES ($1, $2, $3, 'ADMIN', 'Administrador Master')`,
+        [adminId, adminEmail, hash]
+      );
+      console.log(`[DB] ✅ Admin criado via sync: ${adminEmail}`);
+      return { created: true, email: adminEmail };
+    }
+  }
 };
 
 // ─── Funções de Acesso — OtpDB ────────────────────────────────────────────

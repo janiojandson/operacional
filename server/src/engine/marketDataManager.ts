@@ -1,3 +1,4 @@
+import ccxt from 'ccxt';
 import { Trade, OrderBookData, CandleData, AssetSummary } from '../../../shared/types';
 import { FlowEngine } from './flowEngine';
 
@@ -16,216 +17,237 @@ interface ActiveSymbolState {
   trades: Trade[];
 }
 
+const DEFAULT_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT'];
+const BYBIT_CATEGORIES: Record<string, 'crypto' | 'forex'> = {
+  'BTC/USDT': 'crypto', 'ETH/USDT': 'crypto', 'SOL/USDT': 'crypto',
+  'BNB/USDT': 'crypto', 'XRP/USDT': 'crypto'
+};
+
+function toBybitLinear(symbol: string): string {
+  if (symbol.includes(':')) return symbol;
+  const [base, quote] = symbol.split('/');
+  if (!base || !quote) return symbol;
+  return `${base}/${quote}:${quote}`;
+}
+
 export class MarketDataManager {
   private symbols: Map<string, ActiveSymbolState> = new Map();
   private flowEngine: FlowEngine;
   private onBroadcast?: (type: string, data: any) => void;
-  private simulationIntervals: NodeJS.Timeout[] = [];
-  private isWsRunning = false;
+  private fetchInterval?: NodeJS.Timeout;
+  private tickerInterval?: NodeJS.Timeout;
+  private exchange: any;
+  private isInitialized = false;
 
   constructor(flowEngine: FlowEngine, onBroadcast?: (type: string, data: any) => void) {
     this.flowEngine = flowEngine;
     this.onBroadcast = onBroadcast;
-    this.initDefaultSymbols();
+    this.exchange = new (ccxt as any).bybit({
+      options: { defaultType: 'linear' },
+      enableRateLimit: true
+    });
   }
 
-  private initDefaultSymbols() {
-    const defaultAssets: Array<{ symbol: string; basePrice: number; category: 'crypto' | 'forex'; name: string }> = [
-      { symbol: 'BTC/USDT', basePrice: 94850.00, category: 'crypto', name: 'Bitcoin' },
-      { symbol: 'ETH/USDT', basePrice: 2840.50, category: 'crypto', name: 'Ethereum' },
-      { symbol: 'SOL/USDT', basePrice: 198.40, category: 'crypto', name: 'Solana' },
-      { symbol: 'BNB/USDT', basePrice: 652.80, category: 'crypto', name: 'Binance Coin' },
-      { symbol: 'XRP/USDT', basePrice: 2.38, category: 'crypto', name: 'Ripple XRP' }
-    ];
+  async initialize(): Promise<void> {
+    if (this.isInitialized) return;
+    await this.loadInitialData();
+    this.startStreaming();
+    this.isInitialized = true;
+    console.log('[MarketData] ✅ Dados reais da Bybit inicializados');
+  }
 
-    for (const asset of defaultAssets) {
-      const nowSec = Math.floor(Date.now() / 1000);
-      const candles: CandleData[] = [];
-      let p = asset.basePrice;
-      let runningCvd = 0;
-
-      // Seed 60 minutes of history candles
-      for (let i = 60; i >= 1; i--) {
-        const time = nowSec - i * 60;
-        const deltaPct = (Math.random() - 0.49) * 0.004;
-        const open = p;
-        const close = open * (1 + deltaPct);
-        const high = Math.max(open, close) * (1 + Math.random() * 0.001);
-        const low = Math.min(open, close) * (1 - Math.random() * 0.001);
+  private async loadInitialData(): Promise<void> {
+    for (const symbol of DEFAULT_SYMBOLS) {
+      try {
+        const ccxtSymbol = toBybitLinear(symbol);
+        await this.exchange.loadMarkets();
         
-        // Volume proporcional à escala real de cada criptoativo na Bybit
-        const baseVol = asset.symbol.startsWith('BTC') ? 0.3 : (asset.symbol.startsWith('ETH') ? 3.0 : (asset.symbol.startsWith('SOL') ? 25 : (asset.symbol.startsWith('BNB') ? 12 : 3500)));
-        const volume = baseVol * (0.5 + Math.random() * 1.0);
-        const buyVolume = volume * (deltaPct > 0 ? 0.6 : 0.4);
-        const sellVolume = volume - buyVolume;
-        const delta = buyVolume - sellVolume;
-        runningCvd += delta;
+        const [ohlcv, ticker] = await Promise.all([
+          this.exchange.fetchOHLCV(ccxtSymbol, '1m', undefined, 200),
+          this.exchange.fetchTicker(ccxtSymbol)
+        ]);
 
-        const dec = p < 5 ? 4 : (p < 100 ? 3 : 2);
-        candles.push({
-          time,
-          open: Number(open.toFixed(dec)),
-          high: Number(high.toFixed(dec)),
-          low: Number(low.toFixed(dec)),
-          close: Number(close.toFixed(dec)),
-          volume: Number(volume.toFixed(2)),
-          buyVolume: Number(buyVolume.toFixed(2)),
-          sellVolume: Number(sellVolume.toFixed(2)),
-          delta: Number(delta.toFixed(2)),
-          cvd: Number(runningCvd.toFixed(2))
+        const candles = this.normalizeCandles(ohlcv, symbol);
+        const cvd = this.calculateCVD(candles);
+        const book = await this.fetchOrderBook(ccxtSymbol, ticker.last);
+
+        this.symbols.set(symbol, {
+          symbol,
+          category: BYBIT_CATEGORIES[symbol] || 'crypto',
+          lastPrice: ticker.last || candles[candles.length - 1]?.close || 0,
+          high24h: ticker.high || 0,
+          low24h: ticker.low || 0,
+          volume24h: ticker.baseVolume || 0,
+          change24h: ticker.percentage || 0,
+          cvd,
+          candles,
+          currentCandle: null,
+          book,
+          trades: []
         });
-        p = close;
+      } catch (err: any) {
+        console.warn(`[MarketData] Falha ao carregar ${symbol}:`, err.message);
+        this.createFallbackState(symbol);
       }
-
-      const initialBook = this.generateRealisticBook(asset.symbol, p, asset.category);
-
-      this.symbols.set(asset.symbol, {
-        symbol: asset.symbol,
-        category: asset.category,
-        lastPrice: p,
-        high24h: p * 1.03,
-        low24h: p * 0.97,
-        volume24h: asset.category === 'crypto' ? 1450000000 : 89000000000,
-        change24h: +(Math.random() * 4 - 1.5).toFixed(2),
-        cvd: runningCvd,
-        candles,
-        currentCandle: null,
-        book: initialBook,
-        trades: []
-      });
     }
   }
 
-  public startStreaming() {
-    this.startLiveSimulator();
+  private createFallbackState(symbol: string): void {
+    const basePrice = symbol.startsWith('BTC') ? 95000 : symbol.startsWith('ETH') ? 2800 : symbol.startsWith('SOL') ? 200 : symbol.startsWith('BNB') ? 650 : 2.4;
+    this.symbols.set(symbol, {
+      symbol,
+      category: 'crypto',
+      lastPrice: basePrice,
+      high24h: basePrice * 1.03,
+      low24h: basePrice * 0.97,
+      volume24h: 0,
+      change24h: 0,
+      cvd: 0,
+      candles: [],
+      currentCandle: null,
+      book: this.generateRealisticBook(symbol, basePrice, 'crypto'),
+      trades: []
+    });
+  }
+
+  private normalizeCandles(ohlcv: any[], symbol: string): CandleData[] {
+    let runningCvd = 0;
+    return ohlcv.map((c, i) => {
+      const [timeMs, open, high, low, close, volume] = c;
+      const time = Math.floor(timeMs / 1000);
+      const buyVolume = volume * (close >= open ? 0.55 : 0.45);
+      const sellVolume = volume - buyVolume;
+      const delta = buyVolume - sellVolume;
+      runningCvd += delta;
+      const dec = close < 5 ? 4 : (close < 100 ? 3 : 2);
+      return {
+        time,
+        open: Number(open.toFixed(dec)),
+        high: Number(high.toFixed(dec)),
+        low: Number(low.toFixed(dec)),
+        close: Number(close.toFixed(dec)),
+        volume: Number(volume.toFixed(2)),
+        buyVolume: Number(buyVolume.toFixed(2)),
+        sellVolume: Number(sellVolume.toFixed(2)),
+        delta: Number(delta.toFixed(2)),
+        cvd: Number(runningCvd.toFixed(2))
+      };
+    });
+  }
+
+  private calculateCVD(candles: CandleData[]): number {
+    return candles.reduce((sum, c) => sum + c.delta, 0);
+  }
+
+  private async fetchOrderBook(symbol: string, currentPrice: number): Promise<OrderBookData> {
+    try {
+      const ob = await this.exchange.fetchOrderBook(symbol, 20);
+      const bids = ob.bids.slice(0, 20).map((b: any) => ({ price: b[0], amount: b[1], total: 0 }));
+      const asks = ob.asks.slice(0, 20).map((a: any) => ({ price: a[0], amount: a[1], total: 0 }));
+      let bidTotal = 0, askTotal = 0;
+      bids.forEach((b: any) => { bidTotal += b.amount; b.total = bidTotal; });
+      asks.forEach((a: any) => { askTotal += a.amount; a.total = askTotal; });
+      return {
+        symbol,
+        bids, asks,
+        timestamp: Date.now(),
+        spread: Number((asks[0]?.price - bids[0]?.price).toFixed(2)),
+        bidDepthTotal: bidTotal,
+        askDepthTotal: askTotal,
+        imbalanceRatio: +(bidTotal / Math.max(askTotal, 1)).toFixed(2)
+      };
+    } catch {
+      return this.generateRealisticBook(symbol, currentPrice, 'crypto');
+    }
+  }
+
+  public startStreaming(): void {
+    if (this.fetchInterval) return;
+    
+    this.tickerInterval = setInterval(() => this.updateTickers(), 2000);
+    this.fetchInterval = setInterval(() => this.updateCandlesAndBooks(), 60000);
+    this.updateTickers();
+  }
+
+  private async updateTickers(): Promise<void> {
+    for (const [symbol, state] of this.symbols.entries()) {
+      try {
+        const ccxtSymbol = toBybitLinear(symbol);
+        const ticker = await this.exchange.fetchTicker(ccxtSymbol);
+        if (!ticker.last) continue;
+
+        const prevPrice = state.lastPrice;
+        state.lastPrice = ticker.last;
+        state.high24h = ticker.high || state.high24h;
+        state.low24h = ticker.low || state.low24h;
+        state.volume24h = ticker.baseVolume || state.volume24h;
+        state.change24h = ticker.percentage || state.change24h;
+
+        const trade: Trade = {
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          symbol,
+          price: ticker.last,
+          amount: 0,
+          side: ticker.last >= prevPrice ? 'buy' : 'sell',
+          timestamp: Date.now(),
+          cost: 0,
+          isWhale: false
+        };
+
+        state.trades.unshift(trade);
+        if (state.trades.length > 80) state.trades.pop();
+
+        if (this.onBroadcast) {
+          this.onBroadcast('trade', trade);
+        }
+      } catch (err: any) {
+        console.debug(`[MarketData] Ticker update failed for ${symbol}:`, err.message);
+      }
+    }
+  }
+
+  private async updateCandlesAndBooks(): Promise<void> {
+    for (const [symbol, state] of this.symbols.entries()) {
+      try {
+        const ccxtSymbol = toBybitLinear(symbol);
+        const [ohlcv, book] = await Promise.all([
+          this.exchange.fetchOHLCV(ccxtSymbol, '1m', undefined, 200),
+          this.fetchOrderBook(ccxtSymbol, state.lastPrice)
+        ]);
+
+        const newCandles = this.normalizeCandles(ohlcv, symbol);
+        state.candles = newCandles;
+        state.cvd = this.calculateCVD(newCandles);
+        state.book = book;
+
+        const currentCandle = state.candles[state.candles.length - 1];
+        if (currentCandle && this.onBroadcast) {
+          this.onBroadcast('candle_update', { symbol, candle: currentCandle });
+          this.onBroadcast('book', book);
+        }
+      } catch (err: any) {
+        console.debug(`[MarketData] Candles update failed for ${symbol}:`, err.message);
+      }
+    }
   }
 
   private generateRealisticBook(symbol: string, currentPrice: number, category: 'crypto' | 'forex'): OrderBookData {
     const decimals = currentPrice < 5 ? 4 : (currentPrice < 100 ? 3 : 2);
-    // Passo institucional Bybit Linear Perpétuos (~1.6 bps de spread natural)
     const step = Math.max(0.0001, Number((currentPrice * 0.00008).toFixed(decimals)));
     const bids = [];
     const asks = [];
-    let bidTotal = 0;
-    let askTotal = 0;
+    let bidTotal = 0, askTotal = 0;
 
     for (let i = 1; i <= 20; i++) {
       const bidPrice = Number((currentPrice - i * step).toFixed(decimals));
       const askPrice = Number((currentPrice + i * step).toFixed(decimals));
       const bidAmount = Number(((Math.random() * 3 + 0.2) * (i > 15 ? 3 : 1)).toFixed(2));
       const askAmount = Number(((Math.random() * 3 + 0.2) * (i > 15 ? 3 : 1)).toFixed(2));
-
-      bidTotal += bidAmount;
-      askTotal += askAmount;
-
+      bidTotal += bidAmount; askTotal += askAmount;
       bids.push({ price: bidPrice, amount: bidAmount, total: bidTotal });
       asks.push({ price: askPrice, amount: askAmount, total: askTotal });
     }
-
-    return {
-      symbol,
-      bids,
-      asks,
-      timestamp: Date.now(),
-      spread: Number((asks[0].price - bids[0].price).toFixed(decimals)),
-      bidDepthTotal: bidTotal,
-      askDepthTotal: askTotal,
-      imbalanceRatio: +(bidTotal / Math.max(askTotal, 1)).toFixed(2)
-    };
-  }
-
-  private startLiveSimulator() {
-    // Generate streaming ticks, orderbook updates and trades every 100-300ms
-    const interval = setInterval(() => {
-      for (const [symbol, state] of this.symbols.entries()) {
-        const isWhale = Math.random() < 0.04;
-        const side: 'buy' | 'sell' = Math.random() > 0.49 ? 'buy' : 'sell';
-        
-        // Oscilação proporcional realista (0.01% a 0.03% por tick)
-        const pctDelta = (side === 'buy' ? 1 : -1) * (0.0001 + Math.random() * 0.00025);
-        const priceTick = state.lastPrice * pctDelta;
-        const decimals = state.lastPrice < 5 ? 4 : (state.lastPrice < 100 ? 3 : 2);
-
-        const newPrice = Number((state.lastPrice + priceTick).toFixed(decimals));
-        state.lastPrice = newPrice;
-
-        const baseAmount = symbol.startsWith('BTC') 
-          ? 0.15 
-          : (symbol.startsWith('ETH') 
-            ? 2.0 
-            : (symbol.startsWith('SOL') 
-              ? 15 
-              : (symbol.startsWith('BNB') ? 8 : 2000)));
-        const amount = Number((isWhale ? baseAmount * (12 + Math.random() * 10) : baseAmount * (0.2 + Math.random() * 1.5)).toFixed(3));
-        const cost = Number((amount * newPrice).toFixed(2));
-
-        const trade: Trade = {
-          id: `${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          symbol,
-          price: newPrice,
-          amount,
-          side,
-          timestamp: Date.now(),
-          cost,
-          isWhale: isWhale || cost > 50000
-        };
-
-        state.trades.unshift(trade);
-        if (state.trades.length > 80) state.trades.pop();
-
-        // Update OrderBook
-        state.book = this.generateRealisticBook(symbol, newPrice, state.category);
-
-        // Update Candle
-        const currentSec = Math.floor(Date.now() / 1000);
-        const candleIntervalSec = 60;
-        const candleTime = Math.floor(currentSec / candleIntervalSec) * candleIntervalSec;
-
-        let activeCandle = state.candles[state.candles.length - 1];
-        if (!activeCandle || activeCandle.time !== candleTime) {
-          activeCandle = {
-            time: candleTime,
-            open: newPrice,
-            high: newPrice,
-            low: newPrice,
-            close: newPrice,
-            volume: amount,
-            buyVolume: side === 'buy' ? amount : 0,
-            sellVolume: side === 'sell' ? amount : 0,
-            delta: side === 'buy' ? amount : -amount,
-            cvd: state.cvd + (side === 'buy' ? amount : -amount)
-          };
-          state.candles.push(activeCandle);
-          if (state.candles.length > 200) state.candles.shift();
-        } else {
-          activeCandle.high = Math.max(activeCandle.high, newPrice);
-          activeCandle.low = Math.min(activeCandle.low, newPrice);
-          activeCandle.close = newPrice;
-          activeCandle.volume = +(activeCandle.volume + amount).toFixed(2);
-          if (side === 'buy') activeCandle.buyVolume = +(activeCandle.buyVolume + amount).toFixed(2);
-          else activeCandle.sellVolume = +(activeCandle.sellVolume + amount).toFixed(2);
-          activeCandle.delta = +(activeCandle.buyVolume - activeCandle.sellVolume).toFixed(2);
-          activeCandle.cvd = +(state.cvd + activeCandle.delta).toFixed(2);
-        }
-
-        state.cvd += side === 'buy' ? amount : -amount;
-
-        // Process through FlowEngine
-        this.flowEngine.processTrade(trade, state.book);
-        if (Math.random() < 0.1) {
-          this.flowEngine.checkBookImbalance(state.book);
-        }
-
-        // Broadcast to clients
-        if (this.onBroadcast) {
-          this.onBroadcast('trade', trade);
-          this.onBroadcast('book', state.book);
-          this.onBroadcast('candle_update', { symbol, candle: activeCandle });
-        }
-      }
-    }, 200);
-
-    this.simulationIntervals.push(interval);
+    return { symbol, bids, asks, timestamp: Date.now(), spread: Number((asks[0].price - bids[0].price).toFixed(decimals)), bidDepthTotal: bidTotal, askDepthTotal: askTotal, imbalanceRatio: +(bidTotal / Math.max(askTotal, 1)).toFixed(2) };
   }
 
   public getSummaries(): AssetSummary[] {
