@@ -231,6 +231,8 @@ export async function initPaperTables(): Promise<void> {
   `);
 
   await query(`ALTER TABLE paper_mirror_orders ADD COLUMN IF NOT EXISTS updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000`);
+  await query(`ALTER TABLE paper_mirror_orders ADD COLUMN IF NOT EXISTS fee NUMERIC NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE paper_mirror_orders ADD COLUMN IF NOT EXISTS net_pnl NUMERIC NOT NULL DEFAULT 0`);
 
   await query(`CREATE INDEX IF NOT EXISTS idx_paper_master_orders_symbol ON paper_master_orders(symbol)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_paper_master_orders_status ON paper_master_orders(status)`);
@@ -469,7 +471,7 @@ export async function upsertMirrorOrder(trade: SimulatedTradeWithTrailing & { qt
        qty, fee, net_pnl, pnl_usd, pnl_pct, r_multiple, power_multiplier, temperature, session,
        day_of_week, market_regime, status, entry_time, close_time, signal_reason,
        trailing_active, trailing_trigger_price, trailing_stop_price
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
      ON CONFLICT (id) DO UPDATE SET
        current_price = EXCLUDED.current_price,
        pnl_usd = EXCLUDED.pnl_usd,
@@ -480,6 +482,8 @@ export async function upsertMirrorOrder(trade: SimulatedTradeWithTrailing & { qt
        close_time = EXCLUDED.close_time,
        trailing_active = EXCLUDED.trailing_active,
        trailing_stop_price = EXCLUDED.trailing_stop_price,
+       fee = EXCLUDED.fee,
+       net_pnl = EXCLUDED.net_pnl,
        updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
    `,
     [

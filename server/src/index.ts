@@ -277,11 +277,21 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
 const mirrorTrading = new MirrorTradingEngine(async (account, tradeEvent) => {
   io.emit('mirror_account_update', account);
   await persistMirrorBalance(account);
+
+  // Callback protegido para nunca derrubar o processo em caso de falha de I/O
+  const safeUpsertMirror = async (trade: any) => {
+    try {
+      await upsertMirrorOrder(trade);
+    } catch (err) {
+      console.error('[MirrorTradingEngine] Falha não-fatal ao persistir ordem espelho no PostgreSQL:', err);
+    }
+  };
+
   if (tradeEvent) {
-    await upsertMirrorOrder(tradeEvent as any);
+    await safeUpsertMirror(tradeEvent);
   } else {
     for (const openTrade of account.openPositions) {
-      await upsertMirrorOrder(openTrade as any);
+      await safeUpsertMirror(openTrade);
     }
   }
 });
