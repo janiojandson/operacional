@@ -481,11 +481,10 @@ export async function upsertMirrorOrder(trade: SimulatedTradeWithTrailing & { qt
        status = EXCLUDED.status,
        close_time = EXCLUDED.close_time,
        trailing_active = EXCLUDED.trailing_active,
-       trailing_stop_price = EXCLUDED.trailing_stop_price,
-       fee = EXCLUDED.fee,
-       net_pnl = EXCLUDED.net_pnl,
-       updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
-   `,
+        trailing_stop_price = EXCLUDED.trailing_stop_price,
+        fee = EXCLUDED.fee,
+        updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
+    `,
     [
       trade.id,
       trade.symbol,

@@ -9,6 +9,7 @@ const { Pool } = pkg;
 // ─── Pool de Conexão PostgreSQL ───────────────────────────────────────────
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  connectionTimeoutMillis: 10000,
   ssl: process.env.NODE_ENV === 'production' && process.env.DATABASE_URL?.includes('railway.internal')
     ? false  // Conexão interna Railway não precisa de SSL
     : process.env.DATABASE_URL?.includes('railway.internal')

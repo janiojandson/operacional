@@ -155,10 +155,20 @@ const clientCopyTrader = new ClientCopyTraderEngine((log) => {
   }
 });
 
+let lastMasterTickEmit = 0;
 const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
+  if (!tradeEvent) {
+    const nowTs = Date.now();
+    if (nowTs - lastMasterTickEmit >= 1000) {
+      lastMasterTickEmit = nowTs;
+      io.emit('paper_account_update', account);
+    }
+    return;
+  }
+
   io.emit('paper_account_update', account);
   await persistMasterBalance(account);
-  
+
   // Callback protegido para nunca derrubar o processo em caso de falha de I/O
   const safeUpsert = async (trade: any) => {
     try {
@@ -168,13 +178,7 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
     }
   };
 
-  if (tradeEvent) {
-    await safeUpsert(tradeEvent);
-  } else {
-    for (const openTrade of account.openPositions) {
-      await safeUpsert(openTrade);
-    }
-  }
+  await safeUpsert(tradeEvent);
   if (tradeEvent) {
     io.emit('simulated_trade_event', tradeEvent);
     const pairConfig = AutoPairSelectorEngine.getPairConfig(tradeEvent.symbol);
@@ -288,7 +292,17 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
   });
 
 // ─── Mirror Trading Engine (Conta Espelho) ──────────────────────────────────
+let lastMirrorTickEmit = 0;
 const mirrorTrading = new MirrorTradingEngine(async (account, tradeEvent) => {
+  if (!tradeEvent) {
+    const nowTs = Date.now();
+    if (nowTs - lastMirrorTickEmit >= 1000) {
+      lastMirrorTickEmit = nowTs;
+      io.emit('mirror_account_update', account);
+    }
+    return;
+  }
+
   io.emit('mirror_account_update', account);
   await persistMirrorBalance(account);
 
@@ -301,13 +315,7 @@ const mirrorTrading = new MirrorTradingEngine(async (account, tradeEvent) => {
     }
   };
 
-  if (tradeEvent) {
-    await safeUpsertMirror(tradeEvent);
-  } else {
-    for (const openTrade of account.openPositions) {
-      await safeUpsertMirror(openTrade);
-    }
-  }
+  await safeUpsertMirror(tradeEvent);
 });
 
 const flowEngine = new FlowEngine((signal: FlowSignal) => {
