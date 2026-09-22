@@ -8,9 +8,6 @@ export interface SimulatedTradeWithTrailing extends SimulatedTrade {
   trailingActive?: boolean;
   trailingTriggerPrice?: number;
   trailingStopPrice?: number;
-  qty?: number;
-  fee?: number;
-  netPnl?: number;
 }
 
 // ─── Validador de Margem e Lote Mínimo (Bybit USDT Perpétuos) ────────────────

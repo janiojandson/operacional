@@ -144,11 +144,21 @@ const clientCopyTrader = new ClientCopyTraderEngine((log) => {
 const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
   io.emit('paper_account_update', account);
   await persistMasterBalance(account);
+  
+  // Callback protegido para nunca derrubar o processo em caso de falha de I/O
+  const safeUpsert = async (trade: any) => {
+    try {
+      await upsertMasterOrder(trade);
+    } catch (err) {
+      console.error('[PaperTradingEngine] Falha não-fatal ao persistir ordem no PostgreSQL:', err);
+    }
+  };
+
   if (tradeEvent) {
-    await upsertMasterOrder(tradeEvent);
+    await safeUpsert(tradeEvent);
   } else {
     for (const openTrade of account.openPositions) {
-      await upsertMasterOrder(openTrade);
+      await safeUpsert(openTrade);
     }
   }
   if (tradeEvent) {

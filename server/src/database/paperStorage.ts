@@ -180,6 +180,11 @@ export async function initPaperTables(): Promise<void> {
     )
   `);
 
+  // ─── Non-destructive migrations for existing Railway tables ────────────────
+  await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000`);
+  await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS fee NUMERIC NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS net_pnl NUMERIC NOT NULL DEFAULT 0`);
+
   // ─── Mirror Account Tables ────────────────────────────────────────────────
   await query(`
     CREATE TABLE IF NOT EXISTS paper_mirror_account (
@@ -224,6 +229,8 @@ export async function initPaperTables(): Promise<void> {
       trailing_stop_price NUMERIC
     )
   `);
+
+  await query(`ALTER TABLE paper_mirror_orders ADD COLUMN IF NOT EXISTS updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000`);
 
   await query(`CREATE INDEX IF NOT EXISTS idx_paper_master_orders_symbol ON paper_master_orders(symbol)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_paper_master_orders_status ON paper_master_orders(status)`);
@@ -345,8 +352,9 @@ export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Prom
        id, symbol, type, entry_price, current_price, take_profit, stop_loss,
        pnl_usd, pnl_pct, r_multiple, power_multiplier, temperature, session,
        day_of_week, market_regime, status, entry_time, close_time, signal_reason,
-       trailing_active, trailing_trigger_price, trailing_stop_price
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+       trailing_active, trailing_trigger_price, trailing_stop_price,
+       fee, net_pnl, updated_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
      ON CONFLICT (id) DO UPDATE SET
        current_price = EXCLUDED.current_price,
        pnl_usd = EXCLUDED.pnl_usd,
@@ -356,6 +364,8 @@ export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Prom
        close_time = EXCLUDED.close_time,
        trailing_active = EXCLUDED.trailing_active,
        trailing_stop_price = EXCLUDED.trailing_stop_price,
+       fee = EXCLUDED.fee,
+       net_pnl = EXCLUDED.net_pnl,
        updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
    `,
     [
@@ -380,7 +390,10 @@ export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Prom
       trade.signalReason,
       trade.trailingActive ? 1 : 0,
       trade.trailingTriggerPrice || null,
-      trade.trailingStopPrice || null
+      trade.trailingStopPrice || null,
+      trade.fee || 0,
+      trade.netPnl || trade.pnlUsd || 0,
+      Date.now()
     ]
   );
 }

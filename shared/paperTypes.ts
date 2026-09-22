@@ -28,6 +28,9 @@ export interface SimulatedTrade {
   entryTime: number;
   closeTime?: number;
   signalReason: string;
+  qty?: number;
+  fee?: number;
+  netPnl?: number;
 }
 
 export interface PaperAccount {
