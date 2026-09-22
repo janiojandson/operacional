@@ -32,8 +32,16 @@ export class QuantStrategyEngine {
   }
 
   public static generateHealthReport(account: PaperAccount): QuantStrategyHealthReport {
-    const trades = [...account.history].reverse(); // Ordenar cronologicamente do mais antigo para o mais recente
-    const initialBal = this.INITIAL_BALANCE;
+    const trades = [...account.history]
+      .filter(trade => trade.status === 'CLOSED_TP' || trade.status === 'CLOSED_SL')
+      .reverse()
+      .map(trade => ({
+      ...trade,
+      pnlUsd: trade.netPnl ?? trade.pnlUsd
+    })); // Todas as métricas usam PnL líquido quando ele estiver disponível.
+    const initialBal = Number.isFinite(account.initialBalance) && (account.initialBalance ?? 0) > 0
+      ? Number(account.initialBalance)
+      : this.INITIAL_BALANCE;
 
     // 1. Bloco Financeiro e Expectativa Matemática ($R$)
     const financial = this.calculateFinancialMetrics(trades, initialBal);
@@ -229,7 +237,8 @@ export class QuantStrategyEngine {
 
     for (const t of trades) {
       const pnl = t.pnlUsd;
-      const r = t.rMultiple || (pnl >= 0 ? 2.5 : -1.0);
+      const candidateR = t.realizedR ?? t.rMultiple;
+      const r = Number.isFinite(candidateR) ? Number(candidateR) : 0;
       totalR += r;
 
       if (pnl > 0) {
@@ -432,7 +441,8 @@ export class QuantStrategyEngine {
 
     const rDistribution = ranges.map(rng => {
       const matchCount = trades.filter(t => {
-        const r = t.rMultiple || (t.pnlUsd >= 0 ? 2.5 : -1.0);
+        const candidateR = t.realizedR ?? t.rMultiple;
+        const r = Number.isFinite(candidateR) ? Number(candidateR) : 0;
         return r >= rng.min && r < rng.max;
       }).length;
 
@@ -467,7 +477,10 @@ export class QuantStrategyEngine {
         const grossL = matching.filter(t => t.pnlUsd <= 0).reduce((s, t) => s + Math.abs(t.pnlUsd), 0);
         const pf = grossL > 0 ? Number((grossW / grossL).toFixed(2)) : (grossW > 0 ? 99.9 : 0);
         const pnl = Number((grossW - grossL).toFixed(2));
-        const totalR = matching.reduce((s, t) => s + (t.rMultiple || (t.pnlUsd >= 0 ? 2.5 : -1.0)), 0);
+        const totalR = matching.reduce((s, t) => {
+          const candidateR = t.realizedR ?? t.rMultiple;
+          return s + (Number.isFinite(candidateR) ? Number(candidateR) : 0);
+        }, 0);
 
         return {
           key,

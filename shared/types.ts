@@ -24,6 +24,7 @@ export interface OrderBookData {
   bidDepthTotal: number;
   askDepthTotal: number;
   imbalanceRatio: number; // > 1 indicates bullish book, < 1 bearish
+  source?: 'BYBIT' | 'LOCAL_FALLBACK';
 }
 
 export interface CandleData {
@@ -180,4 +181,3 @@ export type MarketRegime =
   | 'CHOPPY_RANGING'
   | 'LOW_LIQUIDITY'
   | 'EXPANSION_FLOW';
-

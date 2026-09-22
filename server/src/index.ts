@@ -21,15 +21,16 @@ import { ClientProtectionEngine } from './engine/clientProtectionEngine.js';
 import { FlowSignal, OrderBookData, CandleData } from '../../shared/types.js';
 import { ClientAccountConfig } from '../../shared/clientTypes.js';
 import { GoogleSheetsService } from './services/googleSheetsService.js';
-import { runShadowAudit, recordShadowOutcome, clearShadowAudits } from './engine/shadowAuditor.js';
+import { runShadowAudit, recordShadowOutcome, clearShadowAudits, getShadowOpportunities, recordShadowOpportunity } from './engine/shadowAuditor.js';
 import { RISK_CONFIG } from './config/riskConfig.js';
+import { evaluateCryptoOpportunity } from './engine/cryptoStrategyDecision.js';
 // SaaS: Autenticação e Rotas
 import { authRouter } from './auth/authRoutes.js';
-import { adminRouter } from './routes/adminRoutes.js';
+import { adminRouter, bindMasterControlHandler } from './routes/adminRoutes.js';
 import { clientRouter } from './routes/clientRoutes.js';
 import { requireAuth, requireAdmin, verifyToken } from './auth/authMiddleware.js';
-import { initDatabase, UserDB, query } from './database/db.js';
-import { initPaperTables, hydrateMasterAccount, persistMasterBalance, upsertMasterOrder, hydrateMirrorAccount, persistMirrorBalance, upsertMirrorOrder, resetTradingAccounts } from './database/paperStorage.js';
+import { initDatabase, UserDB, ClientConfigDB, query } from './database/db.js';
+import { initPaperTables, hydrateMasterAccount, persistMasterBalance, upsertMasterOrder, hydrateMirrorAccount, persistMirrorBalance, upsertMirrorOrder, resetTradingAccounts, getMinLot } from './database/paperStorage.js';
 
 dotenv.config();
 
@@ -160,6 +161,7 @@ const clientCopyTrader = new ClientCopyTraderEngine((log) => {
 });
 
 let lastMasterTickEmit = 0;
+let masterShadowFilterActive = false;
 const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
   if (!tradeEvent) {
     const nowTs = Date.now();
@@ -201,29 +203,32 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
       let rMultiple = 0;
 
       if (tradeEvent.status === 'CLOSED_TP') {
-        statusStr = 'MASTER_WIN (+2.5R)';
+        const isTrailingExit = tradeEvent.closeReason === 'TRAILING';
+        statusStr = isTrailingExit ? 'MASTER_TRAILING' : 'MASTER_WIN (+2.5R)';
         outcomeLabel = 'GREEN 🟢';
-        pnlUsd = tradeEvent.pnlUsd || 0;
-        pnlPct = tradeEvent.pnlPct || 2.50;
-        rMultiple = tradeEvent.rMultiple || 2.5;
-        details = `Take Profit atingido! P&L: +$${pnlUsd.toFixed(2)} (+${pnlPct.toFixed(2)}%) | Retorno: +${rMultiple.toFixed(1)}R`;
+        pnlUsd = Number(tradeEvent.pnlUsd ?? 0);
+        pnlPct = Number(tradeEvent.pnlPct ?? 0);
+        rMultiple = Number(tradeEvent.rMultiple ?? 0);
+        details = isTrailingExit
+          ? `Trailing Stop executado. P&L: +$${pnlUsd.toFixed(2)} (+${pnlPct.toFixed(2)}%) | R realizado: ${rMultiple.toFixed(1)}R`
+          : `Take Profit fixo atingido. P&L: +$${pnlUsd.toFixed(2)} (+${pnlPct.toFixed(2)}%) | Retorno: +${rMultiple.toFixed(1)}R`;
       } else if (tradeEvent.status === 'CLOSED_SL') {
         statusStr = 'MASTER_LOSS (-1.0R)';
         outcomeLabel = 'RED 🔴';
-        pnlUsd = tradeEvent.pnlUsd || 0;
-        pnlPct = tradeEvent.pnlPct || -1.00;
-        rMultiple = tradeEvent.rMultiple || -1.0;
+        pnlUsd = Number(tradeEvent.pnlUsd ?? 0);
+        pnlPct = Number(tradeEvent.pnlPct ?? 0);
+        rMultiple = Number(tradeEvent.rMultiple ?? 0);
         details = `Stop Loss institucional. P&L: -$${Math.abs(pnlUsd).toFixed(2)} (${pnlPct.toFixed(2)}%) | Retorno: ${rMultiple.toFixed(1)}R`;
       }
 
-      const approxQty = Number(((tradeEvent.powerMultiplier * 3000) / (tradeEvent.entryPrice || 1)).toFixed(4));
+      const qty = Number(tradeEvent.qty ?? 0);
 
       GoogleSheetsService.logTradeExecution({
         clientName: '👑 Master Quant (Estratégia)',
         symbol: tradeEvent.symbol,
         side: tradeEvent.type,
         entryPrice: tradeEvent.entryPrice,
-        qty: approxQty,
+        qty,
         stopLoss: tradeEvent.stopLoss,
         takeProfit: tradeEvent.takeProfit,
         status: statusStr,
@@ -234,6 +239,17 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
         orderType: (tradeEvent as any).orderType === 'LIMIT' ? 'LIMIT' : 'MARKET',
         trailingStopAtivo: (tradeEvent as any).trailingActive ? 'SIM' : 'NÃO',
         feePaid: Number((tradeEvent as any).fee ?? 0),
+        tradeId: tradeEvent.id,
+        eventKind: tradeEvent.status === 'OPEN' ? 'OPEN' : 'CLOSE',
+        masterBalanceAtEntry: Number((tradeEvent as any).masterBalanceAtEntry ?? account.balance),
+        masterNotionalUsd: Number((tradeEvent as any).notionalUsd ?? (tradeEvent.entryPrice * qty)),
+        masterExposureRatio: Number((tradeEvent as any).masterExposureRatio ?? 0),
+        masterMarginUsd: Number((tradeEvent as any).marginUsd ?? 0),
+        powerMultiplier: Number(tradeEvent.powerMultiplier ?? 1.5),
+        leverage: 10,
+        exchangeMinQty: getMinLot(tradeEvent.symbol),
+        qtyStep: getMinLot(tradeEvent.symbol),
+        shadowFilterActive: masterShadowFilterActive,
         timestamp: new Date().toISOString(),
         errorMsg: details
       });
@@ -267,9 +283,9 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
         const outcome = recordShadowOutcome(
           tradeEvent.symbol,
           tradeEvent.status,
-          tradeEvent.pnlUsd || 0,
-          tradeEvent.rMultiple || (tradeEvent.status === 'CLOSED_TP' ? 2.5 : -1.0),
-          tradeEvent.pnlPct || (tradeEvent.status === 'CLOSED_TP' ? 2.50 : -1.00)
+          Number(tradeEvent.pnlUsd ?? 0),
+          Number(tradeEvent.realizedR ?? tradeEvent.rMultiple ?? 0),
+          Number(tradeEvent.pnlPct ?? Number.NaN)
         );
         if (outcome) {
           io.emit('shadow_audit_outcome', outcome);
@@ -325,13 +341,73 @@ const mirrorTrading = new MirrorTradingEngine(async (account, tradeEvent) => {
   await safeUpsertMirror(tradeEvent);
 });
 
+bindMasterControlHandler({
+  setTrailingStopEnabled: (enabled) => {
+    paperTrading.setTrailingStopEnabled(enabled);
+    mirrorTrading.setTrailingStopEnabled(enabled);
+  },
+  setShadowFilterActive: (active) => { masterShadowFilterActive = active; }
+});
+
 const flowEngine = new FlowEngine((signal: FlowSignal) => {
   console.log('[Flow] sinal emitido:', signal.type, signal.symbol);
   io.emit('flow_signal', signal);
   const asset = marketManager.getSymbolState(signal.symbol);
-  if (asset) {
-    paperTrading.handleSignal(signal, asset.lastPrice);
-  }
+  if (!asset) return;
+  void (async () => {
+    const side = signal.type === 'ABSORPTION_BUY'
+      ? 'SELL'
+      : signal.type === 'ABSORPTION_SELL'
+        ? 'BUY'
+        : signal.message.includes('Vendedores com')
+          ? 'SELL'
+          : signal.message.includes('Compradores com')
+            ? 'BUY'
+            : null;
+    if (!side) return;
+
+    const pairConfig = AutoPairSelectorEngine.getPairConfig(signal.symbol);
+    const book = asset.book;
+    const decision = evaluateCryptoOpportunity({
+      symbol: signal.symbol,
+      price: asset.lastPrice,
+      signalType: signal.type,
+      signalSide: side,
+      bookTimestamp: book?.timestamp ?? 0,
+      now: Date.now(),
+      spreadPct: book && asset.lastPrice > 0 ? book.spread / asset.lastPrice : Number.NaN,
+      bidAskRatio: book?.imbalanceRatio ?? Number.NaN,
+      flowConfirmed: signal.type === 'ABSORPTION_BUY' || signal.type === 'ABSORPTION_SELL',
+      regime: pairConfig?.regime ?? 'TREND',
+      hasOpenPosition: paperTrading.getAccountState().openPositions.some(position => position.symbol === signal.symbol),
+      cooldownActive: false,
+      orderExecutable: true,
+      source: book?.source ?? 'LOCAL_FALLBACK'
+    });
+    const shadowOpportunity = recordShadowOpportunity({
+      symbol: signal.symbol,
+      side,
+      mode: masterShadowFilterActive ? 'FILTER' : 'AUDIT',
+      approved: decision.approved,
+      reasons: decision.reasons,
+      source: book?.source ?? 'LOCAL_FALLBACK'
+    });
+    void query(
+      `INSERT INTO shadow_opportunities (id, symbol, side, mode, approved, reasons, source, created_at) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8) ON CONFLICT (id) DO NOTHING`,
+      [shadowOpportunity.id, shadowOpportunity.symbol, shadowOpportunity.side, shadowOpportunity.mode, shadowOpportunity.approved ? 1 : 0, JSON.stringify(shadowOpportunity.reasons), shadowOpportunity.source, Date.parse(shadowOpportunity.timestamp)]
+    ).catch((error: any) => console.error('[Shadow] Falha não-fatal ao persistir oportunidade:', error.message));
+    GoogleSheetsService.logShadowOpportunity(shadowOpportunity);
+    io.emit('shadow_opportunity', shadowOpportunity);
+    io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
+    if (!decision.approved) return;
+
+    if (masterShadowFilterActive) {
+      const audit = await runShadowAudit(null, signal.symbol, side, 1.0, paperTrading.getAccountState().openPositions, asset.book);
+      const decision = String(audit?.newMode || '').toUpperCase();
+      if (decision.indexOf('BLOQUEADO') !== -1) return;
+    }
+    paperTrading.handleSignal(signal, asset.lastPrice, decision);
+  })();
 });
 
 const marketManager = new MarketDataManager(flowEngine, (event, data) => {
@@ -678,6 +754,18 @@ app.get('/api/audit-logs', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/shadow-opportunities', requireAuth, async (req, res) => {
+  try {
+    const rows = await query<{ id: string; symbol: string; side: 'BUY' | 'SELL'; mode: 'AUDIT' | 'FILTER'; approved: number; reasons: string[]; source: string; created_at: number }>(
+      'SELECT id, symbol, side, mode, approved, reasons, source, created_at FROM shadow_opportunities ORDER BY created_at DESC LIMIT 500'
+    );
+    const opportunities = rows.map(row => ({ ...row, approved: Number(row.approved) === 1, timestamp: new Date(Number(row.created_at)).toISOString() }));
+    res.json({ opportunities: opportunities.length > 0 ? opportunities : getShadowOpportunities() });
+  } catch (error: any) {
+    res.json({ opportunities: getShadowOpportunities(), persistence: 'UNAVAILABLE' });
+  }
+});
+
 app.post('/api/ai-advisor/audit', requireAuth, async (req, res) => {
   const provider = req.body?.provider || process.env.AI_PROVIDER || 'HYBRID_AUTO';
   const account = paperTrading.getAccountState();
@@ -747,12 +835,12 @@ app.get('/api/assets/:symbol/klines', requireAuth, async (req, res) => {
 
   const direct = await marketManager.getKlines(symbol, tf, 400);
   if (direct && direct.length > 0) {
-    return res.json({ symbol, tf, candles: direct });
+    return res.json({ symbol, tf, candles: direct, source: 'BYBIT' });
   }
 
   const baseCandles = state.candles || [];
   if (tf === '1m' || baseCandles.length === 0) {
-    return res.json({ symbol, tf, candles: baseCandles });
+    return res.json({ symbol, tf, candles: baseCandles, source: 'LOCAL_FALLBACK' });
   }
 
   let minutes = 1;
@@ -795,7 +883,7 @@ app.get('/api/assets/:symbol/klines', requireAuth, async (req, res) => {
   }
 
   const aggregatedCandles = Array.from(aggregatedMap.values()).sort((a, b) => a.time - b.time);
-  res.json({ symbol, tf, candles: aggregatedCandles });
+  res.json({ symbol, tf, candles: aggregatedCandles, source: 'LOCAL_FALLBACK' });
 });
 
 app.get('/api/signals', requireAuth, (req, res) => {
@@ -846,6 +934,13 @@ io.on('connection', (socket) => {
 initDatabase()
   .then(async () => {
     await initPaperTables();
+    const masterControls = await ClientConfigDB.findByClientId('master-client');
+    if (masterControls) {
+      const trailingEnabled = Number(masterControls.trailing_stop_enabled ?? 1) === 1;
+      masterShadowFilterActive = Number(masterControls.shadow_filter_active ?? 0) === 1;
+      paperTrading.setTrailingStopEnabled(trailingEnabled);
+      mirrorTrading.setTrailingStopEnabled(trailingEnabled);
+    }
     const masterAccount = await hydrateMasterAccount();
     paperTrading.hydrateFromStorage({
       balance: masterAccount.balance,

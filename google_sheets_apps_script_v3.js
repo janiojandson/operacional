@@ -103,11 +103,11 @@ function doPost(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    if (data.type === 'SHADOW_AUDIT') {
+    if (data.type === 'SHADOW_AUDIT' || data.type === 'SHADOW_OPPORTUNITY') {
       logShadowAudit(ss, data);
     } else {
       logTrade(ss, data);
-      logComparativoAuto(ss, data);
+      logMasterMirrorComparison(ss, data);
     }
 
     updateDashboard(ss);
@@ -150,8 +150,7 @@ function initSheetTrades(ss, forceRefresh) {
   var sheet = ss.getSheetByName(name);
   if (!sheet) sheet = ss.insertSheet(name);
 
-  if (sheet.getLastRow() === 0 || forceRefresh) {
-    var headers = [
+  var headers = [
       'Data / Hora',
       'Conta / Origem',
       'Par Bybit',
@@ -172,14 +171,27 @@ function initSheetTrades(ss, forceRefresh) {
       'Retorno Bruto (%)',
       'Retorno Líquido (%)',
       'R-Múltiplo',
-      'Detalhes / Auditoria'
+      'Detalhes / Auditoria',
+      'Trade ID',
+      'Evento',
+      'Notional Master ($)',
+      'ExposiÃ§Ã£o Master (%)',
+      'Margem Master ($)',
+      'PotÃªncia',
+      'Alavancagem',
+      'Lote MÃ­nimo',
+      'Shadow Filter'
     ];
+  if (sheet.getLastRow() === 0 || forceRefresh) {
     if (sheet.getLastRow() === 0) {
       sheet.appendRow(headers);
     } else {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     }
     formatHeaderRow(sheet, '#0f172a', '#38bdf8');
+  }
+  if (sheet.getLastRow() > 0 && sheet.getLastColumn() < headers.length) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   }
   return sheet;
 }
@@ -196,7 +208,7 @@ function logTrade(ss, data) {
   // Cálculo de Taxas Reais Bybit (Round-trip)
   var orderType = String(data.orderType || 'MARKET').toUpperCase();
   var feeRate = (orderType.indexOf('LIMIT') !== -1) ? (MAKER_FEE_PCT * 2) : (TAKER_FEE_PCT * 2);
-  var totalFees = Number(data.feePaid || (notional * feeRate + (notional * AVG_SPREAD_BPS)));
+  var totalFees = data.feePaid !== undefined ? Number(data.feePaid) : (notional * feeRate + (notional * AVG_SPREAD_BPS));
   var netPnl = pnlGross - totalFees;
 
   var feeDrag = (pnlGross > 0) ? (totalFees / pnlGross) : (pnlGross < 0 ? (totalFees / Math.abs(pnlGross)) : 0);
@@ -232,7 +244,16 @@ function logTrade(ss, data) {
     pnlPctVal,
     netPctVal,
     rMultipleVal,
-    data.errorMsg || 'Executado via CCXT Bybit'
+    data.errorMsg || 'Executado via CCXT Bybit',
+    data.tradeId || '',
+    data.eventKind || '',
+    Number(data.masterNotionalUsd || 0),
+    Number(data.masterExposureRatio || 0),
+    Number(data.masterMarginUsd || 0),
+    Number(data.powerMultiplier || 0),
+    Number(data.leverage || 0),
+    Number(data.exchangeMinQty || 0),
+    data.shadowFilterActive ? 'ATIVO' : 'INATIVO'
   ];
 
   sheet.appendRow(row);
@@ -288,7 +309,11 @@ function initSheetShadow(ss, forceRefresh) {
       'Impacto Evitado ($)',
       'Lucro Teórico ($)',
       'R-Múltiplo',
-      'Veredito de Segurança'
+      'Veredito de Segurança',
+      'Modo Shadow',
+      'Fonte de Dados',
+      'Aprovada',
+      'ID Oportunidade'
     ];
     if (sheet.getLastRow() === 0) {
       sheet.appendRow(headers);
@@ -312,9 +337,9 @@ function logShadowAudit(ss, data) {
     formattedDate,
     data.symbol || '',
     String(data.side || '').toUpperCase(),
-    data.oldMode || 'PADRÃO',
-    data.newMode || 'PERMITIDO',
-    data.reasons || 'Absorção institucional L2 confirmada',
+    data.oldMode || data.mode || 'AUDIT',
+    data.newMode || (data.approved === false ? 'BLOQUEADO' : 'PERMITIDO'),
+    Array.isArray(data.reasons) ? data.reasons.join(', ') : (data.reasons || 'Confluência aprovada'),
     Number(data.spreadPips || 0),
     Number(data.usdExposureR || 0),
     data.outcome || (pnlUsdVal > 0 ? 'GREEN 🟢' : (pnlUsdVal < 0 ? 'RED 🔴' : 'EM ANDAMENTO ⏳')),
@@ -322,7 +347,11 @@ function logShadowAudit(ss, data) {
     isBlocked && pnlUsdVal < 0 ? Math.abs(pnlUsdVal) : 0,
     theoreticalPnl,
     Number(data.rMultiple || 0),
-    data.safetyVerdict || (isBlocked ? 'SALVOU CAPITAL 🛡️' : 'OPERAÇÃO NORMAL')
+    data.safetyVerdict || (isBlocked ? 'SALVOU CAPITAL 🛡️' : 'OPERAÇÃO NORMAL'),
+    data.mode || 'AUDIT',
+    data.source || 'N/A',
+    data.approved === undefined ? '' : (data.approved ? 'SIM' : 'NÃO'),
+    data.id || ''
   ];
 
   sheet.appendRow(row);
@@ -338,7 +367,7 @@ function logShadowAudit(ss, data) {
   sheet.getRange(lastRow, 10).setNumberFormat('+0.00%;-0.00%;0.00%');
   sheet.getRange(lastRow, 11, 1, 2).setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"');
   sheet.getRange(lastRow, 13).setNumberFormat('+0.0"R";-0.0"R";0.0"R"');
-  sheet.autoResizeColumns(1, 14);
+  sheet.autoResizeColumns(1, 18);
 }
 
 /**
@@ -382,15 +411,113 @@ function initSheetComparativo(ss, forceRefresh) {
   return sheet;
 }
 
+function initMasterMirrorSheet(ss) {
+  var name = 'COMPARATIVO ESPELHO MASTER';
+  var sheet = ss.getSheetByName(name);
+  if (!sheet) sheet = ss.insertSheet(name);
+  if (sheet.getLastRow() === 0) {
+    var headers = [
+      'Data / Hora', 'Trade ID', 'Par', 'Status Master', 'Potencia', 'Exposicao Master (%)', 'Retorno Trade (%)', 'Capital Minimo ($)',
+      'B500 Antes ($)', 'B500 Status', 'B500 Notional ($)', 'B500 Margem ($)', 'B500 Taxas ($)', 'B500 Liquido ($)', 'B500 Depois ($)',
+      'B10k Antes ($)', 'B10k Status', 'B10k Notional ($)', 'B10k Margem ($)', 'B10k Taxas ($)', 'B10k Liquido ($)', 'B10k Depois ($)',
+      'Trailing', 'Shadow Filter', 'Motivo'
+    ];
+    sheet.appendRow(headers);
+    formatHeaderRow(sheet, '#0f172a', '#38bdf8');
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function lastMirrorBank(sheet, column, initialBalance) {
+  for (var row = sheet.getLastRow(); row >= 2; row--) {
+    var value = Number(sheet.getRange(row, column).getValue());
+    if (isFinite(value) && value >= 0) return value;
+  }
+  return initialBalance;
+}
+
+function evaluateMasterMirrorBank(balance, data) {
+  var exposure = Number(data.masterExposureRatio || 0);
+  var entry = Number(data.entryPrice || 0);
+  var leverage = Number(data.leverage || 10);
+  var minQty = Number(data.exchangeMinQty || 0);
+  var step = Number(data.qtyStep || minQty || 0);
+  var feeRate = String(data.orderType || 'MARKET').toUpperCase().indexOf('LIMIT') !== -1 ? MAKER_FEE_PCT : TAKER_FEE_PCT;
+  if (!(exposure > 0 && entry > 0 && leverage > 0 && minQty > 0 && step > 0)) {
+    return { status: 'SEM DADOS DE ELEGIBILIDADE', reason: 'Payload da master sem exposicao, preco ou lote minimo.' };
+  }
+  var desiredNotional = balance * exposure;
+  var qty = Math.floor((desiredNotional / entry) / step) * step;
+  var minNotional = minQty * entry;
+  var minimumBank = minNotional / exposure;
+  if (qty < minQty) {
+    return { status: 'FORA - LOTE MINIMO', minimumBank: minimumBank, reason: 'A banca nao atinge o lote minimo Bybit sem alterar a exposicao da master.' };
+  }
+  var notional = qty * entry;
+  var margin = notional / leverage;
+  var openFee = notional * feeRate;
+  if (margin + openFee > balance) {
+    return { status: 'FORA - MARGEM/TAXA', minimumBank: minimumBank, reason: 'Margem isolada e taxa de abertura excedem o saldo disponivel.' };
+  }
+  var returnPct = Number(data.pnlPct || 0) / 100;
+  var gross = notional * returnPct;
+  var fees = notional * feeRate * 2;
+  var net = gross - fees;
+  return { status: 'EXECUTAVEL', minimumBank: minimumBank, notional: notional, margin: margin, fees: fees, net: net, reason: '' };
+}
+
+function logMasterMirrorComparison(ss, data) {
+  if (String(data.eventKind || '').toUpperCase() !== 'CLOSE') return;
+  var sheet = initMasterMirrorSheet(ss);
+  var b500Before = lastMirrorBank(sheet, 15, 500);
+  var b10kBefore = lastMirrorBank(sheet, 22, 10000);
+  var b500 = evaluateMasterMirrorBank(b500Before, data);
+  var b10k = evaluateMasterMirrorBank(b10kBefore, data);
+  var b500After = b500.status === 'EXECUTAVEL' ? b500Before + b500.net : b500Before;
+  var b10kAfter = b10k.status === 'EXECUTAVEL' ? b10kBefore + b10k.net : b10kBefore;
+  var minimumBank = Math.max(Number(b500.minimumBank || 0), Number(b10k.minimumBank || 0));
+  var row = [
+    Utilities.formatDate(new Date(), 'America/Sao_Paulo', 'dd/MM/yyyy HH:mm:ss'), data.tradeId || '', data.symbol || '', data.status || '',
+    Number(data.powerMultiplier || 0), Number(data.masterExposureRatio || 0), Number(data.pnlPct || 0) / 100, minimumBank,
+    b500Before, b500.status, Number(b500.notional || 0), Number(b500.margin || 0), Number(b500.fees || 0), Number(b500.net || 0), b500After,
+    b10kBefore, b10k.status, Number(b10k.notional || 0), Number(b10k.margin || 0), Number(b10k.fees || 0), Number(b10k.net || 0), b10kAfter,
+    data.trailingStopAtivo || 'N/A', data.shadowFilterActive ? 'ATIVO' : 'INATIVO', b500.reason || b10k.reason || ''
+  ];
+  sheet.appendRow(row);
+  var last = sheet.getLastRow();
+  sheet.getRange(last, 6, 1, 2).setNumberFormat('0.00%');
+  sheet.getRange(last, 8, 1, 1).setNumberFormat('$#,##0.00');
+  sheet.getRange(last, 9).setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"');
+  sheet.getRange(last, 11, 1, 5).setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"');
+  sheet.getRange(last, 16).setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"');
+  sheet.getRange(last, 18, 1, 5).setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"');
+  sheet.autoResizeColumns(1, 25);
+  refreshMasterMirrorChart(sheet);
+}
+
+function refreshMasterMirrorChart(sheet) {
+  var last = sheet.getLastRow();
+  if (last < 2) return;
+  var charts = sheet.getCharts();
+  for (var i = 0; i < charts.length; i++) sheet.removeChart(charts[i]);
+  var chart = sheet.newChart()
+    .asLineChart()
+    .addRange(sheet.getRange(1, 1, last, 1))
+    .addRange(sheet.getRange(1, 15, last, 1))
+    .addRange(sheet.getRange(1, 22, last, 1))
+    .setPosition(3, 27, 0, 0)
+    .setOption('title', 'Evolucao das Bancas — somente trades executaveis')
+    .setOption('legend', { position: 'bottom' })
+    .build();
+  sheet.insertChart(chart);
+}
+
 function logComparativoAuto(ss, data) {
   var sheet = initSheetComparativo(ss, false);
   var formattedDate = Utilities.formatDate(new Date(), "America/Sao_Paulo", "dd/MM/yyyy HH:mm:ss");
 
   var pnlPct = Number(data.pnlPct || 0) / 100; // Ex: 0.025 para +2.5%
-  if (pnlPct === 0 && data.entryPrice && data.takeProfit) {
-    pnlPct = (Number(data.takeProfit) - Number(data.entryPrice)) / Number(data.entryPrice);
-  }
-  if (pnlPct === 0) pnlPct = 0.020; // Fallback para 2.0%
 
   // BANCA $500 (USD):
   // Alocação 10% = $50 (atende o min notional de $5.00)
@@ -467,13 +594,20 @@ function recalcComparativo() {
     return;
   }
 
-  var compSheet = initSheetComparativo(ss, true);
+  var mirrorSheet = ss.getSheetByName('COMPARATIVO ESPELHO MASTER');
+  if (mirrorSheet) ss.deleteSheet(mirrorSheet);
+  initMasterMirrorSheet(ss);
   var rows = tradesSheet.getRange(2, 1, tradesSheet.getLastRow() - 1, tradesSheet.getLastColumn()).getValues();
 
   for (var i = 0; i < rows.length; i++) {
-    var symbol = rows[i][2];
-    var pnlPct = Number(rows[i][17] || 0); // Retorno Bruto (%)
-    logComparativoAuto(ss, { symbol: symbol, pnlPct: pnlPct * 100 });
+    logMasterMirrorComparison(ss, {
+      symbol: rows[i][2], status: rows[i][10], pnlPct: Number(rows[i][17] || 0) * 100,
+      trailingStopAtivo: rows[i][9], tradeId: rows[i][21], eventKind: rows[i][22],
+      masterNotionalUsd: Number(rows[i][23] || 0), masterExposureRatio: Number(rows[i][24] || 0),
+      masterMarginUsd: Number(rows[i][25] || 0), powerMultiplier: Number(rows[i][26] || 0),
+      leverage: Number(rows[i][27] || 0), exchangeMinQty: Number(rows[i][28] || 0), qtyStep: Number(rows[i][28] || 0),
+      shadowFilterActive: String(rows[i][29] || '').toUpperCase() === 'ATIVO', orderType: rows[i][4], entryPrice: Number(rows[i][5] || 0)
+    });
   }
 
   updateDashboard(ss);

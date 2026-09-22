@@ -156,7 +156,8 @@ export class MarketDataManager {
         spread: Number((asks[0]?.price - bids[0]?.price).toFixed(2)),
         bidDepthTotal: bidTotal,
         askDepthTotal: askTotal,
-        imbalanceRatio: +(bidTotal / Math.max(askTotal, 1)).toFixed(2)
+        imbalanceRatio: +(bidTotal / Math.max(askTotal, 1)).toFixed(2),
+        source: 'BYBIT'
       };
     } catch {
       return this.generateRealisticBook(symbol, currentPrice, 'crypto');
@@ -239,7 +240,6 @@ export class MarketDataManager {
         this.updateLiveCandle(state, ticker.last);
 
         if (state.book && this.onBroadcast) {
-          state.book.timestamp = Date.now();
           this.flowEngine.checkBookImbalance(state.book);
         }
       } catch (err: any) {
@@ -345,7 +345,7 @@ export class MarketDataManager {
       bids.push({ price: bidPrice, amount: bidAmount, total: bidTotal });
       asks.push({ price: askPrice, amount: askAmount, total: askTotal });
     }
-    return { symbol, bids, asks, timestamp: Date.now(), spread: Number((asks[0].price - bids[0].price).toFixed(decimals)), bidDepthTotal: bidTotal, askDepthTotal: askTotal, imbalanceRatio: +(bidTotal / Math.max(askTotal, 1)).toFixed(2) };
+    return { symbol, bids, asks, timestamp: Date.now(), spread: Number((asks[0].price - bids[0].price).toFixed(decimals)), bidDepthTotal: bidTotal, askDepthTotal: askTotal, imbalanceRatio: +(bidTotal / Math.max(askTotal, 1)).toFixed(2), source: 'LOCAL_FALLBACK' };
   }
 
   public getSummaries(): AssetSummary[] {

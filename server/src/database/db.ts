@@ -132,6 +132,19 @@ export async function initDatabase(): Promise<void> {
     )
   `);
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS shadow_opportunities (
+      id TEXT PRIMARY KEY,
+      symbol TEXT NOT NULL,
+      side TEXT NOT NULL,
+      mode TEXT NOT NULL CHECK(mode IN ('AUDIT', 'FILTER')),
+      approved INTEGER NOT NULL,
+      reasons JSONB NOT NULL DEFAULT '[]'::jsonb,
+      source TEXT NOT NULL,
+      created_at BIGINT NOT NULL
+    )
+  `);
+
   // Migrações seguras de colunas
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS whatsapp TEXT`).catch(() => { });
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS whatsapp_validado INTEGER NOT NULL DEFAULT 0`).catch(() => { });
@@ -161,12 +174,16 @@ export async function initDatabase(): Promise<void> {
   await query(`CREATE INDEX IF NOT EXISTS idx_password_reset_otps ON password_reset_otps(email, otp_code, expires_at)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_trade_history_client ON trade_history(client_id, entry_time DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_announcements_active ON announcements(is_active, created_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_shadow_opportunities_created ON shadow_opportunities(created_at DESC)`);
 
   console.log('[DB] ✅ Tabelas PostgreSQL inicializadas com sucesso.');
 
   // Seed: Admin padrão — sincroniza com variáveis de ambiente
-  const adminEmail = process.env.ADMIN_EMAIL || 'admin@marketflow.pro';
-  const adminPassword = process.env.ADMIN_PASSWORD || 'MarketFlow@2026!';
+  const adminEmail = process.env.ADMIN_EMAIL;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (!adminEmail || !adminPassword) {
+    throw new Error('ADMIN_EMAIL e ADMIN_PASSWORD devem estar configurados antes da inicialização.');
+  }
 
   const existingAdmin = await queryOne<UserRow>('SELECT * FROM app_users WHERE role = $1 LIMIT 1', ['ADMIN']);
   if (!existingAdmin) {

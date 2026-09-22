@@ -142,7 +142,8 @@ export class ClientCopyTraderEngine {
                 stopLoss: trade.stopLoss,
                 takeProfit: trade.takeProfit,
                 signalReason: trade.signalReason,
-                powerMultiplier: powerMultiplier || trade.powerMultiplier || 1.5
+                powerMultiplier: powerMultiplier || trade.powerMultiplier || 1.5,
+                masterExposureRatio: trade.masterExposureRatio
               });
 
               if (execRes.success) {
@@ -196,4 +197,3 @@ export class ClientCopyTraderEngine {
     }
   }
 }
-

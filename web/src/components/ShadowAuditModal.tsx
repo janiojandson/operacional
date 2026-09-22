@@ -18,12 +18,15 @@ interface ShadowAuditModalProps {
   onClose: () => void;
 }
 
+interface ShadowOpportunity { id: string; symbol: string; side: 'BUY' | 'SELL'; mode: 'AUDIT' | 'FILTER'; approved: boolean; reasons: string[]; source: string; timestamp: string; }
+
 export const ShadowAuditModal: React.FC<ShadowAuditModalProps> = ({ isOpen, onClose }) => {
   const [logsText, setLogsText] = useState<string>('Carregando logs de auditoria...');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const [opportunities, setOpportunities] = useState<ShadowOpportunity[]>([]);
   const logsContainerRef = useRef<HTMLDivElement>(null);
 
   const fetchLogs = async () => {
@@ -36,6 +39,11 @@ export const ShadowAuditModal: React.FC<ShadowAuditModalProps> = ({ isOpen, onCl
         setLastUpdate(new Date());
       } else {
         setLogsText(`Falha ao carregar logs (Status HTTP ${res.status}).`);
+      }
+      const opportunitiesResponse = await authFetch('/api/shadow-opportunities');
+      if (opportunitiesResponse.ok) {
+        const payload = await opportunitiesResponse.json();
+        setOpportunities(Array.isArray(payload.opportunities) ? payload.opportunities : []);
       }
     } catch (err: any) {
       setLogsText(`Erro de conexão ao buscar logs: ${err.message}`);
@@ -77,11 +85,10 @@ export const ShadowAuditModal: React.FC<ShadowAuditModalProps> = ({ isOpen, onCl
     URL.revokeObjectURL(url);
   };
 
-  // Cálculo de estatísticas rápidas baseadas no texto
   const logLines = logsText.split('\n').filter(l => l.trim().length > 0);
-  const blockedCount = logLines.filter(l => l.includes('BLOQUEADO 🛑')).length;
-  const permittedCount = logLines.filter(l => l.includes('PERMITIDO 🟢')).length;
-  const totalAudits = blockedCount + permittedCount;
+  const blockedCount = opportunities.length ? opportunities.filter(item => !item.approved).length : logLines.filter(l => l.includes('BLOQUEADO 🛑')).length;
+  const permittedCount = opportunities.length ? opportunities.filter(item => item.approved).length : logLines.filter(l => l.includes('PERMITIDO 🟢')).length;
+  const totalAudits = opportunities.length || blockedCount + permittedCount;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-200">
@@ -100,7 +107,7 @@ export const ShadowAuditModal: React.FC<ShadowAuditModalProps> = ({ isOpen, onCl
                 <h2 className="text-sm md:text-base font-bold text-white tracking-wide font-mono flex items-center gap-2">
                   <span>SHADOW MODE AUDITOR</span>
                   <span className="px-2 py-0.5 rounded-full text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-sans font-semibold">
-                    MODO FANTASMA
+                    OPORTUNIDADES AUDITADAS
                   </span>
                 </h2>
               </div>
@@ -175,9 +182,16 @@ export const ShadowAuditModal: React.FC<ShadowAuditModalProps> = ({ isOpen, onCl
             <span className="text-cyan-400 flex items-center gap-1">
               <Activity className="w-3.5 h-3.5" /> Modo Real:
             </span>
-            <span className="font-bold text-cyan-300 text-xs">INTOCADO 🟢</span>
+            <span className="font-bold text-cyan-300 text-xs">{opportunities.some(item => item.mode === 'FILTER') ? 'FILTER ATIVO' : 'AUDIT'}</span>
           </div>
         </div>
+
+        {opportunities.length > 0 && <div className="max-h-44 overflow-y-auto border-b border-slate-800 bg-slate-950 p-3 space-y-2 text-xs font-mono">
+          {opportunities.slice(0, 20).map(item => <div key={item.id} className={`rounded border p-2 ${item.approved ? 'border-emerald-700/50 bg-emerald-950/20' : 'border-red-800/50 bg-red-950/20'}`}>
+            <div className="flex justify-between gap-2 text-slate-200"><span>{item.symbol} {item.side} · {item.mode}</span><span>{item.approved ? 'APROVADA' : 'BLOQUEADA'}</span></div>
+            <div className="mt-1 text-slate-400">{item.source} · {item.reasons.length ? item.reasons.join(', ') : 'Confluência aprovada'} · {new Date(item.timestamp).toLocaleTimeString()}</div>
+          </div>)}
+        </div>}
 
         {/* Terminal Log Console */}
         <div 

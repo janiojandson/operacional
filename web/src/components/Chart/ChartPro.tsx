@@ -55,6 +55,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
   const [showFlowMarkers, setShowFlowMarkers] = useState(true);
   const [selectedTf, setSelectedTf] = useState<'1m' | '3m' | '5m' | '15m' | '1h' | '4h' | '1D'>('1m');
+  const [candleSource, setCandleSource] = useState<'BYBIT' | 'LOCAL_FALLBACK' | 'UNAVAILABLE'>('UNAVAILABLE');
 
   // Cálculo da pressão institucional blindado contra undefined e divisão por zero
   const buyVol = Number(activeCandle?.buyVolume ?? 0);
@@ -155,6 +156,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
         if (res.ok) {
           const data = await res.json();
+          setCandleSource(data?.source === 'BYBIT' ? 'BYBIT' : 'LOCAL_FALLBACK');
           const rawCandles = Array.isArray(data) ? data : (Array.isArray(data.candles) ? data.candles : []);
 
           if (!isCancelled && rawCandles.length > 0) {
@@ -180,6 +182,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
         }
       } catch (err) {
         console.warn('Erro ao carregar klines para timeframe:', err);
+        setCandleSource('UNAVAILABLE');
       }
 
       if (!isCancelled && selectedTf === '1m' && candles && candles.length > 0) {
@@ -375,6 +378,9 @@ export const ChartPro: React.FC<ChartProProps> = ({
         <div className="flex items-center justify-between px-3 py-1.5">
           <div className="flex items-center space-x-2.5">
             <span className="font-mono font-bold text-sm text-text-primary tracking-wider">{symbol}</span>
+            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${candleSource === 'BYBIT' ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10' : candleSource === 'LOCAL_FALLBACK' ? 'text-amber-300 border-amber-500/40 bg-amber-500/10' : 'text-rose-300 border-rose-500/40 bg-rose-500/10'}`}>
+              {candleSource === 'BYBIT' ? 'BYBIT AO VIVO' : candleSource === 'LOCAL_FALLBACK' ? 'FALLBACK LOCAL' : 'DADOS INDISPONIVEIS'}
+            </span>
 
             <div className="flex items-center bg-bg-app p-0.5 rounded border border-border-panel text-[11px] font-mono">
               {(['1m', '3m', '5m', '15m', '1h', '4h', '1D'] as const).map((tf) => (

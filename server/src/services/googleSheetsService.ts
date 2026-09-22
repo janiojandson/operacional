@@ -30,6 +30,17 @@ export interface TradeLogPayload {
   trailingStopAtivo?: string;
   feePaid?: number;
   pnlTeoricoSemTrailing?: string;
+  tradeId?: string;
+  eventKind?: 'OPEN' | 'CLOSE';
+  masterBalanceAtEntry?: number;
+  masterNotionalUsd?: number;
+  masterExposureRatio?: number;
+  masterMarginUsd?: number;
+  powerMultiplier?: number;
+  leverage?: number;
+  exchangeMinQty?: number;
+  qtyStep?: number;
+  shadowFilterActive?: boolean;
 }
 
 export interface ShadowAuditPayload {
@@ -47,6 +58,18 @@ export interface ShadowAuditPayload {
   pnlPct?: number;
   rMultiple?: number;
   safetyVerdict?: string;
+}
+
+export interface ShadowOpportunityPayload {
+  type: 'SHADOW_OPPORTUNITY';
+  id: string;
+  symbol: string;
+  side: string;
+  mode: 'AUDIT' | 'FILTER';
+  approved: boolean;
+  reasons: string[];
+  source: string;
+  timestamp: string;
 }
 
 export class GoogleSheetsService {
@@ -75,6 +98,10 @@ export class GoogleSheetsService {
 
   static async logShadowAudit(log: Omit<ShadowAuditPayload, 'type'>): Promise<void> {
     this.sendData({ ...log, type: 'SHADOW_AUDIT' }).catch(() => {});
+  }
+
+  static async logShadowOpportunity(log: Omit<ShadowOpportunityPayload, 'type'>): Promise<void> {
+    this.sendData({ ...log, type: 'SHADOW_OPPORTUNITY' }).catch(() => {});
   }
 
   static async resetSpreadsheet(): Promise<void> {

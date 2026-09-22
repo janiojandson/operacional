@@ -27,8 +27,43 @@ export interface ShadowAuditResult {
   timestamp: string;
 }
 
+export interface ShadowOpportunity {
+  id: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  mode: 'AUDIT' | 'FILTER';
+  approved: boolean;
+  reasons: string[];
+  source: 'BYBIT' | 'LOCAL_FALLBACK' | 'UNAVAILABLE';
+  timestamp: string;
+}
+
 // Armazena auditorias ativas para cruzar com o desfecho do trade (GREEN / RED)
 const pendingAudits = new Map<string, { auditResult: ShadowAuditResult; entryTime: number }>();
+const shadowOpportunities: ShadowOpportunity[] = [];
+
+export function normalizeShadowPnlPct(value: number): number | null {
+  return Number.isFinite(value) ? value : null;
+}
+
+export function recordShadowOpportunity(input: Omit<ShadowOpportunity, 'id' | 'timestamp'>): ShadowOpportunity {
+  const record: ShadowOpportunity = {
+    ...input,
+    id: `shadow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    timestamp: new Date().toISOString()
+  };
+  shadowOpportunities.unshift(record);
+  if (shadowOpportunities.length > 500) shadowOpportunities.pop();
+  return record;
+}
+
+export function getShadowOpportunities(): ShadowOpportunity[] {
+  return [...shadowOpportunities];
+}
+
+export function clearShadowOpportunities(): void {
+  shadowOpportunities.length = 0;
+}
 
 /**
  * Executa avaliação quantitativa em Shadow Mode (Modo Fantasma).
@@ -237,10 +272,10 @@ export function recordShadowOutcome(
   pnlUsd: number,
   rMultiple: number,
   pnlPct: number = 0
-): { outcome: string; verdict: string; savedCapital: boolean; pnlUsd: number; pnlPct: number; rMultiple: number } | null {
+): { outcome: string; verdict: string; savedCapital: boolean; pnlUsd: number; pnlPct: number | null; rMultiple: number } | null {
   const pending = pendingAudits.get(symbol);
   const isGreen = status === 'CLOSED_TP';
-  const finalPnlPct = pnlPct !== 0 ? pnlPct : (isGreen ? 2.50 : -1.00);
+  const finalPnlPct = normalizeShadowPnlPct(pnlPct);
   const outcomeText = isGreen ? 'GREEN 🟢' : 'RED 🔴';
 
   let safetyVerdict = '';
@@ -249,21 +284,22 @@ export function recordShadowOutcome(
   if (pending) {
     const wasBlocked = pending.auditResult.newMode.includes('BLOQUEADO');
     if (wasBlocked && !isGreen) {
-      safetyVerdict = `🛡️ FILTRO SALVOU A BANCA (Bloqueou loss de -$${Math.abs(pnlUsd).toFixed(2)} | -${Math.abs(finalPnlPct).toFixed(2)}%)`;
+      safetyVerdict = `🛡️ FILTRO SALVOU A BANCA (Bloqueou loss de -$${Math.abs(pnlUsd).toFixed(2)}${finalPnlPct === null ? '' : ` | -${Math.abs(finalPnlPct).toFixed(2)}%`})`;
       savedCapital = true;
     } else if (wasBlocked && isGreen) {
-      safetyVerdict = `⚠️ FALSO POSITIVO (Filtro bloqueou ganho de +$${Math.abs(pnlUsd).toFixed(2)} | +${Math.abs(finalPnlPct).toFixed(2)}%)`;
+      safetyVerdict = `⚠️ FALSO POSITIVO (Filtro bloqueou ganho de +$${Math.abs(pnlUsd).toFixed(2)}${finalPnlPct === null ? '' : ` | +${Math.abs(finalPnlPct).toFixed(2)}%`})`;
     } else if (!wasBlocked && isGreen) {
-      safetyVerdict = `✅ CONFLUÊNCIA PERFEITA (Filtro aprovou e capturou +$${Math.abs(pnlUsd).toFixed(2)} | +${Math.abs(finalPnlPct).toFixed(2)}%)`;
+      safetyVerdict = `✅ CONFLUÊNCIA PERFEITA (Filtro aprovou e capturou +$${Math.abs(pnlUsd).toFixed(2)}${finalPnlPct === null ? '' : ` | +${Math.abs(finalPnlPct).toFixed(2)}%`})`;
     } else {
-      safetyVerdict = `❌ RISCO NÃO EVITADO (Filtro aprovou mas bateu loss de -$${Math.abs(pnlUsd).toFixed(2)} | -${Math.abs(finalPnlPct).toFixed(2)}%)`;
+      safetyVerdict = `❌ RISCO NÃO EVITADO (Filtro aprovou mas bateu loss de -$${Math.abs(pnlUsd).toFixed(2)}${finalPnlPct === null ? '' : ` | -${Math.abs(finalPnlPct).toFixed(2)}%`})`;
     }
   } else {
     safetyVerdict = isGreen ? `✅ GREEN EXECUTADO (+${rMultiple.toFixed(1)}R)` : `❌ RED EXECUTADO (${rMultiple.toFixed(1)}R)`;
   }
 
   const timestamp = new Date().toISOString();
-  const outcomeLog = `[SHADOW OUTCOME] | Ativo: ${symbol} | Resultado: ${outcomeText} (${finalPnlPct > 0 ? '+' : ''}${finalPnlPct.toFixed(2)}% / $${pnlUsd.toFixed(2)}) | Decisão Pré-Trade: ${pending?.auditResult.newMode || 'N/A'} | Veredito: ${safetyVerdict}`;
+  const pnlPctText = finalPnlPct === null ? 'N/A' : `${finalPnlPct > 0 ? '+' : ''}${finalPnlPct.toFixed(2)}%`;
+  const outcomeLog = `[SHADOW OUTCOME] | Ativo: ${symbol} | Resultado: ${outcomeText} (${pnlPctText} / $${pnlUsd.toFixed(2)}) | Decisão Pré-Trade: ${pending?.auditResult.newMode || 'N/A'} | Veredito: ${safetyVerdict}`;
 
   // Print no terminal com cor correspondente
   const color = isGreen ? '\x1b[32m' : '\x1b[31m';
@@ -288,7 +324,7 @@ export function recordShadowOutcome(
     usdExposureR: pending?.auditResult.usdExposureR || 0,
     outcome: outcomeText,
     pnlUsd,
-    pnlPct: finalPnlPct,
+    ...(finalPnlPct === null ? {} : { pnlPct: finalPnlPct }),
     rMultiple,
     safetyVerdict,
     timestamp
@@ -303,6 +339,7 @@ export function recordShadowOutcome(
  */
 export function clearShadowAudits() {
   pendingAudits.clear();
+  clearShadowOpportunities();
   try {
     const logFilePath = path.resolve(process.cwd(), RISK_CONFIG.LOG_FILE_PATH);
     const timestamp = new Date().toISOString();

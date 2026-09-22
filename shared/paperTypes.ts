@@ -29,11 +29,20 @@ export interface SimulatedTrade {
   closeTime?: number;
   signalReason: string;
   qty?: number;
+  notionalUsd?: number;
+  marginUsd?: number;
+  masterExposureRatio?: number;
+  masterBalanceAtEntry?: number;
   fee?: number;
   netPnl?: number;
+  strategyVersion?: string;
+  closeReason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS';
+  realizedR?: number;
+  decisionFactors?: string[];
 }
 
 export interface PaperAccount {
+  initialBalance?: number;
   balance: number;
   equity: number;
   winRate: number;

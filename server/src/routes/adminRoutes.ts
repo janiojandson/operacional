@@ -7,6 +7,15 @@ import { sanitizeCsvField, escapeHtml } from '../utils/sanitizer.js';
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
 
+let masterControlHandler: {
+  setTrailingStopEnabled: (enabled: boolean) => void;
+  setShadowFilterActive: (active: boolean) => void;
+} | null = null;
+
+export function bindMasterControlHandler(handler: typeof masterControlHandler): void {
+  masterControlHandler = handler;
+}
+
 // GET /api/admin/clients — listar todos os clientes com status de sincronização e API
 adminRouter.get('/clients', async (_req: Request, res: Response) => {
   const users = await UserDB.listClients();
@@ -83,6 +92,7 @@ adminRouter.post('/config/trailing-stop', async (req: Request, res: Response) =>
     const targetClient = clientId || 'master-client';
 
     await ClientConfigDB.setTrailingStop(targetClient, Boolean(enabled));
+    if (targetClient === 'master-client') masterControlHandler?.setTrailingStopEnabled(Boolean(enabled));
 
     return res.json({
       success: true,
@@ -101,6 +111,7 @@ adminRouter.post('/config/shadow-filter', async (req: Request, res: Response) =>
     const targetClient = clientId || 'master-client';
 
     await ClientConfigDB.setShadowFilter(targetClient, Boolean(active));
+    if (targetClient === 'master-client') masterControlHandler?.setShadowFilterActive(Boolean(active));
 return res.json({
       success: true,
       shadowFilterActive: Boolean(active),

@@ -3,6 +3,7 @@ import { decrypt, maskApiKey } from '../utils/crypto.js';
 import { ClientConfigDB, TradeHistoryDB } from '../database/db.js';
 import { runShadowAudit } from './shadowAuditor.js';
 import { GoogleSheetsService } from '../services/googleSheetsService.js';
+import { calculateMasterMirrorSize } from './masterMirrorSizing.js';
 
 export interface BybitAccountInfo {
   walletBalance: number;
@@ -40,6 +41,7 @@ export interface TradePayload {
   orderType?: 'MARKET' | 'LIMIT';
   isMaker?: boolean;
   trailingStopAtivo?: boolean;
+  masterExposureRatio?: number;
 }
 
 export interface SizingResult {
@@ -459,16 +461,39 @@ export class BybitExecutionEngine {
       if (validEntryPrice <= 0) throw new Error(`Preço de entrada inválido: ${payload.entryPrice}`);
       if (validStopLoss <= 0) throw new Error(`Stop Loss inválido: ${payload.stopLoss}`);
 
-      const sizing = calculatePositionSize({
-        balance,
-        riskPct: effectiveRiskPct,
-        entryPrice: validEntryPrice,
-        stopLoss: validStopLoss,
-        leverage: toValidNumber(config.leverage, 10),
-        minQty,
-        qtyStep,
-        symbol: payload.symbol
-      });
+      const leverage = toValidNumber(config.leverage, 10);
+      const mirrorSizing = payload.masterExposureRatio
+        ? calculateMasterMirrorSize({
+            balanceUsd: balance,
+            masterExposureRatio: payload.masterExposureRatio,
+            entryPrice: validEntryPrice,
+            leverage,
+            minQty,
+            qtyStep,
+            feeRate: payload.isMaker ? 0.0002 : 0.00055
+          })
+        : null;
+      if (mirrorSizing && mirrorSizing.status !== 'EXECUTABLE') {
+        return { success: false, error: mirrorSizing.reason || mirrorSizing.status };
+      }
+      const sizing = mirrorSizing
+        ? {
+            qty: mirrorSizing.qty,
+            notionalUsd: mirrorSizing.notionalUsd,
+            marginUsd: mirrorSizing.marginUsd,
+            leverage,
+            stopDistPct: Number((Math.abs(validEntryPrice - validStopLoss) / validEntryPrice * 100).toFixed(3))
+          }
+        : calculatePositionSize({
+            balance,
+            riskPct: effectiveRiskPct,
+            entryPrice: validEntryPrice,
+            stopLoss: validStopLoss,
+            leverage,
+            minQty,
+            qtyStep,
+            symbol: payload.symbol
+          });
 
       const cleanQty = Number(exchange.amountToPrecision(ccxtSymbol, sizing.qty));
       if (isNaN(cleanQty) || cleanQty <= 0) {

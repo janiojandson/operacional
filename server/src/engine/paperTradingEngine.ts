@@ -3,6 +3,9 @@ import { SimulatedTrade, PaperAccount } from '../../../shared/paperTypes';
 import { AutoPairSelectorEngine } from './autoPairSelectorEngine';
 import { QuantStrategyEngine } from './quantStrategyEngine';
 import { validateOrderMarginAndLot, getMinLot } from '../database/paperStorage.js';
+import { calculateMasterMirrorSize } from './masterMirrorSizing.js';
+import { getCryptoStrategyProfile } from './cryptoStrategyProfile.js';
+import type { StrategyDecision } from './cryptoStrategyDecision.js';
 
 export interface SimulatedTradeWithTrailing extends SimulatedTrade {
   trailingActive?: boolean;
@@ -90,7 +93,7 @@ export class PaperTradingEngine {
   }
 
   // Executa uma entrada automatizada SEM REPAINT quando um sinal de fluxo qualificado ocorre
-  public handleSignal(signal: FlowSignal, currentPrice: number) {
+  public handleSignal(signal: FlowSignal, currentPrice: number, decision?: StrategyDecision) {
     // 1. Verificar se o par está habilitado pelo usuário
     if (!this.activePairs.has(signal.symbol)) {
       return;
@@ -109,18 +112,9 @@ export class PaperTradingEngine {
 
     let tradeType: 'BUY' | 'SELL' | null = null;
 
-    // Calibração de SL / TP específica por ativo baseada no perfil de volatilidade (Razão R:R de 2.5R mantida)
-    const coinRiskProfiles: Record<string, { sl: number; tp: number }> = {
-      'BTC/USDT': { sl: 0.0080, tp: 0.0200 }, // 0.8% SL / 2.0% TP
-      'ETH/USDT': { sl: 0.0100, tp: 0.0250 }, // 1.0% SL / 2.5% TP (Padrão ouro)
-      'SOL/USDT': { sl: 0.0140, tp: 0.0350 }, // 1.4% SL / 3.5% TP
-      'BNB/USDT': { sl: 0.0090, tp: 0.0225 }, // 0.9% SL / 2.25% TP
-      'XRP/USDT': { sl: 0.0120, tp: 0.0300 }  // 1.2% SL / 3.0% TP
-    };
-
-    const riskProfile = coinRiskProfiles[signal.symbol] || { sl: 0.0100, tp: 0.0250 };
-    const slDistancePct = riskProfile.sl;
-    const tpDistancePct = riskProfile.tp;
+    if (!decision?.approved || !decision.stopLoss || !decision.takeProfit || !decision.trailingTrigger) {
+      return;
+    }
 
     if (signal.type === 'ABSORPTION_BUY') {
       tradeType = 'SELL';
@@ -131,21 +125,11 @@ export class PaperTradingEngine {
       else if (signal.message.includes('Vendedores com')) tradeType = 'SELL';
     }
 
-    if (!tradeType) return;
+    if (!tradeType || decision.entrySide !== tradeType) return;
 
-    const decimals = currentPrice < 5 ? 4 : (currentPrice < 100 ? 3 : 2);
-    const stopLoss = tradeType === 'BUY'
-      ? Number((currentPrice * (1 - slDistancePct)).toFixed(decimals))
-      : Number((currentPrice * (1 + slDistancePct)).toFixed(decimals));
-
-    const takeProfit = tradeType === 'BUY'
-      ? Number((currentPrice * (1 + tpDistancePct)).toFixed(decimals))
-      : Number((currentPrice * (1 - tpDistancePct)).toFixed(decimals));
-
-    // Preço do Gatilho do Trailing Stop (80% do Alvo de Lucro)
-    const trailingTriggerPrice = tradeType === 'BUY'
-      ? Number((currentPrice * (1 + (0.80 * tpDistancePct))).toFixed(decimals))
-      : Number((currentPrice * (1 - (0.80 * tpDistancePct))).toFixed(decimals));
+    const stopLoss = decision.stopLoss;
+    const takeProfit = decision.takeProfit;
+    const trailingTriggerPrice = decision.trailingTrigger;
 
     // Potência proporcional à banca (20% por trade padrão)
     const baseAllocation = Math.max(100, this.balance * 0.20);
@@ -158,6 +142,8 @@ export class PaperTradingEngine {
     const dayOfWeek = QuantStrategyEngine.determineDayOfWeek(now);
     const regime = pairConfig?.regime || 'TREND';
 
+    const masterBalanceAtEntry = this.balance;
+    const openNotional = Math.max(100, masterBalanceAtEntry * 0.20) * (powerMultiplier / 1.5);
     const newTrade: SimulatedTradeWithTrailing = {
       id: `sim-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       symbol: signal.symbol,
@@ -179,10 +165,16 @@ export class PaperTradingEngine {
       signalReason: `${signal.message}${powerLabel}`,
       trailingActive: false,
       trailingTriggerPrice,
-      trailingStopPrice: undefined
+      trailingStopPrice: undefined,
+      qty: Number((openNotional / currentPrice).toFixed(8)),
+      notionalUsd: openNotional,
+      marginUsd: Number((openNotional / 10).toFixed(4)),
+      masterExposureRatio: openNotional / masterBalanceAtEntry,
+      masterBalanceAtEntry,
+      strategyVersion: decision.profileVersion,
+      decisionFactors: decision.reasons
     };
 
-    const openNotional = Math.max(100, this.balance * 0.20) * (powerMultiplier / 1.5);
     const openFee = Number((openNotional * 0.00055).toFixed(4));
     newTrade.fee = openFee;
     newTrade.netPnl = Number((-openFee).toFixed(4));
@@ -198,8 +190,7 @@ export class PaperTradingEngine {
 
     trade.currentPrice = currentPrice;
 
-    const baseAllocation = Math.max(100, this.balance * 0.20);
-    const notionalSize = baseAllocation * (trade.powerMultiplier / 1.5);
+    const notionalSize = trade.notionalUsd ?? (Math.max(100, this.balance * 0.20) * (trade.powerMultiplier / 1.5));
 
     const priceDeltaPct = trade.type === 'BUY'
       ? (currentPrice - trade.entryPrice) / trade.entryPrice
@@ -208,17 +199,9 @@ export class PaperTradingEngine {
     trade.pnlPct = Number((priceDeltaPct * 100).toFixed(2));
     trade.pnlUsd = Number((notionalSize * priceDeltaPct).toFixed(2));
 
-    // Determina o perfil de risco do ativo
-    const coinRiskProfiles: Record<string, { sl: number; tp: number }> = {
-      'BTC/USDT': { sl: 0.0080, tp: 0.0200 },
-      'ETH/USDT': { sl: 0.0100, tp: 0.0250 },
-      'SOL/USDT': { sl: 0.0140, tp: 0.0350 },
-      'BNB/USDT': { sl: 0.0090, tp: 0.0225 },
-      'XRP/USDT': { sl: 0.0120, tp: 0.0300 }
-    };
-    const riskProfile = coinRiskProfiles[symbol] || { sl: 0.0100, tp: 0.0250 };
-    const tpDistancePct = riskProfile.tp;
-    const slDistancePct = riskProfile.sl;
+    const riskProfile = getCryptoStrategyProfile(symbol) || { stopLossPct: 0.01, takeProfitPct: 0.025 };
+    const tpDistancePct = riskProfile.takeProfitPct;
+    const slDistancePct = riskProfile.stopLossPct;
     const decimals = currentPrice < 5 ? 4 : (currentPrice < 100 ? 3 : 2);
 
     // Progresso em relação ao objetivo (1.0 = 100% do alvo atingido)
@@ -242,6 +225,8 @@ export class PaperTradingEngine {
         if (currentPrice <= trade.trailingStopPrice) {
           trade.status = 'CLOSED_TP';
           trade.rMultiple = Number((trade.pnlPct / (slDistancePct * 100)).toFixed(2));
+          trade.realizedR = trade.rMultiple;
+          trade.closeReason = 'TRAILING';
           closed = true;
         }
       } else {
@@ -255,6 +240,8 @@ export class PaperTradingEngine {
         if (currentPrice >= trade.trailingStopPrice) {
           trade.status = 'CLOSED_TP';
           trade.rMultiple = Number((trade.pnlPct / (slDistancePct * 100)).toFixed(2));
+          trade.realizedR = trade.rMultiple;
+          trade.closeReason = 'TRAILING';
           closed = true;
         }
       }
@@ -266,6 +253,8 @@ export class PaperTradingEngine {
       ) {
         trade.status = 'CLOSED_SL';
         trade.rMultiple = -1.0;
+        trade.realizedR = trade.rMultiple;
+        trade.closeReason = 'STOP_LOSS';
         closed = true;
       }
     }
@@ -278,13 +267,15 @@ export class PaperTradingEngine {
       ) {
         trade.status = 'CLOSED_TP';
         trade.rMultiple = 2.5;
+        trade.realizedR = trade.rMultiple;
+        trade.closeReason = 'FIXED_TP';
         closed = true;
       }
     }
 
     // Se a posição encerrou, liquida e atualiza histórico (com fee round-trip)
     if (closed) {
-      const closeNotional = Math.max(100, this.balance * 0.20) * (trade.powerMultiplier / 1.5);
+      const closeNotional = trade.notionalUsd ?? (Math.max(100, this.balance * 0.20) * (trade.powerMultiplier / 1.5));
       const openFee = trade.fee ?? 0;
       const closeFee = Number((closeNotional * 0.00055).toFixed(4));
       trade.fee = Number((openFee + closeFee).toFixed(4));
@@ -310,6 +301,7 @@ export class PaperTradingEngine {
     const winRate = total > 0 ? Number(((winning / total) * 100).toFixed(1)) : 0;
 
     return {
+      initialBalance: Number(this.initialBalance.toFixed(2)),
       balance: Number(this.balance.toFixed(2)),
       equity: Number((this.balance + unrealizedPnl).toFixed(2)),
       winRate,
@@ -414,25 +406,27 @@ export class MirrorTradingEngine {
     }
 
     // 3. Validar margem e lote mínimo com taxas
-    const validation = validateOrderMarginAndLot(
-      masterTrade.symbol,
-      masterTrade.entryPrice,
-      masterTrade.qty || this.calculateQty(masterTrade),
-      this.balance,
-      DEFAULT_LEVERAGE,
-      isMaker
-    );
-
-    if (!validation.valid) {
-      return { success: false, error: validation.reason };
+    const exposureRatio = masterTrade.masterExposureRatio
+      ?? ((masterTrade.notionalUsd || (masterTrade.qty || 0) * masterTrade.entryPrice) / Math.max(masterTrade.masterBalanceAtEntry || 0, 1));
+    const minQty = getMinLot(masterTrade.symbol);
+    const sizing = calculateMasterMirrorSize({
+      balanceUsd: this.balance,
+      masterExposureRatio: exposureRatio,
+      entryPrice: masterTrade.entryPrice,
+      leverage: DEFAULT_LEVERAGE,
+      minQty,
+      qtyStep: minQty,
+      feeRate: isMaker ? BYBIT_FEES.maker : BYBIT_FEES.taker
+    });
+    if (sizing.status !== 'EXECUTABLE') {
+      return { success: false, error: sizing.reason };
     }
 
     // 4. Calcular quantidade baseada na alocação proporcional (mesmo % do master)
-    const masterAllocation = masterTrade.qty || this.calculateQty(masterTrade);
-    const qty = masterAllocation;
+    const qty = sizing.qty;
 
     // 5. Calcular taxas
-    const notional = masterTrade.entryPrice * qty;
+    const notional = sizing.notionalUsd;
     const feeRate = isMaker ? BYBIT_FEES.maker : BYBIT_FEES.taker;
     const openFee = notional * feeRate;
 
@@ -445,7 +439,7 @@ export class MirrorTradingEngine {
       currentPrice: masterTrade.entryPrice,
       takeProfit: masterTrade.takeProfit,
       stopLoss: masterTrade.stopLoss,
-      pnlUsd: -openFee, // Inicia com taxa de abertura negativa
+      pnlUsd: 0,
       pnlPct: 0,
       rMultiple: 0,
       powerMultiplier: masterTrade.powerMultiplier,
@@ -460,11 +454,13 @@ export class MirrorTradingEngine {
       trailingTriggerPrice: masterTrade.trailingTriggerPrice,
       trailingStopPrice: undefined,
       qty,
+      notionalUsd: notional,
+      marginUsd: sizing.marginUsd,
+      masterExposureRatio: exposureRatio,
       fee: openFee,
       netPnl: -openFee
     };
 
-    this.balance -= openFee; // Deduz taxa de abertura imediatamente
     this.openPositions.set(masterTrade.symbol, newTrade);
     this.broadcastUpdate(newTrade);
     return { success: true };
@@ -477,7 +473,7 @@ export class MirrorTradingEngine {
 
     trade.currentPrice = currentPrice;
 
-    const notional = trade.entryPrice * (trade.qty || this.calculateQty(trade));
+    const notional = trade.notionalUsd ?? (trade.entryPrice * (trade.qty || this.calculateQty(trade)));
     const priceDeltaPct = trade.type === 'BUY'
       ? (currentPrice - trade.entryPrice) / trade.entryPrice
       : (trade.entryPrice - currentPrice) / trade.entryPrice;
@@ -489,8 +485,8 @@ export class MirrorTradingEngine {
     const closeFeeRate = BYBIT_FEES.taker; // Assume market close
     const closeFee = notional * closeFeeRate;
     const openFee = trade.fee ?? 0;
-    trade.pnlUsd = Number((grossPnl - openFee - closeFee).toFixed(2));
-    trade.netPnl = trade.pnlUsd;
+    trade.pnlUsd = Number(grossPnl.toFixed(2));
+    trade.netPnl = Number((grossPnl - openFee - closeFee).toFixed(2));
 
     // Risk profile
     const coinRiskProfiles: Record<string, { sl: number; tp: number }> = {
@@ -558,9 +554,10 @@ export class MirrorTradingEngine {
     }
 
     if (closed) {
+      trade.fee = Number((openFee + closeFee).toFixed(4));
       trade.closeTime = Math.floor(Date.now() / 1000);
-      this.realizedPnl += trade.pnlUsd;
-      this.balance += trade.pnlUsd;
+      this.realizedPnl += trade.netPnl;
+      this.balance += trade.netPnl;
       this.history.unshift(trade);
       if (this.history.length > 100) this.history.pop();
       this.openPositions.delete(symbol);
