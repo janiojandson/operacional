@@ -40,6 +40,10 @@ const rootDir = path.resolve(__dirname, '../../');
 const PORT = Number(process.env.PORT) || 4000;
 const app = express();
 
+// --- CONFIGURAÇÃO MANDATÓRIA PARA PROXY REVERSO RAILWAY ---
+// Permite que express-rate-limit leia X-Forwarded-For do proxy de borda com segurança
+app.set('trust proxy', 1);
+
 // ─── Segurança Enterprise ──────────────────────────────────────────────────
 
 // Helmet: headers de segurança HTTP
