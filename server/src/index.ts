@@ -10,7 +10,7 @@ import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import { FlowEngine } from './engine/flowEngine.js';
 import { MarketDataManager } from './engine/marketDataManager.js';
-import { PaperTradingEngine } from './engine/paperTradingEngine.js';
+import { PaperTradingEngine, MirrorTradingEngine, validateOrderExecution } from './engine/paperTradingEngine.js';
 import { PairPerformanceTracker } from './engine/pairPerformanceTracker.js';
 import { AutoPairSelectorEngine, DynamicPairStatus } from './engine/autoPairSelectorEngine.js';
 import { AIAdvisorEngine } from './engine/aiAdvisorEngine.js';
@@ -28,7 +28,8 @@ import { authRouter } from './auth/authRoutes.js';
 import { adminRouter } from './routes/adminRoutes.js';
 import { clientRouter } from './routes/clientRoutes.js';
 import { requireAuth, requireAdmin, verifyToken } from './auth/authMiddleware.js';
-import { initDatabase, UserDB } from './database/db.js';
+import { initDatabase, UserDB, query } from './database/db.js';
+import { initPaperTables, hydrateMasterAccount, persistMasterBalance, upsertMasterOrder, hydrateMirrorAccount, persistMirrorBalance, upsertMirrorOrder, resetTradingAccounts } from './database/paperStorage.js';
 
 dotenv.config();
 
@@ -140,8 +141,16 @@ const clientCopyTrader = new ClientCopyTraderEngine((log) => {
   }
 });
 
-const paperTrading = new PaperTradingEngine((account, tradeEvent) => {
+const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
   io.emit('paper_account_update', account);
+  await persistMasterBalance(account);
+  if (tradeEvent) {
+    await upsertMasterOrder(tradeEvent);
+  } else {
+    for (const openTrade of account.openPositions) {
+      await upsertMasterOrder(openTrade);
+    }
+  }
   if (tradeEvent) {
     io.emit('simulated_trade_event', tradeEvent);
     const pairConfig = AutoPairSelectorEngine.getPairConfig(tradeEvent.symbol);
@@ -218,7 +227,7 @@ const paperTrading = new PaperTradingEngine((account, tradeEvent) => {
       }).catch(auditErr => {
         console.error('[ShadowAuditor] Erro no shadow mode do Master:', auditErr.message);
       });
-    } else if (tradeEvent.status === 'CLOSED_TP' || tradeEvent.status === 'CLOSED_SL') {
+} else if (tradeEvent.status === 'CLOSED_TP' || tradeEvent.status === 'CLOSED_SL') {
       try {
         const outcome = recordShadowOutcome(
           tradeEvent.symbol,
@@ -234,8 +243,37 @@ const paperTrading = new PaperTradingEngine((account, tradeEvent) => {
         console.error('[ShadowAuditor] Erro ao registrar desfecho do trade:', err.message);
       }
     }
+
+    // ─── Replicar no Espelho (Mirror) ────────────────────────────────────────
+    if (tradeEvent.status === 'OPEN') {
+      const isMaker = (tradeEvent as any).orderType === 'LIMIT' || false;
+      const result = mirrorTrading.replicateMasterTrade(tradeEvent, isMaker);
+      if (!result.success) {
+        console.warn(`[Mirror] Falha ao replicar ${tradeEvent.symbol}: ${result.error}`);
+      } else {
+        console.log(`[Mirror] ✅ Replicado ${tradeEvent.type} ${tradeEvent.symbol} @ ${tradeEvent.entryPrice}`);
+      }
+    } else if (tradeEvent.status === 'CLOSED_TP' || tradeEvent.status === 'CLOSED_SL') {
+      const result = mirrorTrading.closePosition(tradeEvent.symbol, tradeEvent.currentPrice, false);
+      if (result.success) {
+        console.log(`[Mirror] ✅ Fechado ${tradeEvent.symbol} PnL líquido: $${result.pnl?.toFixed(2)}`);
+      }
+    }
   }
   recalculateAllPairs();
+  });
+
+// ─── Mirror Trading Engine (Conta Espelho) ──────────────────────────────────
+const mirrorTrading = new MirrorTradingEngine(async (account, tradeEvent) => {
+  io.emit('mirror_account_update', account);
+  await persistMirrorBalance(account);
+  if (tradeEvent) {
+    await upsertMirrorOrder(tradeEvent as any);
+  } else {
+    for (const openTrade of account.openPositions) {
+      await upsertMirrorOrder(openTrade as any);
+    }
+  }
 });
 
 const flowEngine = new FlowEngine((signal: FlowSignal) => {
@@ -250,6 +288,7 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
   broadcast(event, data);
   if (event === 'trade') {
     paperTrading.updatePrice(data.symbol, data.price);
+    mirrorTrading.updatePrice(data.symbol, data.price);
   }
 });
 marketManager.startStreaming();
@@ -288,6 +327,32 @@ app.get('/api/assets', (req, res) => {
 // Endpoints de paper trading (admin apenas — tela do terminal)
 app.get('/api/paper-trading', requireAuth, (req, res) => {
   res.json(paperTrading.getAccountState());
+});
+
+// ─── Mirror Account Endpoints ────────────────────────────────────────────────
+app.get('/api/trading/mirror/account', requireAuth, (req, res) => {
+  res.json(mirrorTrading.getAccountState());
+});
+
+// POST /api/trading/reset — Reset parametrizado Master + Mirror
+app.post('/api/trading/reset', requireAuth, async (req, res) => {
+  try {
+    const { masterBalance = 10000, mirrorBalance = 500 } = req.body || {};
+    const result = await resetTradingAccounts(Number(masterBalance), Number(mirrorBalance));
+    
+    // Reset em memória
+    paperTrading.resetData(result.masterBalance);
+    mirrorTrading.resetData(result.mirrorBalance);
+    
+    io.emit('paper_account_update', paperTrading.getAccountState());
+    io.emit('mirror_account_update', mirrorTrading.getAccountState());
+    io.emit('trading_reset', result);
+    
+    res.json({ success: true, ...result, message: 'Bancas Master e Mirror resetadas com sucesso' });
+  } catch (err: any) {
+    console.error('[TradingReset] Erro:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.get('/api/pair-performance', requireAuth, (req, res) => {
@@ -405,11 +470,19 @@ app.post('/api/paper-trading/balance', requireAuth, (req, res) => {
 app.post('/api/paper-trading/reset', requireAuth, async (req, res) => {
   try {
     const { balance } = req.body;
+    const newBalance = typeof balance === 'number' ? balance : 10000;
     
     // 1. Zera a conta Master Quant (saldo, posições abertas, histórico)
-    paperTrading.resetData(typeof balance === 'number' ? balance : undefined);
+    paperTrading.resetData(newBalance);
     const updated = paperTrading.getAccountState();
     io.emit('paper_account_update', updated);
+    
+    // Persistir reset no banco
+    await query(`DELETE FROM paper_master_orders`);
+    await query(
+      `UPDATE paper_master_account SET balance = $1, equity = $1, realized_pnl = 0, win_rate = 0, total_trades = 0, winning_trades = 0, losing_trades = 0, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $2`,
+      [newBalance, 'master-paper-account']
+    );
 
     // 2. Zera o Shadow Mode Auditor (arquivo de log e auditorias pendentes)
     clearShadowAudits();
@@ -428,11 +501,11 @@ app.post('/api/paper-trading/reset', requireAuth, async (req, res) => {
     res.json({ 
       success: true, 
       message: 'Sessão zerada com sucesso em todas as frentes (Master Quant, Shadow Mode e Planilha Google sincronizados)', 
-      account: updated 
+      account: updated
     });
   } catch (err: any) {
-    console.error('[SessionReset] Erro ao resetar sessão:', err.message);
-    res.status(500).json({ error: 'Erro ao zerar sessão', message: err.message });
+    console.error('[PaperTrading] Erro ao resetar:', err.message);
+    res.status(500).json({ error: 'Erro ao resetar sessão', message: err.message });
   }
 });
 
@@ -707,6 +780,7 @@ io.on('connection', (socket) => {
     assets: marketManager.getSummaries(),
     signals: flowEngine.getRecentSignals(),
     paperAccount: paperTrading.getAccountState(),
+    mirrorAccount: mirrorTrading.getAccountState(),
     pairStats,
     dynamicPairs,
     clients: user?.role === 'ADMIN' ? clientCopyTrader.getClients() : [],
@@ -723,7 +797,29 @@ io.on('connection', (socket) => {
 
 // Inicializar banco de dados ANTES de iniciar o servidor
 initDatabase()
-  .then(() => {
+  .then(async () => {
+    await initPaperTables();
+    const masterAccount = await hydrateMasterAccount();
+    paperTrading.hydrateFromStorage({
+      balance: masterAccount.balance,
+      realizedPnl: masterAccount.realizedPnl,
+      openPositions: masterAccount.openPositions,
+      history: masterAccount.history
+    });
+    console.log('[PaperTrading] ✅ Banca master hidratada do PostgreSQL:', masterAccount.balance.toFixed(2));
+
+    // Hidratar conta Mirror
+    const mirrorAccount = await hydrateMirrorAccount();
+    mirrorTrading.hydrateFromStorage({
+      balance: mirrorAccount.balance,
+      realizedPnl: mirrorAccount.realizedPnl,
+      openPositions: mirrorAccount.openPositions,
+      history: mirrorAccount.history
+    });
+    console.log('[MirrorTrading] ✅ Conta espelho hidratada do PostgreSQL:', mirrorAccount.balance.toFixed(2));
+    
+    await marketManager.initialize();
+    
     server.listen(Number(PORT), '0.0.0.0', () => {
       console.log(`🚀 MarketFlow Pro SaaS Backend running at http://0.0.0.0:${PORT}`);
       console.log(`🔒 Segurança: JWT + AES-256 + Helmet + Rate Limiting ATIVO`);
