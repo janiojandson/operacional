@@ -57,19 +57,6 @@ export const MIN_NOTIONAL_USD = 5.0;
 /** Spread (bps) a partir do qual priorizamos LIMIT Post-Only (taxa Maker) */
 const SPREAD_MAKER_THRESHOLD_BPS = 2.0;
 
-export const COIN_RISK_PROFILES: Record<string, { sl: number; tp: number }> = {
-  'BTC/USDT': { sl: 0.0080, tp: 0.0200 }, // 0.8% SL / 2.0% TP
-  'BTCUSDT': { sl: 0.0080, tp: 0.0200 },
-  'ETH/USDT': { sl: 0.0100, tp: 0.0250 }, // 1.0% SL / 2.5% TP
-  'ETHUSDT': { sl: 0.0100, tp: 0.0250 },
-  'SOL/USDT': { sl: 0.0140, tp: 0.0350 }, // 1.4% SL / 3.5% TP
-  'SOLUSDT': { sl: 0.0140, tp: 0.0350 },
-  'BNB/USDT': { sl: 0.0090, tp: 0.0225 }, // 0.9% SL / 2.25% TP
-  'BNBUSDT': { sl: 0.0090, tp: 0.0225 },
-  'XRP/USDT': { sl: 0.0120, tp: 0.0300 }, // 1.2% SL / 3.0% TP
-  'XRPUSDT': { sl: 0.0120, tp: 0.0300 }
-};
-
 function toBybitLinear(symbol: string): string {
   if (symbol.includes(':')) return symbol;
   const [base, quote] = symbol.split('/');
@@ -104,6 +91,20 @@ function createBybitClient(apiKey: string, apiSecret: string, testnet: boolean, 
 function toValidNumber(val: any, fallback: number = 0): number {
   const num = Number(val);
   return Number.isFinite(num) && !Number.isNaN(num) ? num : fallback;
+}
+
+export function calculateTrailingConfiguration(input: {
+  entryPrice: number;
+  takeProfit: number;
+  side: 'BUY' | 'SELL';
+}): { activationPrice: number; callbackDistance: number } | null {
+  const targetDistancePct = Math.abs(input.takeProfit - input.entryPrice) / input.entryPrice;
+  if (!Number.isFinite(targetDistancePct) || targetDistancePct <= 0 || !Number.isFinite(input.entryPrice) || input.entryPrice <= 0) return null;
+  const direction = input.side === 'BUY' ? 1 : -1;
+  return {
+    activationPrice: Number((input.entryPrice * (1 + direction * targetDistancePct * 0.8)).toFixed(8)),
+    callbackDistance: Number((input.entryPrice * targetDistancePct * 0.2).toFixed(8))
+  };
 }
 
 export function calculatePositionSize(params: {
@@ -595,12 +596,11 @@ export class BybitExecutionEngine {
         ? payload.trailingStopAtivo
         : Number(config.trailing_stop_enabled ?? 1) === 1;
 
-      const cleanKey = payload.symbol.replace(':USDT', '').trim();
-      const profile = COIN_RISK_PROFILES[cleanKey] || COIN_RISK_PROFILES[payload.symbol] || { sl: 0.0100, tp: 0.0250 };
-
-      const alvoLucroPct = profile.tp;
-      const gatilhoPct = 0.80;
-      const distanciaPct = 0.20;
+      const trailingConfiguration = calculateTrailingConfiguration({
+        entryPrice: validEntryPrice,
+        takeProfit: validTakeProfit,
+        side: payload.side
+      });
 
       // ─── CORREÇÃO DEFINITIVA: STOP LOSS COMO STRING DIRETA (NUNCA OBJETO) ───
       if (validStopLoss > 0) {
@@ -630,13 +630,9 @@ export class BybitExecutionEngine {
       if (trailingAtivo) {
         try {
           const rawSymbol = ccxtSymbol.replace('/', '').split(':')[0];
-          const callbackDistance = Number(exchange.priceToPrecision(ccxtSymbol, validEntryPrice * (distanciaPct * alvoLucroPct)));
-          const activationPrice = Number(exchange.priceToPrecision(
-            ccxtSymbol,
-            payload.side === 'BUY'
-              ? validEntryPrice * (1 + (gatilhoPct * alvoLucroPct))
-              : validEntryPrice * (1 - (gatilhoPct * alvoLucroPct))
-          ));
+          if (!trailingConfiguration) throw new Error('Take Profit inválido para trailing stop.');
+          const callbackDistance = Number(exchange.priceToPrecision(ccxtSymbol, trailingConfiguration.callbackDistance));
+          const activationPrice = Number(exchange.priceToPrecision(ccxtSymbol, trailingConfiguration.activationPrice));
 
           if (!isNaN(callbackDistance) && callbackDistance > 0 && !isNaN(activationPrice) && activationPrice > 0) {
             try {
@@ -695,7 +691,7 @@ export class BybitExecutionEngine {
         orderType: orderType.toUpperCase(),
         trailingStopAtivo: trailingAtivo ? 'SIM' : 'NÃO',
         feePaid,
-        pnlTeoricoSemTrailing: `Alvo Fixo: +${(alvoLucroPct * 100).toFixed(2)}% | SL: -${(profile.sl * 100).toFixed(2)}%`,
+        pnlTeoricoSemTrailing: `Alvo Fixo: +${(Math.abs(validTakeProfit - validEntryPrice) / validEntryPrice * 100).toFixed(2)}% | SL: -${(Math.abs(validEntryPrice - validStopLoss) / validEntryPrice * 100).toFixed(2)}%`,
         timestamp: new Date().toISOString()
       });
 
