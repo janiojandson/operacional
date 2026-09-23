@@ -5,6 +5,7 @@ import { runShadowAudit } from './shadowAuditor.js';
 import { GoogleSheetsService } from '../services/googleSheetsService.js';
 import { calculateMasterMirrorSize } from './masterMirrorSizing.js';
 import { assessClientMarginCapacity } from './clientMarginGuard.js';
+import { classifyBybitOrderState, verifyIsolatedLeverage } from './bybitExecutionSafety.js';
 
 export interface BybitAccountInfo {
   walletBalance: number;
@@ -533,8 +534,16 @@ export class BybitExecutionEngine {
         };
       }
 
-      await exchange.setMarginMode('isolated', ccxtSymbol).catch(() => { });
-      await exchange.setLeverage(sizing.leverage, ccxtSymbol).catch(() => { });
+      const marginModeError = await exchange.setMarginMode('isolated', ccxtSymbol).catch((error: any) => error);
+      const leverageError = await exchange.setLeverage(sizing.leverage, ccxtSymbol).catch((error: any) => error);
+      const configuredPositions = await exchange.fetchPositions([ccxtSymbol]).catch(() => []);
+      const configuration = verifyIsolatedLeverage(configuredPositions, ccxtSymbol, sizing.leverage);
+      if (!configuration.verified) {
+        const apiHint = marginModeError instanceof Error || leverageError instanceof Error
+          ? ` (${marginModeError?.message || leverageError?.message || 'API recusou a configuração'})`
+          : '';
+        return { success: false, error: `${configuration.reason}${apiHint}. Ordem não enviada.` };
+      }
 
       // Pré-checagem de saldo (auditoria clara antes de qualquer envio à exchange)
       if (balance < sizing.marginUsd) {
@@ -656,9 +665,10 @@ export class BybitExecutionEngine {
         orderPrice,
         orderParams
       );
+      const entryOrderState = classifyBybitOrderState(order);
 
       // Se o Trailing Stop estiver ATIVADO, programa no endpoint nativo da Bybit
-      if (trailingAtivo) {
+      if (trailingAtivo && (entryOrderState === 'PREENCHIDA' || entryOrderState === 'PARCIAL')) {
         try {
           const rawSymbol = ccxtSymbol.replace('/', '').split(':')[0];
           if (!trailingConfiguration) throw new Error('Take Profit inválido para trailing stop.');
@@ -702,7 +712,7 @@ export class BybitExecutionEngine {
         qty: cleanQty,
         notional_usd: sizing.notionalUsd,
         leverage: sizing.leverage,
-        status: 'OPEN',
+        status: entryOrderState,
         signal_reason: payload.signalReason,
         bybitOrderId: order.id,
         entry_time: Date.now()
@@ -718,7 +728,7 @@ export class BybitExecutionEngine {
         qty: cleanQty,
         stopLoss: validStopLoss,
         takeProfit: validTakeProfit,
-        status: 'EXECUTADO',
+        status: entryOrderState,
         orderType: orderType.toUpperCase(),
         trailingStopAtivo: trailingAtivo ? 'SIM' : 'NÃO',
         feePaid,
