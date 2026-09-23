@@ -18,6 +18,11 @@ interface ActiveSymbolState {
 }
 
 const DEFAULT_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT'];
+export const MARKET_DATA_INTERVALS = {
+  tickerMs: 2_000,
+  bookMs: 10_000,
+  candlesMs: 60_000
+} as const;
 const BYBIT_CATEGORIES: Record<string, 'crypto' | 'forex'> = {
   'BTC/USDT': 'crypto', 'ETH/USDT': 'crypto', 'SOL/USDT': 'crypto',
   'BNB/USDT': 'crypto', 'XRP/USDT': 'crypto'
@@ -35,9 +40,11 @@ export class MarketDataManager {
   private flowEngine: FlowEngine;
   private onBroadcast?: (type: string, data: any) => void;
   private fetchInterval?: NodeJS.Timeout;
+  private bookInterval?: NodeJS.Timeout;
   private tickerInterval?: NodeJS.Timeout;
   private exchange: any;
   private isInitialized = false;
+  private isRefreshingBooks = false;
   private processedTradeIds = new Map<string, Set<string>>();
 
   constructor(flowEngine: FlowEngine, onBroadcast?: (type: string, data: any) => void) {
@@ -167,9 +174,11 @@ export class MarketDataManager {
   public startStreaming(): void {
     if (this.fetchInterval) return;
     
-    this.tickerInterval = setInterval(() => this.updateTickers(), 2000);
-    this.fetchInterval = setInterval(() => this.updateCandlesAndBooks(), 60000);
+    this.tickerInterval = setInterval(() => this.updateTickers(), MARKET_DATA_INTERVALS.tickerMs);
+    this.bookInterval = setInterval(() => this.updateBooks(), MARKET_DATA_INTERVALS.bookMs);
+    this.fetchInterval = setInterval(() => this.updateCandlesAndBooks(), MARKET_DATA_INTERVALS.candlesMs);
     this.updateTickers();
+    this.updateBooks();
   }
 
   private async updateTickers(): Promise<void> {
@@ -285,10 +294,7 @@ export class MarketDataManager {
     for (const [symbol, state] of this.symbols.entries()) {
       try {
         const ccxtSymbol = toBybitLinear(symbol);
-        const [ohlcv, book] = await Promise.all([
-          this.exchange.fetchOHLCV(ccxtSymbol, '1m', undefined, 200),
-          this.fetchOrderBook(ccxtSymbol, state.lastPrice)
-        ]);
+        const ohlcv = await this.exchange.fetchOHLCV(ccxtSymbol, '1m', undefined, 200);
 
         const newCandles = this.normalizeCandles(ohlcv, symbol);
         const live = state.candles[state.candles.length - 1];
@@ -303,17 +309,32 @@ export class MarketDataManager {
         }
         state.candles = newCandles;
         state.cvd = this.calculateCVD(newCandles);
-        book.symbol = symbol;
-        state.book = book;
-
         const currentCandle = state.candles[state.candles.length - 1];
         if (currentCandle && this.onBroadcast) {
           this.onBroadcast('candle_update', { symbol, candle: currentCandle });
-          this.onBroadcast('book', book);
         }
       } catch (err: any) {
         console.debug(`[MarketData] Candles update failed for ${symbol}:`, err.message);
       }
+    }
+  }
+
+  private async updateBooks(): Promise<void> {
+    if (this.isRefreshingBooks) return;
+    this.isRefreshingBooks = true;
+    try {
+      for (const [symbol, state] of this.symbols.entries()) {
+        try {
+          const book = await this.fetchOrderBook(toBybitLinear(symbol), state.lastPrice);
+          book.symbol = symbol;
+          state.book = book;
+          if (this.onBroadcast) this.onBroadcast('book', book);
+        } catch (err: any) {
+          console.debug(`[MarketData] Book update failed for ${symbol}:`, err.message);
+        }
+      }
+    } finally {
+      this.isRefreshingBooks = false;
     }
   }
 
