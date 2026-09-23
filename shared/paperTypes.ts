@@ -30,6 +30,9 @@ export interface SimulatedTrade {
   signalReason: string;
   qty?: number;
   notionalUsd?: number;
+  riskUsd?: number;
+  grossR?: number;
+  netR?: number;
   marginUsd?: number;
   masterExposureRatio?: number;
   masterBalanceAtEntry?: number;

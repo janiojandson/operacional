@@ -41,6 +41,10 @@ export interface TradeLogPayload {
   exchangeMinQty?: number;
   qtyStep?: number;
   shadowFilterActive?: boolean;
+  grossR?: number;
+  netR?: number;
+  riskUsd?: number;
+  riskReasons?: string[];
 }
 
 export interface ShadowAuditPayload {

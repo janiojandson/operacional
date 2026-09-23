@@ -24,6 +24,8 @@ import { GoogleSheetsService } from './services/googleSheetsService.js';
 import { runShadowAudit, recordShadowOutcome, clearShadowAudits, getShadowOpportunities, recordShadowOpportunity } from './engine/shadowAuditor.js';
 import { RISK_CONFIG } from './config/riskConfig.js';
 import { evaluateCryptoOpportunity } from './engine/cryptoStrategyDecision.js';
+import { calculateAdaptiveRisk } from './engine/adaptiveRisk.js';
+import { getCryptoStrategyProfile } from './engine/cryptoStrategyProfile.js';
 // SaaS: Autenticação e Rotas
 import { authRouter } from './auth/authRoutes.js';
 import { adminRouter, bindMasterControlHandler } from './routes/adminRoutes.js';
@@ -250,6 +252,10 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
         exchangeMinQty: getMinLot(tradeEvent.symbol),
         qtyStep: getMinLot(tradeEvent.symbol),
         shadowFilterActive: masterShadowFilterActive,
+        grossR: Number((tradeEvent as any).grossR ?? 0),
+        netR: Number((tradeEvent as any).netR ?? 0),
+        riskUsd: Number((tradeEvent as any).riskUsd ?? 0),
+        riskReasons: (tradeEvent as any).decisionFactors ?? [],
         timestamp: new Date().toISOString(),
         errorMsg: details
       });
@@ -401,12 +407,44 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
     io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
     if (!decision.approved) return;
 
+    const profile = getCryptoStrategyProfile(signal.symbol);
+    const account = paperTrading.getAccountState();
+    if (!profile || book?.source !== 'BYBIT') return;
+    const powerMultiplier = Math.max(paperTrading.getMinTemperature(), pairConfig?.powerMultiplier || 1.5);
+    const requestedNotionalUsd = Math.max(100, account.balance * 0.20) * (powerMultiplier / 1.5);
+    const existingAggregateRiskUsd = account.openPositions.reduce((sum, position) => {
+      if (Number.isFinite(position.riskUsd) && (position.riskUsd || 0) > 0) return sum + (position.riskUsd || 0);
+      const notional = position.notionalUsd || 0;
+      const stopDistancePct = position.entryPrice > 0 ? Math.abs(position.entryPrice - position.stopLoss) / position.entryPrice : 0;
+      return sum + notional * stopDistancePct;
+    }, 0);
+    const adaptiveRisk = calculateAdaptiveRisk({
+      entryPrice: asset.lastPrice,
+      side,
+      candles: asset.candles,
+      structuralStopDistancePct: profile.stopLossPct,
+      spreadPct: book.spread / asset.lastPrice,
+      slippageBufferPct: profile.slippageBufferPct,
+      atrMultiplier: profile.atrMultiplier,
+      requestedNotionalUsd,
+      accountBalanceUsd: account.balance,
+      maxRiskUsd: account.balance * profile.maxRiskPct,
+      existingAggregateRiskUsd,
+      maxAggregateRiskUsd: account.balance * profile.maxAggregateRiskPct,
+      roundTripFeePct: 0.0011
+    });
+    if (!adaptiveRisk.approved) {
+      decision.reasons.push(...adaptiveRisk.reasons);
+      io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
+      return;
+    }
+
     if (masterShadowFilterActive) {
       const audit = await runShadowAudit(null, signal.symbol, side, 1.0, paperTrading.getAccountState().openPositions, asset.book);
       const decision = String(audit?.newMode || '').toUpperCase();
       if (decision.indexOf('BLOQUEADO') !== -1) return;
     }
-    paperTrading.handleSignal(signal, asset.lastPrice, decision);
+    paperTrading.handleSignal(signal, asset.lastPrice, decision, adaptiveRisk);
   })();
 });
 

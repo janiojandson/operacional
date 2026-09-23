@@ -4,8 +4,8 @@ import { AutoPairSelectorEngine } from './autoPairSelectorEngine';
 import { QuantStrategyEngine } from './quantStrategyEngine';
 import { validateOrderMarginAndLot, getMinLot } from '../database/paperStorage.js';
 import { calculateMasterMirrorSize } from './masterMirrorSizing.js';
-import { getCryptoStrategyProfile } from './cryptoStrategyProfile.js';
 import type { StrategyDecision } from './cryptoStrategyDecision.js';
+import type { AdaptiveRiskResult } from './adaptiveRisk.js';
 
 export interface SimulatedTradeWithTrailing extends SimulatedTrade {
   trailingActive?: boolean;
@@ -93,7 +93,7 @@ export class PaperTradingEngine {
   }
 
   // Executa uma entrada automatizada SEM REPAINT quando um sinal de fluxo qualificado ocorre
-  public handleSignal(signal: FlowSignal, currentPrice: number, decision?: StrategyDecision) {
+  public handleSignal(signal: FlowSignal, currentPrice: number, decision?: StrategyDecision, adaptiveRisk?: AdaptiveRiskResult) {
     // 1. Verificar se o par está habilitado pelo usuário
     if (!this.activePairs.has(signal.symbol)) {
       return;
@@ -115,6 +115,9 @@ export class PaperTradingEngine {
     if (!decision?.approved || !decision.stopLoss || !decision.takeProfit || !decision.trailingTrigger) {
       return;
     }
+    if (adaptiveRisk && (!adaptiveRisk.approved || !adaptiveRisk.stopLoss || !adaptiveRisk.takeProfit || !adaptiveRisk.notionalUsd || !adaptiveRisk.riskUsd)) {
+      return;
+    }
 
     if (signal.type === 'ABSORPTION_BUY') {
       tradeType = 'SELL';
@@ -127,9 +130,10 @@ export class PaperTradingEngine {
 
     if (!tradeType || decision.entrySide !== tradeType) return;
 
-    const stopLoss = decision.stopLoss;
-    const takeProfit = decision.takeProfit;
-    const trailingTriggerPrice = decision.trailingTrigger;
+    const stopLoss = adaptiveRisk?.stopLoss ?? decision.stopLoss;
+    const takeProfit = adaptiveRisk?.takeProfit ?? decision.takeProfit;
+    const targetDistance = Math.abs(takeProfit - currentPrice);
+    const trailingTriggerPrice = Number((currentPrice + (tradeType === 'BUY' ? 1 : -1) * targetDistance * 0.8).toFixed(8));
 
     // Potência proporcional à banca (20% por trade padrão)
     const baseAllocation = Math.max(100, this.balance * 0.20);
@@ -143,7 +147,8 @@ export class PaperTradingEngine {
     const regime = pairConfig?.regime || 'TREND';
 
     const masterBalanceAtEntry = this.balance;
-    const openNotional = Math.max(100, masterBalanceAtEntry * 0.20) * (powerMultiplier / 1.5);
+    const requestedNotional = Math.max(100, masterBalanceAtEntry * 0.20) * (powerMultiplier / 1.5);
+    const openNotional = adaptiveRisk?.notionalUsd ?? requestedNotional;
     const newTrade: SimulatedTradeWithTrailing = {
       id: `sim-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       symbol: signal.symbol,
@@ -168,11 +173,20 @@ export class PaperTradingEngine {
       trailingStopPrice: undefined,
       qty: Number((openNotional / currentPrice).toFixed(8)),
       notionalUsd: openNotional,
+      riskUsd: adaptiveRisk?.riskUsd ?? undefined,
+      grossR: adaptiveRisk?.grossR ?? undefined,
+      netR: adaptiveRisk?.netR ?? undefined,
       marginUsd: Number((openNotional / 10).toFixed(4)),
       masterExposureRatio: openNotional / masterBalanceAtEntry,
       masterBalanceAtEntry,
       strategyVersion: decision.profileVersion,
-      decisionFactors: decision.reasons
+      decisionFactors: [
+        ...decision.reasons,
+        ...(adaptiveRisk ? [
+          `STOP_ADAPTATIVO_${((adaptiveRisk.stopDistancePct || 0) * 100).toFixed(3)}%`,
+          `RISCO_USD_${(adaptiveRisk.riskUsd || 0).toFixed(2)}`
+        ] : [])
+      ]
     };
 
     const openFee = Number((openNotional * 0.00055).toFixed(4));
@@ -199,9 +213,9 @@ export class PaperTradingEngine {
     trade.pnlPct = Number((priceDeltaPct * 100).toFixed(2));
     trade.pnlUsd = Number((notionalSize * priceDeltaPct).toFixed(2));
 
-    const riskProfile = getCryptoStrategyProfile(symbol) || { stopLossPct: 0.01, takeProfitPct: 0.025 };
-    const tpDistancePct = riskProfile.takeProfitPct;
-    const slDistancePct = riskProfile.stopLossPct;
+    const tpDistancePct = Math.abs(trade.takeProfit - trade.entryPrice) / trade.entryPrice;
+    const slDistancePct = Math.abs(trade.entryPrice - trade.stopLoss) / trade.entryPrice;
+    if (!Number.isFinite(tpDistancePct) || tpDistancePct <= 0 || !Number.isFinite(slDistancePct) || slDistancePct <= 0) return;
     const decimals = currentPrice < 5 ? 4 : (currentPrice < 100 ? 3 : 2);
 
     // Progresso em relação ao objetivo (1.0 = 100% do alvo atingido)
@@ -212,7 +226,7 @@ export class PaperTradingEngine {
 
     // ─── 1. VERIFICAÇÃO DO GATILHO E GESTÃO DO TRAILING STOP ─────────────────
     // Só persegue o preço se o botão Trailing Stop estiver ATIVADO
-    if (this.trailingStopEnabled && (progressRatio >= 0.80 || trade.trailingActive)) {
+    if (this.trailingStopEnabled && (progressRatio >= 0.80 - 1e-9 || trade.trailingActive)) {
       trade.trailingActive = true;
 
       if (trade.type === 'BUY') {

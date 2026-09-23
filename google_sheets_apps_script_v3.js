@@ -63,10 +63,33 @@ function manualUpdateDashboard() {
   SpreadsheetApp.getUi().alert('Painel atualizado com sucesso!');
 }
 
+function scheduleDashboardRefresh(ss) {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('MARKETFLOW_DASHBOARD_REFRESH_PENDING') === 'true') return;
+  props.setProperty('MARKETFLOW_DASHBOARD_REFRESH_PENDING', 'true');
+  ScriptApp.newTrigger('refreshDashboardFromTrigger')
+    .timeBased()
+    .after(60 * 1000)
+    .create();
+}
+
+function refreshDashboardFromTrigger() {
+  var props = PropertiesService.getScriptProperties();
+  try {
+    updateDashboard(getSpreadsheet());
+    props.setProperty('MARKETFLOW_DASHBOARD_LAST_REFRESH', String(Date.now()));
+  } finally {
+    props.deleteProperty('MARKETFLOW_DASHBOARD_REFRESH_PENDING');
+    ScriptApp.getProjectTriggers().forEach(function(trigger) {
+      if (trigger.getHandlerFunction() === 'refreshDashboardFromTrigger') ScriptApp.deleteTrigger(trigger);
+    });
+  }
+}
+
 function doGet(e) {
   try {
     var ss = getSpreadsheet();
-    updateDashboard(ss);
+    scheduleDashboardRefresh(ss);
     return ContentService.createTextOutput(JSON.stringify({
       status: 'success',
       service: 'MarketFlow & Nexus Shadow Webhook Engine v3.1',
@@ -110,11 +133,11 @@ function doPost(e) {
       logMasterMirrorComparison(ss, data);
     }
 
-    updateDashboard(ss);
+    scheduleDashboardRefresh(ss);
 
     return ContentService.createTextOutput(JSON.stringify({
       status: 'success',
-      message: 'Registrado com sucesso e sincronizado no comparativo',
+      message: 'Registrado com sucesso; painel será atualizado em até 60 segundos',
       timestamp: new Date().toISOString()
     })).setMimeType(ContentService.MimeType.JSON);
 
@@ -180,7 +203,11 @@ function initSheetTrades(ss, forceRefresh) {
       'PotÃªncia',
       'Alavancagem',
       'Lote MÃ­nimo',
-      'Shadow Filter'
+      'Shadow Filter',
+      'R Bruto Estrutural',
+      'R LÃ­quido Estimado',
+      'Risco por Trade ($)',
+      'Motivos / ValidaÃ§Ã£o de Risco'
     ];
   if (sheet.getLastRow() === 0 || forceRefresh) {
     if (sheet.getLastRow() === 0) {
@@ -253,7 +280,11 @@ function logTrade(ss, data) {
     Number(data.powerMultiplier || 0),
     Number(data.leverage || 0),
     Number(data.exchangeMinQty || 0),
-    data.shadowFilterActive ? 'ATIVO' : 'INATIVO'
+    data.shadowFilterActive ? 'ATIVO' : 'INATIVO',
+    data.grossR !== undefined ? Number(data.grossR) : '',
+    data.netR !== undefined ? Number(data.netR) : '',
+    data.riskUsd !== undefined ? Number(data.riskUsd) : '',
+    Array.isArray(data.riskReasons) ? data.riskReasons.join(' | ') : String(data.riskReasons || '')
   ];
 
   sheet.appendRow(row);
@@ -283,7 +314,7 @@ function logTrade(ss, data) {
   sheet.getRange(lastRow, 17).setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"');
   sheet.getRange(lastRow, 18, 1, 2).setNumberFormat('+0.00%;-0.00%;0.00%');
   sheet.getRange(lastRow, 20).setNumberFormat('+0.0"R";-0.0"R";0.0"R"');
-  sheet.autoResizeColumns(1, 21);
+  sheet.autoResizeColumns(1, 34);
 }
 
 /**
@@ -623,7 +654,6 @@ function updateDashboard(ss) {
   if (!sheet) sheet = ss.insertSheet(name, 0);
 
   sheet.setTabColor('#10b981');
-  sheet.clear();
 
   // Cabeçalho Principal
   sheet.getRange('A1:F1').merge()

@@ -26,13 +26,47 @@ rawEngine.handleSignal(signal, 100_000);
 assert.equal(rawEngine.getAccountState().openPositions.length, 0, 'raw signal must not open a position');
 
 const approvedEngine = new PaperTradingEngine();
-approvedEngine.handleSignal(signal, 100_000, decision);
+approvedEngine.handleSignal(signal, 100_000, decision, {
+  approved: true,
+  reasons: [],
+  stopLoss: 98_000,
+  takeProfit: 105_000,
+  stopDistancePct: 0.02,
+  notionalUsd: 1_000,
+  riskUsd: 20,
+  grossR: 2.5,
+  netR: 2.31
+});
 const open = approvedEngine.getAccountState().openPositions[0];
 assert.equal(approvedEngine.getAccountState().openPositions.length, 1);
-assert.equal(open.takeProfit, 102_000);
-assert.equal(open.stopLoss, 99_200);
+assert.equal(open.takeProfit, 105_000);
+assert.equal(open.stopLoss, 98_000);
+assert.equal(open.notionalUsd, 1_000, 'adaptive risk cap must control the paper notional');
+assert.equal(open.riskUsd, 20);
+assert.equal(open.grossR, 2.5);
+assert.equal(open.netR, 2.31);
 assert.equal(open.rMultiple, 0, 'an open position preserves 0R rather than replacing it');
 assert.equal(open.strategyVersion, 'flow-crypto-v1');
 assert.equal(open.closeReason, undefined);
+
+approvedEngine.updatePrice('BTC/USDT', 104_000);
+approvedEngine.updatePrice('BTC/USDT', 102_300);
+const trailingClosed = approvedEngine.getAccountState().history[0];
+assert.equal(trailingClosed.closeReason, 'TRAILING');
+assert.equal(trailingClosed.rMultiple, 1.15, 'trailing R must use the adaptive 2% stop, not the legacy 0.8% profile stop');
+
+const rejectedRiskEngine = new PaperTradingEngine();
+rejectedRiskEngine.handleSignal(signal, 100_000, decision, {
+  approved: false,
+  reasons: ['RISCO_AGREGADO_EXCEDIDO'],
+  stopLoss: null,
+  takeProfit: null,
+  stopDistancePct: null,
+  notionalUsd: null,
+  riskUsd: null,
+  grossR: null,
+  netR: null
+});
+assert.equal(rejectedRiskEngine.getAccountState().openPositions.length, 0, 'a rejected adaptive-risk plan must not open a position');
 
 console.log('paperTradingEngine: PASS');
