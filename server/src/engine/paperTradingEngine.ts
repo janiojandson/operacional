@@ -149,6 +149,9 @@ export class PaperTradingEngine {
     const masterBalanceAtEntry = this.balance;
     const requestedNotional = Math.max(100, masterBalanceAtEntry * 0.20) * (powerMultiplier / 1.5);
     const openNotional = adaptiveRisk?.notionalUsd ?? requestedNotional;
+    const qty = Number((openNotional / currentPrice).toFixed(8));
+    const execution = validateOrderExecution(signal.symbol, currentPrice, qty, masterBalanceAtEntry, 10, false);
+    if (!execution.valid) return;
     const newTrade: SimulatedTradeWithTrailing = {
       id: `sim-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       symbol: signal.symbol,
@@ -171,12 +174,12 @@ export class PaperTradingEngine {
       trailingActive: false,
       trailingTriggerPrice,
       trailingStopPrice: undefined,
-      qty: Number((openNotional / currentPrice).toFixed(8)),
+      qty,
       notionalUsd: openNotional,
       riskUsd: adaptiveRisk?.riskUsd ?? undefined,
       grossR: adaptiveRisk?.grossR ?? undefined,
       netR: adaptiveRisk?.netR ?? undefined,
-      marginUsd: Number((openNotional / 10).toFixed(4)),
+      marginUsd: execution.marginRequired,
       masterExposureRatio: openNotional / masterBalanceAtEntry,
       masterBalanceAtEntry,
       strategyVersion: decision.profileVersion,
@@ -189,9 +192,8 @@ export class PaperTradingEngine {
       ]
     };
 
-    const openFee = Number((openNotional * 0.00055).toFixed(4));
-    newTrade.fee = openFee;
-    newTrade.netPnl = Number((-openFee).toFixed(4));
+    newTrade.fee = execution.fee;
+    newTrade.netPnl = Number((-execution.fee).toFixed(4));
 
     this.openPositions.set(signal.symbol, newTrade);
     this.broadcastUpdate(newTrade);

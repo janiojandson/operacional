@@ -390,6 +390,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       orderExecutable: true,
       source: book?.source ?? 'LOCAL_FALLBACK'
     });
+    const publishOpportunity = () => {
     const shadowOpportunity = recordShadowOpportunity({
       symbol: signal.symbol,
       side,
@@ -405,7 +406,11 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
     GoogleSheetsService.logShadowOpportunity(shadowOpportunity);
     io.emit('shadow_opportunity', shadowOpportunity);
     io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
-    if (!decision.approved) return;
+    };
+    if (!decision.approved) {
+      publishOpportunity();
+      return;
+    }
 
     const profile = getCryptoStrategyProfile(signal.symbol);
     const account = paperTrading.getAccountState();
@@ -434,10 +439,19 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       roundTripFeePct: 0.0011
     });
     if (!adaptiveRisk.approved) {
+      decision.approved = false;
       decision.reasons.push(...adaptiveRisk.reasons);
-      io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
+      publishOpportunity();
       return;
     }
+    if ((adaptiveRisk.notionalUsd || 0) / asset.lastPrice < getMinLot(signal.symbol)) {
+      decision.approved = false;
+      decision.reasons.push('LOTE_MINIMO_EXCEDE_RISCO');
+      publishOpportunity();
+      return;
+    }
+
+    publishOpportunity();
 
     if (masterShadowFilterActive) {
       const audit = await runShadowAudit(null, signal.symbol, side, 1.0, paperTrading.getAccountState().openPositions, asset.book);

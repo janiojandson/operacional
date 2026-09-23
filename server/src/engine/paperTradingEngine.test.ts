@@ -69,4 +69,18 @@ rejectedRiskEngine.handleSignal(signal, 100_000, decision, {
 });
 assert.equal(rejectedRiskEngine.getAccountState().openPositions.length, 0, 'a rejected adaptive-risk plan must not open a position');
 
+const belowLotEngine = new PaperTradingEngine();
+belowLotEngine.handleSignal(signal, 100_000, decision, {
+  approved: true,
+  reasons: [],
+  stopLoss: 98_000,
+  takeProfit: 105_000,
+  stopDistancePct: 0.02,
+  notionalUsd: 50,
+  riskUsd: 1,
+  grossR: 2.5,
+  netR: 2.31
+});
+assert.equal(belowLotEngine.getAccountState().openPositions.length, 0, 'paper master must not simulate a BTC order below the Bybit minimum lot');
+
 console.log('paperTradingEngine: PASS');

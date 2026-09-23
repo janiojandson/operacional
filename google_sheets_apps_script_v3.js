@@ -92,7 +92,7 @@ function doGet(e) {
     scheduleDashboardRefresh(ss);
     return ContentService.createTextOutput(JSON.stringify({
       status: 'success',
-      service: 'MarketFlow & Nexus Shadow Webhook Engine v3.1',
+      service: 'MarketFlow & Nexus Shadow Webhook Engine v3.2 — dashboard debounced',
       spreadsheetConnected: ss.getName(),
       timestamp: new Date().toISOString()
     })).setMimeType(ContentService.MimeType.JSON);

@@ -88,9 +88,8 @@ export default function TradingTerminal() {
 
   const handleToggleTrailing = async () => {
     const nextVal = !trailingStopEnabled;
-    setTrailingStopEnabled(nextVal);
     try {
-      await fetch('/api/admin/config/trailing-stop', {
+      const response = await fetch('/api/admin/config/trailing-stop', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -98,6 +97,9 @@ export default function TradingTerminal() {
         },
         body: JSON.stringify({ enabled: nextVal })
       });
+      const payload = await response.json();
+      if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Falha ao atualizar trailing stop');
+      setTrailingStopEnabled(Boolean(payload.trailingStopEnabled));
     } catch {
       setTrailingStopEnabled(!nextVal);
     }
@@ -105,9 +107,8 @@ export default function TradingTerminal() {
 
   const handleToggleShadow = async () => {
     const nextVal = !shadowFilterActive;
-    setShadowFilterActive(nextVal);
     try {
-      await fetch('/api/admin/config/shadow-filter', {
+      const response = await fetch('/api/admin/config/shadow-filter', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -115,6 +116,9 @@ export default function TradingTerminal() {
         },
         body: JSON.stringify({ active: nextVal })
       });
+      const payload = await response.json();
+      if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Falha ao atualizar Shadow Mode');
+      setShadowFilterActive(Boolean(payload.shadowFilterActive));
     } catch {
       setShadowFilterActive(!nextVal);
     }

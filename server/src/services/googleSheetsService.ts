@@ -84,13 +84,22 @@ export class GoogleSheetsService {
     if (!WEB_APP_URL) return;
 
     try {
-      await fetch(WEB_APP_URL, {
+      const response = await fetch(WEB_APP_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(data),
       });
+      const body = await response.text();
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      try {
+        const payload = JSON.parse(body);
+        if (payload?.status === 'error') throw new Error(payload.message || 'Apps Script recusou o evento');
+      } catch (err) {
+        if (err instanceof SyntaxError) return;
+        throw err;
+      }
     } catch (err: any) {
       console.error(`\x1b[33m[GoogleSheets] Falha ao enviar log para a planilha: ${err.message}\x1b[0m`);
     }
