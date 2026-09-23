@@ -17,7 +17,8 @@ const result = calculateAdaptiveRisk(input);
 assert.equal(result.approved, true);
 assert.equal(result.stopLoss, 98, 'ATR distance dominates the fixed 0.8% stop');
 assert.equal(result.takeProfit, 105, 'target remains 2.5R from the adaptive stop');
-assert.equal(result.notionalUsd, 1000, 'notional is capped by 20 USD risk over 2% distance');
+assert.ok(result.notionalUsd !== null && result.notionalUsd < 1000, 'notional reserves estimated round-trip fees inside the 20 USD loss budget');
+assert.equal(result.riskUsd, 20, 'riskUsd represents the all-in stop budget, not only price movement');
 assert.equal(result.grossR, 2.5);
 assert.ok(result.netR !== null && result.netR < 2.5);
 

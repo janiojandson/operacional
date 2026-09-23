@@ -45,9 +45,12 @@ export function calculateAdaptiveRisk(input: AdaptiveRiskInput): AdaptiveRiskRes
 
   const atrDistancePct = (atr * input.atrMultiplier) / input.entryPrice;
   const stopDistancePct = Math.max(input.structuralStopDistancePct, atrDistancePct, input.spreadPct + input.slippageBufferPct);
-  const riskLimitedNotional = input.maxRiskUsd / stopDistancePct;
+  // The loss budget is net of the expected round-trip execution cost.  This
+  // prevents a '$25 risk' label from becoming $25 plus fees at the stop.
+  const allInLossPct = stopDistancePct + input.roundTripFeePct;
+  const riskLimitedNotional = input.maxRiskUsd / allInLossPct;
   const notionalUsd = Math.min(input.requestedNotionalUsd, riskLimitedNotional);
-  const riskUsd = notionalUsd * stopDistancePct;
+  const riskUsd = notionalUsd * allInLossPct;
   if (!Number.isFinite(notionalUsd) || notionalUsd <= 0 || !Number.isFinite(riskUsd)) reasons.push('RISCO_INVALIDO');
   if (input.existingAggregateRiskUsd + riskUsd > input.maxAggregateRiskUsd) reasons.push('RISCO_AGREGADO_EXCEDIDO');
   if (reasons.length > 0) return { approved: false, reasons, stopLoss: null, takeProfit: null, stopDistancePct, notionalUsd, riskUsd, grossR: null, netR: null };
