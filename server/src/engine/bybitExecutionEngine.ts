@@ -4,6 +4,7 @@ import { ClientConfigDB, TradeHistoryDB } from '../database/db.js';
 import { runShadowAudit } from './shadowAuditor.js';
 import { GoogleSheetsService } from '../services/googleSheetsService.js';
 import { calculateMasterMirrorSize } from './masterMirrorSizing.js';
+import { assessClientMarginCapacity } from './clientMarginGuard.js';
 
 export interface BybitAccountInfo {
   walletBalance: number;
@@ -502,6 +503,36 @@ export class BybitExecutionEngine {
       }
 
       // 🛡️ Margem ISOLADA 10x (default do cliente) — falha silenciosa não aborta a ordem
+      const actualNotionalUsd = cleanQty * validEntryPrice;
+      const actualMarginUsd = actualNotionalUsd / sizing.leverage;
+      const conservativeOpenFeeUsd = actualNotionalUsd * 0.00055;
+      const exchangePositions = await exchange.fetchPositions().catch(() => []);
+      const activePositions = (exchangePositions as any[]).filter((position: any) => Number(position?.contracts || 0) > 0);
+      const existingMarginUsd = activePositions.reduce((sum: number, position: any) => {
+        const reportedMargin = Number(position?.initialMargin ?? position?.info?.positionIM ?? 0);
+        if (Number.isFinite(reportedMargin) && reportedMargin > 0) return sum + reportedMargin;
+        const contracts = Number(position?.contracts || 0);
+        const markPrice = Number(position?.markPrice ?? position?.entryPrice ?? 0);
+        const positionLeverage = Number(position?.leverage || sizing.leverage);
+        return sum + (contracts > 0 && markPrice > 0 && positionLeverage > 0 ? contracts * markPrice / positionLeverage : 0);
+      }, 0);
+      const capacity = assessClientMarginCapacity({
+        equityUsd: Math.max(0, Number(accountInfo?.equity || balance)),
+        availableUsd: balance,
+        existingMarginUsd,
+        existingPositionCount: activePositions.length,
+        newMarginUsd: actualMarginUsd,
+        openFeeUsd: conservativeOpenFeeUsd,
+        maxMarginUsagePct: 0.30,
+        maxOpenPositions: Math.max(1, Number(config.max_open_positions || 2))
+      });
+      if (!capacity.approved) {
+        return {
+          success: false,
+          error: `${capacity.reason}: margem projetada $${capacity.projectedMarginUsd.toFixed(2)} / limite $${capacity.maximumMarginUsd.toFixed(2)}; necessidade imediata $${capacity.requiredAvailableUsd.toFixed(2)}.`
+        };
+      }
+
       await exchange.setMarginMode('isolated', ccxtSymbol).catch(() => { });
       await exchange.setLeverage(sizing.leverage, ccxtSymbol).catch(() => { });
 
