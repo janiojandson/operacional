@@ -6,6 +6,18 @@ import { ComunicacaoService } from '../services/comunicacaoService.js';
 
 export const authRouter = Router();
 
+export function isValidInternationalE164(value: string): boolean {
+  return /^\+[1-9]\d{7,14}$/.test(String(value).trim());
+}
+
+export function hasMatchingPasswordConfirmation(password: string, confirmation: string): boolean {
+  return password === confirmation;
+}
+
+export function canCustomerLogIn(user: { role: string; email_verified?: number | boolean }): boolean {
+  return user.role !== 'CLIENT' || Number(user.email_verified) === 1;
+}
+
 // POST /api/auth/login
 authRouter.post('/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
@@ -21,6 +33,10 @@ authRouter.post('/login', async (req: Request, res: Response) => {
   const passwordMatch = await bcrypt.compare(password, user.password_hash);
   if (!passwordMatch) {
     return res.status(401).json({ error: 'Credenciais inválidas.' });
+  }
+
+  if (!canCustomerLogIn(user)) {
+    return res.status(403).json({ error: 'E-mail não verificado.', requiresEmailVerification: true });
   }
 
   const token = signToken({
@@ -106,12 +122,14 @@ authRouter.get('/me', requireAuth, async (req: Request, res: Response) => {
 // POST /api/auth/signup — Cadastro obrigatório com Nome, Email, Senha e WhatsApp (inicia no Modo Vitrine)
 authRouter.post('/signup', async (req: Request, res: Response) => {
   try {
-    const { email, password, name, whatsapp } = req.body;
+    const { email, password, confirmPassword, name, whatsapp } = req.body;
     if (!email || !password || !name || !whatsapp) {
       return res.status(400).json({ error: 'Nome, WhatsApp, email e senha são obrigatórios.' });
     }
 
-    const cleanPhone = String(whatsapp).replace(/\D/g, '');
+    if (!hasMatchingPasswordConfirmation(password, confirmPassword)) return res.status(400).json({ error: 'As senhas não coincidem.' });
+    if (!isValidInternationalE164(whatsapp)) return res.status(400).json({ error: 'Informe um WhatsApp válido no formato E.164.' });
+    const cleanPhone = String(whatsapp).trim();
     if (cleanPhone.length < 10 || cleanPhone.length > 15) {
       return res.status(400).json({ error: 'Número de WhatsApp inválido. Informe com DDD.' });
     }

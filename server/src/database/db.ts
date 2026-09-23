@@ -37,6 +37,24 @@ export async function queryOne<T = any>(text: string, params?: any[]): Promise<T
   return rows[0];
 }
 
+export async function bootstrapAdministrator(
+  environment: NodeJS.ProcessEnv,
+  operations: { find: (email: string) => Promise<{ id: string } | undefined>; execute: (text: string, params: unknown[]) => Promise<unknown>; hash: (password: string) => Promise<string> }
+): Promise<{ created: boolean; email: string }> {
+  const email = environment.ADMIN_EMAIL?.trim().toLowerCase();
+  const password = environment.ADMIN_PASSWORD;
+  if (!email || !password) throw new Error('ADMIN_EMAIL e ADMIN_PASSWORD devem estar configurados antes da inicializaÃ§Ã£o.');
+  const name = environment.ADMIN_NAME?.trim() || 'Administrador Nexus';
+  const passwordHash = await operations.hash(password);
+  const existing = await operations.find(email);
+  if (existing) {
+    await operations.execute(`UPDATE app_users SET password_hash = $1, role = 'ADMIN', name = $2, email_verified = 1, is_active = 1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $3`, [passwordHash, name, existing.id]);
+    return { created: false, email };
+  }
+  await operations.execute(`INSERT INTO app_users (id, email, password_hash, role, name, email_verified) VALUES ($1, $2, $3, 'ADMIN', $4, 1)`, [`admin-${Date.now()}`, email, passwordHash, name]);
+  return { created: true, email };
+}
+
 // ─── Inicialização das Tabelas ─────────────────────────────────────────────
 
 export async function initDatabase(): Promise<void> {
@@ -52,6 +70,7 @@ export async function initDatabase(): Promise<void> {
       name TEXT,
       whatsapp TEXT,
       whatsapp_validado INTEGER NOT NULL DEFAULT 0,
+      email_verified INTEGER NOT NULL DEFAULT 0,
       created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
       updated_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
       is_active INTEGER NOT NULL DEFAULT 1
@@ -93,6 +112,19 @@ export async function initDatabase(): Promise<void> {
       phone TEXT NOT NULL,
       otp_code TEXT NOT NULL,
       expires_at BIGINT NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0,
+      created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS email_otp_tokens (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      purpose TEXT NOT NULL CHECK(purpose IN ('VERIFY_EMAIL', 'RESET_PASSWORD')),
+      pin_hash TEXT NOT NULL,
+      expires_at BIGINT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
       used INTEGER NOT NULL DEFAULT 0,
       created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
     )
@@ -148,6 +180,7 @@ export async function initDatabase(): Promise<void> {
   // Migrações seguras de colunas
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS whatsapp TEXT`).catch(() => { });
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS whatsapp_validado INTEGER NOT NULL DEFAULT 0`).catch(() => { });
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 0`).catch(() => { });
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS sync_enabled INTEGER NOT NULL DEFAULT 0`).catch(() => { });
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_active INTEGER NOT NULL DEFAULT 1`).catch(() => { });
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_expires_at BIGINT`).catch(() => { });
@@ -172,6 +205,7 @@ export async function initDatabase(): Promise<void> {
   await query(`CREATE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_app_users_whatsapp ON app_users(whatsapp)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_password_reset_otps ON password_reset_otps(email, otp_code, expires_at)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_email_otp_tokens ON email_otp_tokens(email, purpose, expires_at)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_trade_history_client ON trade_history(client_id, entry_time DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_announcements_active ON announcements(is_active, created_at DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_shadow_opportunities_created ON shadow_opportunities(created_at DESC)`);
@@ -179,6 +213,12 @@ export async function initDatabase(): Promise<void> {
   console.log('[DB] ✅ Tabelas PostgreSQL inicializadas com sucesso.');
 
   // Seed: Admin padrão — sincroniza com variáveis de ambiente
+  await bootstrapAdministrator(process.env, {
+    find: (email) => queryOne<{ id: string }>('SELECT id FROM app_users WHERE LOWER(email) = LOWER($1) LIMIT 1', [email]),
+    execute: (text, params) => query(text, params),
+    hash: (password) => bcrypt.hash(password, 12)
+  });
+
   const adminEmail = process.env.ADMIN_EMAIL;
   const adminPassword = process.env.ADMIN_PASSWORD;
   if (!adminEmail || !adminPassword) {
@@ -225,6 +265,7 @@ export interface UserRow {
   name: string | null;
   whatsapp: string | null;
   whatsapp_validado: number;
+  email_verified: number;
   created_at: number;
   is_active: number;
 }
@@ -315,10 +356,10 @@ export const UserDB = {
     return queryOne<UserRow>(`SELECT * FROM app_users WHERE REPLACE(REPLACE(REPLACE(REPLACE(whatsapp, '+', ''), ' ', ''), '-', ''), '(', '') LIKE $1`, [`%${clean.slice(-8)}%`]);
   },
 
-  create: async (data: { id: string; email: string; passwordHash: string; role: 'ADMIN' | 'CLIENT'; clientId?: string; name?: string; whatsapp?: string; planActive?: boolean; whatsappValidado?: boolean }) => {
+  create: async (data: { id: string; email: string; passwordHash: string; role: 'ADMIN' | 'CLIENT'; clientId?: string; name?: string; whatsapp?: string; planActive?: boolean; whatsappValidado?: boolean; emailVerified?: boolean }) => {
     await query(
-      `INSERT INTO app_users (id, email, password_hash, role, client_id, name, whatsapp, whatsapp_validado, is_active) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      `INSERT INTO app_users (id, email, password_hash, role, client_id, name, whatsapp, whatsapp_validado, email_verified, is_active) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         data.id,
         data.email,
@@ -328,6 +369,7 @@ export const UserDB = {
         data.name || null,
         data.whatsapp || null,
         data.whatsappValidado ? 1 : 0,
+        data.emailVerified ? 1 : 0,
         data.planActive === false ? 0 : 1
       ]
     );
@@ -335,6 +377,10 @@ export const UserDB = {
 
   validateWhatsApp: async (userId: string) => {
     await query('UPDATE app_users SET whatsapp_validado = 1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $1', [userId]);
+  },
+
+  verifyEmail: async (userId: string) => {
+    await query('UPDATE app_users SET email_verified = 1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $1', [userId]);
   },
 
   updatePassword: async (userId: string, passwordHash: string) => {
