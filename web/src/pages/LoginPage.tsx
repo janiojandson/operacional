@@ -16,6 +16,9 @@ export default function LoginPage() {
     } else if (urlMode === 'login') {
       setMode('login');
     }
+    if (searchParams.get('expired') === '1') {
+      setError('Sua sessão expirou por segurança. Faça login novamente para continuar.');
+    }
   }, [searchParams]);
 
   // Fields

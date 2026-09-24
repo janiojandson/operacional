@@ -121,9 +121,9 @@ export function useAuth(): AuthContextValue {
 }
 
 // Helper: adicionar token nas requisições fetch
-export function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+export async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const token = localStorage.getItem('mfp_token');
-  return fetch(url, {
+  const res = await fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -131,5 +131,15 @@ export function authFetch(url: string, options: RequestInit = {}): Promise<Respo
       ...(options.headers || {})
     }
   });
+
+  if (res.status === 401) {
+    localStorage.removeItem('mfp_token');
+    localStorage.removeItem('mfp_user');
+    if (!window.location.pathname.includes('/login')) {
+      window.location.href = '/login?expired=1';
+    }
+  }
+
+  return res;
 }
 

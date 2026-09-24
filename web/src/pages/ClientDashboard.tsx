@@ -1295,9 +1295,62 @@ export default function ClientDashboard() {
                 </div>
               </div>
 
-              <div className="pt-2">
-                <button type="submit" className="w-full py-3 rounded-xl bg-accent hover:bg-accent/80 text-white text-sm font-bold transition-all shadow-lg shadow-accent/20">
-                  Salvar Chaves Criptografadas
+              <div className="pt-2 flex flex-col sm:flex-row gap-3">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 py-3 rounded-xl bg-accent hover:bg-accent/80 text-white text-sm font-bold transition-all shadow-lg shadow-accent/20 cursor-pointer flex items-center justify-center space-x-2"
+                >
+                  <Lock className="w-4 h-4" />
+                  <span>Salvar Chaves Criptografadas</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!apiKey || !apiSecret) {
+                      notify('Preencha a API Key e o Secret acima para testar.', 'error');
+                      return;
+                    }
+                    setTesting(true);
+                    setTestResult(null);
+                    try {
+                      // Salva primeiro e em seguida testa
+                      const saveRes = await authFetch('/api/client/api-keys', {
+                        method: 'POST',
+                        body: JSON.stringify({ apiKey: apiKey.trim(), apiSecret: apiSecret.trim(), testnet })
+                      });
+                      const saveData = await saveRes.json();
+                      if (!saveRes.ok) {
+                        notify(saveData.error || 'Erro ao processar chaves.', 'error');
+                        setTesting(false);
+                        return;
+                      }
+                      
+                      const env = testnet ? 'TESTNET' : 'REAL';
+                      const testRes = await authFetch('/api/client/api-keys/test', {
+                        method: 'POST',
+                        body: JSON.stringify({ env })
+                      });
+                      const testData = await testRes.json();
+                      setTestResult(testData);
+                      if (testData.success) {
+                        notify(`✅ Conexão com BingX (${env}) estabelecida com sucesso!`);
+                        fetchAccount();
+                      } else {
+                        notify(testData.error || 'Falha ao validar com a BingX.', 'error');
+                      }
+                    } catch {
+                      notify('Erro de conexão ao testar chaves.', 'error');
+                    } finally {
+                      setTesting(false);
+                    }
+                  }}
+                  disabled={testing || !apiKey || !apiSecret}
+                  className="px-6 py-3 rounded-xl bg-surface border border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-300 hover:text-emerald-200 text-sm font-bold transition-all flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {testing ? <Loader2 className="w-4 h-4 animate-spin text-emerald-400" /> : <RefreshCw className="w-4 h-4 text-emerald-400" />}
+                  <span>{testing ? 'Testando Conexão...' : 'Testar Conexão Agora'}</span>
                 </button>
               </div>
             </form>
