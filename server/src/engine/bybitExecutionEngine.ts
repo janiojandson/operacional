@@ -54,8 +54,8 @@ export interface SizingResult {
   stopDistPct: number;
 }
 
-/** Bybit Linear VIP0: notional mínimo por ordem (USDT) */
-export const MIN_NOTIONAL_USD = 5.0;
+/** BingX Swap VIP0: notional mínimo por ordem (USDT) */
+export const MIN_NOTIONAL_USD = 2.0;
 /** Spread (bps) a partir do qual priorizamos LIMIT Post-Only (taxa Maker) */
 const SPREAD_MAKER_THRESHOLD_BPS = 2.0;
 
