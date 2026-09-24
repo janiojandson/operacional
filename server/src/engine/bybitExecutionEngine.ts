@@ -67,12 +67,12 @@ function toBybitLinear(symbol: string): string {
 }
 
 function createBybitClient(apiKey: string, apiSecret: string, testnet: boolean, _useAlternateDomain: boolean = false): any {
-  // Conexão direta com Binance USD-M Futures
-  const exchange = new (ccxt as any).binance({
+  // Conexão direta com BingX Perpetual Swap (Futuros USDT-M)
+  const exchange = new (ccxt as any).bingx({
     apiKey,
     secret: apiSecret,
     options: {
-      defaultType: 'future',
+      defaultType: 'swap',
       adjustForTimeDifference: true,
       recvWindow: 60000
     },
@@ -217,12 +217,12 @@ export class BybitExecutionEngine {
 
       const fetchAccountBal = async (ex: any) => {
         try {
-          return await ex.fetchBalance({ type: 'future' });
+          return await ex.fetchBalance({ type: 'swap' });
         } catch {
           try {
             return await ex.fetchBalance();
           } catch (e) {
-            return await ex.fetchBalance({ type: 'unified' });
+            return await ex.fetchBalance({ type: 'future' });
           }
         }
       };
@@ -253,13 +253,13 @@ export class BybitExecutionEngine {
     } catch (err: any) {
       await ClientConfigDB.setApiConnected(clientId, false);
       await ClientConfigDB.setEnvironmentStatus(clientId, isTestnet, false);
-      console.error(`[BinanceEngine] Falha ao conectar cliente ${clientId}:`, err.message);
+      console.error(`[BingXEngine] Falha ao conectar cliente ${clientId}:`, err.message);
 
-      let friendlyError = `Erro de conexão com Binance: ${err.message}`;
-      if (err.message?.includes('API-key') || err.message?.includes('-2015') || err.message?.includes('-2014')) {
-        friendlyError = 'API Key ou Secret inválidos na Binance. Certifique-se de copiar as credenciais completas e habilitar "Ativar Futuros".';
-      } else if (err.message?.includes('IP') || err.message?.includes('-2010')) {
-        friendlyError = 'Restrição de IP ativa na chave da Binance. Libere o acesso sem restrição de IP ou vincule os IPs da nuvem.';
+      let friendlyError = `Erro de conexão com BingX: ${err.message}`;
+      if (err.message?.includes('100001') || err.message?.includes('signature') || err.message?.includes('key')) {
+        friendlyError = 'API Key ou Secret inválidos na BingX. Certifique-se de copiar as credenciais completas e habilitar "Perpetual Futures Trading".';
+      } else if (err.message?.includes('IP') || err.message?.includes('ip')) {
+        friendlyError = 'Restrição de IP ativa na chave da BingX. Deixe em branco para permitir conexões da nuvem.';
       }
 
       return {
@@ -281,12 +281,12 @@ export class BybitExecutionEngine {
 
       const fetchBal = async (ex: any) => {
         try {
-          return await ex.fetchBalance({ type: 'future' });
+          return await ex.fetchBalance({ type: 'swap' });
         } catch {
           try {
             return await ex.fetchBalance();
           } catch {
-            return await ex.fetchBalance({ type: 'unified' });
+            return await ex.fetchBalance({ type: 'future' });
           }
         }
       };
@@ -313,7 +313,7 @@ export class BybitExecutionEngine {
         totalEquityUsd: isNaN(totalEquityUsd) ? 0 : totalEquityUsd
       };
     } catch (err: any) {
-      console.error(`[BinanceEngine] Erro ao buscar saldo ${clientId}:`, err.message);
+      console.error(`[BingXEngine] Erro ao buscar saldo ${clientId}:`, err.message);
       return null;
     }
   }
@@ -691,7 +691,7 @@ export class BybitExecutionEngine {
       const feePaid = Number((sizing.notionalUsd * (isMaker ? 0.0002 : 0.0005)).toFixed(4));
 
       (GoogleSheetsService.logTradeExecution as any)({
-        clientName: 'Binance Futures (USD-M)',
+        clientName: 'BingX Swap (USDT-M)',
         symbol: payload.symbol,
         side: payload.side,
         entryPrice: validEntryPrice,
@@ -708,10 +708,10 @@ export class BybitExecutionEngine {
 
       return { success: true, orderId: order.id, sizing };
     } catch (err: any) {
-      console.error(`[BinanceEngine] Erro ao executar ordem ${clientId}:`, err.message);
+      console.error(`[BingXEngine] Erro ao executar ordem ${clientId}:`, err.message);
 
       (GoogleSheetsService.logTradeExecution as any)({
-        clientName: 'Binance Futures (USD-M)',
+        clientName: 'BingX Swap (USDT-M)',
         symbol: payload.symbol,
         side: payload.side,
         entryPrice: payload.entryPrice || 0,

@@ -32,7 +32,7 @@ clientRouter.post('/api-keys', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'apiKey e apiSecret são obrigatórios.' });
   }
   if (apiKey.length < 10 || apiSecret.length < 10) {
-    return res.status(400).json({ error: 'Chaves inválidas — verifique se copiou corretamente da Binance.' });
+    return res.status(400).json({ error: 'Chaves inválidas — verifique se copiou corretamente da BingX.' });
   }
 
   try {
@@ -63,8 +63,8 @@ clientRouter.post('/api-keys', async (req: Request, res: Response) => {
       success: true,
       validated: result.success,
       message: result.success 
-        ? 'Chaves da Binance salvas e validadas com sucesso!' 
-        : 'Chaves salvas com criptografia AES-256. ' + (result.error || 'Aguardando validação com a Binance.'),
+        ? 'Chaves da BingX salvas e validadas com sucesso!' 
+        : 'Chaves salvas com criptografia AES-256. ' + (result.error || 'Aguardando validação com a BingX.'),
       testnet,
       maskedKey: result.maskedKey || `${apiKey.trim().substring(0, 5)}...`,
       warning: result.success ? null : result.error
@@ -84,7 +84,7 @@ clientRouter.delete('/api-keys', async (req: Request, res: Response) => {
 
   try {
     await ClientConfigDB.deleteApiKeys(clientId, env);
-    res.json({ success: true, message: `Chaves da Binance ${env ? `(${env})` : ''} removidas com sucesso.` });
+    res.json({ success: true, message: `Chaves da BingX ${env ? `(${env})` : ''} removidas com sucesso.` });
   } catch (err: any) {
     res.status(500).json({ error: `Erro ao remover chaves: ${err.message}` });
   }
@@ -101,7 +101,7 @@ clientRouter.post('/api-keys/test', async (req: Request, res: Response) => {
   if (result.success) {
     res.json({
       success: true,
-      message: `✅ Conexão com Binance ${env ? `(${env})` : ''} estabelecida com sucesso!`,
+      message: `✅ Conexão com BingX ${env ? `(${env})` : ''} estabelecida com sucesso!`,
       maskedKey: result.maskedKey,
       accountInfo: result.accountInfo
     });
@@ -109,7 +109,7 @@ clientRouter.post('/api-keys/test', async (req: Request, res: Response) => {
     res.status(400).json({
       success: false,
       error: result.error,
-      hint: 'Verifique se as chaves estão corretas e se a permissão "Ativar Futuros" está habilitada na Binance.'
+      hint: 'Verifique se as chaves estão corretas e se a permissão "Perpetual Futures Trading" está habilitada na BingX.'
     });
   }
 });
