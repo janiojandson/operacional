@@ -385,7 +385,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       bidAskRatio: book?.imbalanceRatio ?? Number.NaN,
       flowConfirmed: signal.type === 'ABSORPTION_BUY' || signal.type === 'ABSORPTION_SELL',
       regime: pairConfig?.regime ?? 'TREND',
-      hasOpenPosition: paperTrading.getAccountState().openPositions.some(position => position.symbol === signal.symbol),
+      hasOpenPosition: paperTrading.getAccountState().openPositions.some(position => position.symbol === signal.symbol) || paperTrading.getAccountState().openPositions.length >= 2,
       cooldownActive: false,
       orderExecutable: true,
       source: book?.source ?? 'LOCAL_FALLBACK'

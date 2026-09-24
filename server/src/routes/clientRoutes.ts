@@ -123,11 +123,27 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
   if (!config) return res.status(404).json({ error: 'Configuração de cliente não encontrada.' });
 
   let bybitAccount = null;
+  let realAccount = null;
+  let testAccount = null;
+
   if (Number(config.api_connected) === 1 && config.bybit_api_key_enc) {
     bybitAccount = await BybitExecutionEngine.getAccountBalance(clientId);
     if (bybitAccount) {
       await ClientConfigDB.updateBalance(clientId, bybitAccount.walletBalance);
     }
+  }
+
+  // Se houver chaves de REAL e TESTNET, busca ambos para visualização simultânea no painel
+  if ((config as any).bybit_real_api_key_enc) {
+    realAccount = await BybitExecutionEngine.getAccountBalance(clientId, 'REAL').catch(() => null);
+  } else if (!config.bybit_testnet && bybitAccount) {
+    realAccount = bybitAccount;
+  }
+
+  if ((config as any).bybit_test_api_key_enc) {
+    testAccount = await BybitExecutionEngine.getAccountBalance(clientId, 'TESTNET').catch(() => null);
+  } else if (config.bybit_testnet && bybitAccount) {
+    testAccount = bybitAccount;
   }
 
   const now = Date.now();
@@ -179,8 +195,12 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
     hasTestKeys: !!testKeyEnc,
     testMaskedKey: testKeyEnc ? `${decrypt(testKeyEnc).substring(0, 5)}...` : null,
     testConnected,
-    testBalance: (config.bybit_testnet === 1) ? (bybitAccount?.walletBalance ?? Number(config.balance)) : undefined,
-    testCoin: (config.bybit_testnet === 1) ? (bybitAccount?.coin || 'VST') : 'VST',
+    testBalance: testAccount ? testAccount.walletBalance : ((config.bybit_testnet === 1) ? (bybitAccount?.walletBalance ?? Number(config.balance)) : undefined),
+    testEquity: testAccount ? testAccount.equity : undefined,
+    testCoin: testAccount?.coin || 'VST',
+    realBalance: realAccount ? realAccount.walletBalance : ((config.bybit_testnet === 0) ? (bybitAccount?.walletBalance ?? Number(config.balance)) : undefined),
+    realEquity: realAccount ? realAccount.equity : undefined,
+    realCoin: realAccount?.coin || 'USDT',
     autoConfigEnabled: (config as any).auto_config_enabled !== undefined ? Number((config as any).auto_config_enabled) === 1 : true,
     notificationPhone: config.notification_phone,
     planType: config.plan_type || 'ACTIVE',
@@ -216,7 +236,7 @@ clientRouter.post('/account/refresh', async (req: Request, res: Response) => {
 
       return res.json({
         success: true,
-        message: '✅ Saldo e proteções atualizados com sucesso da Bybit!',
+        message: '✅ Saldo e proteções atualizados com sucesso da BingX!',
         balance: bybitAccount.walletBalance,
         availableBalance: bybitAccount.availableBalance,
         equity: bybitAccount.equity,

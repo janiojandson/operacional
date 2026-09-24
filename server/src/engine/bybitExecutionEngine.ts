@@ -525,11 +525,15 @@ export class BybitExecutionEngine {
         };
       }
 
-      const marginModeError = await exchange.setMarginMode('isolated', ccxtSymbol).catch((error: any) => error);
-      const leverageError = await exchange.setLeverage(sizing.leverage, ccxtSymbol).catch((error: any) => error);
+      const sideArg = payload.side === 'BUY' ? 'LONG' : 'SHORT';
+      const marginModeError = await exchange.setMarginMode('isolated', ccxtSymbol, { side: sideArg }).catch((error: any) => error);
+      const leverageError = await exchange.setLeverage(sizing.leverage, ccxtSymbol, { side: sideArg }).catch(async (error: any) => {
+        // Fallback para BOTH caso o modo de posição seja unilateral
+        return await exchange.setLeverage(sizing.leverage, ccxtSymbol, { side: 'BOTH' }).catch(() => error);
+      });
       const configuredPositions = await exchange.fetchPositions([ccxtSymbol]).catch(() => []);
       const configuration = verifyIsolatedLeverage(configuredPositions, ccxtSymbol, sizing.leverage);
-      if (!configuration.verified) {
+      if (!configuration.verified && configuration.reason !== 'NENHUMA_POSICAO_ENCONTRADA') {
         const apiHint = marginModeError instanceof Error || leverageError instanceof Error
           ? ` (${marginModeError?.message || leverageError?.message || 'API recusou a configuração'})`
           : '';

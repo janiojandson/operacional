@@ -40,9 +40,12 @@ interface AccountInfo {
   realConnected?: boolean;
   hasTestKeys?: boolean;
   testMaskedKey?: string;
-  testConnected?: boolean;
   testBalance?: number;
+  testEquity?: number;
   testCoin?: string;
+  realBalance?: number;
+  realEquity?: number;
+  realCoin?: string;
   notificationPhone?: string;
   planType?: string;
   planExpiresAt?: number | null;
@@ -610,7 +613,7 @@ export default function ClientDashboard() {
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-xl font-bold text-white">Minha Conta — Bybit</h2>
+                <h2 className="text-xl font-bold text-white">Minha Conta — BingX</h2>
                 <p className="text-xs text-slate-400 mt-0.5">Visão consolidada do saldo, posições abertas e réplica do Master Quant.</p>
               </div>
 
@@ -697,7 +700,7 @@ export default function ClientDashboard() {
                     </span>
                   </div>
                   <p className="text-emerald-200/80 text-xs">
-                    Você possui USDT na Conta de Financiamento da Bybit. Transfira para a Conta de Trading Unificada (UTA) para que o robô utilize esse valor como margem operacional.
+                    Você possui USDT na Conta de Financiamento da BingX. Transfira para a Conta de Futuros Perpétuos para que o robô utilize esse valor como margem operacional.
                   </p>
                   <div className="pt-2 flex flex-wrap gap-2 items-center">
                     <button
@@ -721,34 +724,42 @@ export default function ClientDashboard() {
             )}
 
             {/* KPI Cards */}
-            <div className="grid grid-cols-4 gap-4">
-              <div className="bg-surface border border-border/60 rounded-2xl p-5 shadow-lg shadow-black/20 relative group">
-                <div className="flex items-center justify-between mb-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              {/* Saldo Demo (VST) */}
+              <div className="bg-surface border border-border/60 rounded-2xl p-4 shadow-lg shadow-black/20 relative group">
+                <div className="flex items-center justify-between mb-1.5">
                   <div className="flex items-center space-x-1.5">
-                    <span className="text-xs text-slate-400 font-mono uppercase">Saldo Total</span>
-                    {account?.bybitTestnet && (
-                      <span className="text-[10px] px-1.5 py-0.2 rounded font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                        DEMO (VST)
-                      </span>
-                    )}
+                    <span className="text-xs text-slate-400 font-mono uppercase">Saldo Demo</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      VST
+                    </span>
                   </div>
+                  <DollarSign className="w-4 h-4 text-amber-400" />
+                </div>
+                <div className="text-xl font-black text-amber-400">
+                  ${(account?.testBalance !== undefined ? account.testBalance : (account?.bybitTestnet ? account?.balance : 0) ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  VST margem simulada
+                </div>
+              </div>
+
+              {/* Saldo Real (USDT) */}
+              <div className="bg-surface border border-border/60 rounded-2xl p-4 shadow-lg shadow-black/20 relative group">
+                <div className="flex items-center justify-between mb-1.5">
                   <div className="flex items-center space-x-1.5">
-                    <button
-                      onClick={handleRefreshBalance}
-                      disabled={refreshingBalance}
-                      title="Sincronizar saldo ao vivo na BingX"
-                      className="p-1 rounded-md hover:bg-white/10 text-amber-400 transition-colors"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${refreshingBalance ? 'animate-spin' : ''}`} />
-                    </button>
-                    <DollarSign className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs text-slate-400 font-mono uppercase">Saldo Real</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      USDT
+                    </span>
                   </div>
+                  <DollarSign className="w-4 h-4 text-emerald-400" />
                 </div>
-                <div className="text-2xl font-black text-amber-400">
-                  ${(account?.balance ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                <div className="text-xl font-black text-emerald-400">
+                  ${(account?.realBalance !== undefined ? account.realBalance : (!account?.bybitTestnet ? account?.balance : 0) ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
-                <div className="flex items-center justify-between text-xs text-slate-400 mt-1">
-                  <span>{account?.bybitTestnet ? 'VST margem futuros (Simulado)' : 'USDT margem futuros (Real)'}</span>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  USDT margem real
                 </div>
               </div>
 
@@ -808,10 +819,10 @@ export default function ClientDashboard() {
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-border/30">
                     <span className="text-slate-400">Alvo da Operação (Take Profit)</span>
-                    <span className="text-emerald-400 font-bold">Estratégia Quant (Direto na Bybit)</span>
+                    <span className="text-emerald-400 font-bold">Estratégia Quant (Direto na BingX)</span>
                   </div>
                   <div className="flex justify-between items-center py-2">
-                    <span className="text-slate-400">Status da Sincronização Bybit</span>
+                    <span className="text-slate-400">Status da Sincronização BingX</span>
                     <span className={`font-bold ${account?.syncEnabled ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {account?.syncEnabled ? '● LIGADA & SINCRONIZADA' : '⛔ DESLIGADA'}
                     </span>
@@ -823,7 +834,7 @@ export default function ClientDashboard() {
               <div className="bg-surface border border-border/60 rounded-2xl p-5">
                 <h3 className="text-sm font-bold text-white mb-3 flex items-center space-x-2">
                   <BarChart2 className="w-4 h-4 text-accent" />
-                  <span>Posições Ativas na Bybit ({positions.length})</span>
+                  <span>Posições Ativas na BingX ({positions.length})</span>
                 </h3>
                 {positions.length === 0 ? (
                   <div className="text-sm text-slate-500 text-center py-8">Nenhuma posição aberta no momento. O robô entrará automaticamente no próximo sinal do Master.</div>
@@ -863,11 +874,11 @@ export default function ClientDashboard() {
                       ● MASTER 24/7 AO VIVO
                     </span>
                     <span className="px-2.5 py-0.5 rounded bg-primary/20 text-primary font-mono text-[10px] font-bold border border-primary/30">
-                      ⚡ 100% BYBIT LINEAR PERPETUAL
+                      ⚡ 100% BINGX PERPETUAL SWAP
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-1.5">
-                    Acompanhe a inteligência autônoma institucional, posições em andamento, assertividade e o status de execução de cada disparo na sua conta Bybit.
+                    Acompanhe a inteligência autônoma institucional, posições em andamento, assertividade e o status de execução de cada disparo na sua conta BingX.
                   </p>
                 </div>
 
@@ -959,15 +970,15 @@ export default function ClientDashboard() {
                 </div>
               </div>
 
-              {/* Pares Cripto Oficiais Bybit Monitorados */}
+              {/* Pares Cripto Oficiais BingX Monitorados */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                     <Activity className="w-3.5 h-3.5 text-primary" />
-                    Pares Cripto Monitorados na Bybit (Contratos Lineares USDT)
+                    Pares Cripto Monitorados na BingX (Perpetual Swap USDT)
                   </span>
                   <span className="text-[10px] text-slate-500 font-mono">
-                    100% Compatíveis com sua conta Bybit
+                    100% Compatíveis com sua conta BingX
                   </span>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 font-mono">

@@ -130,9 +130,10 @@ export class PaperTradingEngine {
 
     if (!tradeType || decision.entrySide !== tradeType) return;
 
-    const stopLoss = adaptiveRisk?.stopLoss ?? decision.stopLoss;
-    const takeProfit = adaptiveRisk?.takeProfit ?? decision.takeProfit;
-    const targetDistance = Math.abs(takeProfit - currentPrice);
+    // 🛡️ Alvos e Stops Canônicos 2.5R Fixo por Ativo (Padrão Original do Deploy Funcional)
+    const stopLoss = decision.stopLoss ?? adaptiveRisk?.stopLoss;
+    const takeProfit = decision.takeProfit ?? adaptiveRisk?.takeProfit;
+    const targetDistance = Math.abs((takeProfit || currentPrice) - currentPrice);
     const trailingTriggerPrice = Number((currentPrice + (tradeType === 'BUY' ? 1 : -1) * targetDistance * 0.8).toFixed(8));
 
     // Potência proporcional à banca (20% por trade padrão)
