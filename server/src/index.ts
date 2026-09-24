@@ -414,7 +414,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
 
     const profile = getCryptoStrategyProfile(signal.symbol);
     const account = paperTrading.getAccountState();
-    if (!profile || book?.source !== 'BYBIT') return;
+    if (!profile || (book?.source !== 'BINANCE' && book?.source !== 'BYBIT')) return;
     const powerMultiplier = Math.max(paperTrading.getMinTemperature(), pairConfig?.powerMultiplier || 1.5);
     const requestedNotionalUsd = Math.max(100, account.balance * 0.20) * (powerMultiplier / 1.5);
     const existingAggregateRiskUsd = account.openPositions.reduce((sum, position) => {
