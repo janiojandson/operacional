@@ -264,6 +264,7 @@ export async function initDatabase(): Promise<void> {
   // 🚀 Migrações dos Botões: Trailing Stop e Shadow Mode Executor
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS trailing_stop_enabled INTEGER NOT NULL DEFAULT 1`).catch(() => { });
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS shadow_filter_active INTEGER NOT NULL DEFAULT 0`).catch(() => { });
+  await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS test_sync_enabled INTEGER NOT NULL DEFAULT 0`).catch(() => { });
 
   await query(`ALTER TABLE client_configs DROP CONSTRAINT IF EXISTS client_configs_user_id_fkey`).catch(() => { });
 
@@ -693,6 +694,13 @@ export const ClientConfigDB = {
     await query(
       'UPDATE client_configs SET sync_enabled = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $2',
       [syncEnabled ? 1 : 0, clientId]
+    );
+  },
+
+  setTestSyncEnabled: async (clientId: string, testSyncEnabled: boolean) => {
+    await query(
+      'UPDATE client_configs SET test_sync_enabled = $1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE client_id = $2',
+      [testSyncEnabled ? 1 : 0, clientId]
     );
   },
 

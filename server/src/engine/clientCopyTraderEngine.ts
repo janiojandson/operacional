@@ -111,78 +111,134 @@ export class ClientCopyTraderEngine {
       }
     }
 
-    // 2. Execução REAL para clientes cadastrados no Banco de Dados com sincronização ativada
+    // 2. Execução REAL e DEMO/TESTNET para clientes cadastrados no Banco de Dados
     try {
-      const realConfigs = await ClientConfigDB.listAll();
+      const allConfigs = await ClientConfigDB.listAll();
       const now = Date.now();
-      const eligibleClients = realConfigs.filter(c => {
+
+      const validClientBase = (c: any) => {
         const isExp = c.plan_expires_at ? Number(c.plan_expires_at) < now : false;
         const isVitrine = c.plan_type === 'VITRINE';
-        return (
-          Number(c.is_active) === 1 &&
-          Number(c.sync_enabled) === 1 &&
-          Number(c.api_connected) === 1 &&
-          Number(c.plan_active) === 1 &&
-          !isExp &&
-          !isVitrine &&
-          Boolean(c.bybit_api_key_enc)
-        );
+        return Number(c.is_active) === 1 && Number(c.plan_active) === 1 && !isExp && !isVitrine;
+      };
+
+      const realClients = allConfigs.filter(c => {
+        const hasRealKey = Boolean((c as any).bybit_real_api_key_enc || (!c.bybit_testnet && c.bybit_api_key_enc));
+        const realConn = (c as any).bybit_real_connected !== undefined ? Number((c as any).bybit_real_connected) === 1 : Number(c.api_connected) === 1;
+        return validClientBase(c) && Number(c.sync_enabled) === 1 && realConn && hasRealKey;
       });
 
-      if (eligibleClients.length > 0) {
-        console.log(`[CopyTrader] 📡 Disparando ordem real para ${eligibleClients.length} cliente(s) ativo(s)...`);
+      const testClients = allConfigs.filter(c => {
+        const hasTestKey = Boolean((c as any).bybit_test_api_key_enc || (c.bybit_testnet && c.bybit_api_key_enc));
+        const testConn = (c as any).bybit_test_connected !== undefined ? Number((c as any).bybit_test_connected) === 1 : Number(c.api_connected) === 1;
+        return validClientBase(c) && Number((c as any).test_sync_enabled) === 1 && testConn && hasTestKey;
+      });
 
-        await Promise.allSettled(
-          eligibleClients.map(async (cfg) => {
-            try {
-              const execRes = await BybitExecutionEngine.executeCopyTrade(cfg.client_id, {
+      const tasks: Promise<any>[] = [];
+
+      if (realClients.length > 0) {
+        console.log(`[CopyTrader] 📡 Disparando ordem real para ${realClients.length} cliente(s) ativo(s)...`);
+        tasks.push(...realClients.map(async (cfg) => {
+          try {
+            const execRes = await BybitExecutionEngine.executeCopyTrade(cfg.client_id, {
+              symbol: trade.symbol,
+              side: trade.type === 'BUY' ? 'BUY' : 'SELL',
+              entryPrice: trade.entryPrice,
+              stopLoss: trade.stopLoss,
+              takeProfit: trade.takeProfit,
+              signalReason: trade.signalReason,
+              powerMultiplier: powerMultiplier || trade.powerMultiplier || 1.5,
+              masterExposureRatio: trade.masterExposureRatio
+            }, 'REAL');
+
+            if (execRes.success) {
+              this.emitLog({
+                id: `exec-real-${Date.now()}-${cfg.client_id}`,
+                clientId: cfg.client_id,
                 symbol: trade.symbol,
-                side: trade.type === 'BUY' ? 'BUY' : 'SELL',
-                entryPrice: trade.entryPrice,
-                stopLoss: trade.stopLoss,
-                takeProfit: trade.takeProfit,
-                signalReason: trade.signalReason,
-                powerMultiplier: powerMultiplier || trade.powerMultiplier || 1.5,
-                masterExposureRatio: trade.masterExposureRatio
+                side: trade.type,
+                price: trade.entryPrice,
+                amount: execRes.sizing?.qty || 0,
+                costUsd: execRes.sizing?.notionalUsd || 0,
+                status: 'EXECUTED',
+                executedAt: Date.now(),
+                reason: `✅ Ordem Real Executada BingX (Order: ${execRes.orderId || 'OK'} | Qty: ${execRes.sizing?.qty})`
               });
 
-              if (execRes.success) {
-                this.emitLog({
-                  id: `exec-real-${Date.now()}-${cfg.client_id}`,
-                  clientId: cfg.client_id,
-                  symbol: trade.symbol,
-                  side: trade.type,
-                  price: trade.entryPrice,
-                  amount: execRes.sizing?.qty || 0,
-                  costUsd: execRes.sizing?.notionalUsd || 0,
-                  status: 'EXECUTED',
-                  executedAt: Date.now(),
-                  reason: `✅ Ordem Real Executada BingX (Order: ${execRes.orderId || 'OK'} | Qty: ${execRes.sizing?.qty})`
-                });
-
-                if (cfg.notification_phone) {
-                  const msg = `⚡ *MarketFlow Pro — Ordem Real Executada*\n\nPar: *${trade.symbol}*\nTipo: *${trade.type}*\nPreço: *$${trade.entryPrice.toLocaleString()}*\nVolume: *$${execRes.sizing?.notionalUsd}*\nAlavancagem: *${execRes.sizing?.leverage}x*\nOrdem BingX: \`${execRes.orderId}\``;
-                  ComunicacaoService.sendWhatsApp({ to: cfg.notification_phone, message: msg }).catch(() => {});
-                }
-              } else {
-                this.emitLog({
-                  id: `err-real-${Date.now()}-${cfg.client_id}`,
-                  clientId: cfg.client_id,
-                  symbol: trade.symbol,
-                  side: trade.type,
-                  price: trade.entryPrice,
-                  amount: 0,
-                  costUsd: 0,
-                  status: 'BLOCKED_RISK_LIMIT',
-                  executedAt: Date.now(),
-                  reason: `⚠️ Falha ao executar na BingX: ${execRes.error}`
-                });
+              if (cfg.notification_phone) {
+                const msg = `⚡ *MarketFlow Pro — Ordem Real Executada*\n\nPar: *${trade.symbol}*\nTipo: *${trade.type}*\nPreço: *$${trade.entryPrice.toLocaleString()}*\nVolume: *$${execRes.sizing?.notionalUsd}*\nAlavancagem: *${execRes.sizing?.leverage}x*\nOrdem BingX: \`${execRes.orderId}\``;
+                ComunicacaoService.sendWhatsApp({ to: cfg.notification_phone, message: msg }).catch(() => {});
               }
-            } catch (err: any) {
-              console.error(`[CopyTrader] Erro ao executar para cliente real ${cfg.client_id}:`, err.message);
+            } else {
+              this.emitLog({
+                id: `err-real-${Date.now()}-${cfg.client_id}`,
+                clientId: cfg.client_id,
+                symbol: trade.symbol,
+                side: trade.type,
+                price: trade.entryPrice,
+                amount: 0,
+                costUsd: 0,
+                status: 'BLOCKED_RISK_LIMIT',
+                executedAt: Date.now(),
+                reason: `⚠️ Falha ao executar na BingX (Real): ${execRes.error}`
+              });
             }
-          })
-        );
+          } catch (err: any) {
+            console.error(`[CopyTrader] Erro ao executar para cliente real ${cfg.client_id}:`, err.message);
+          }
+        }));
+      }
+
+      if (testClients.length > 0) {
+        console.log(`[CopyTrader] 🧪 Disparando ordem demo/testnet para ${testClients.length} cliente(s)...`);
+        tasks.push(...testClients.map(async (cfg) => {
+          try {
+            const execRes = await BybitExecutionEngine.executeCopyTrade(cfg.client_id, {
+              symbol: trade.symbol,
+              side: trade.type === 'BUY' ? 'BUY' : 'SELL',
+              entryPrice: trade.entryPrice,
+              stopLoss: trade.stopLoss,
+              takeProfit: trade.takeProfit,
+              signalReason: trade.signalReason,
+              powerMultiplier: powerMultiplier || trade.powerMultiplier || 1.5,
+              masterExposureRatio: trade.masterExposureRatio
+            }, 'TESTNET');
+
+            if (execRes.success) {
+              this.emitLog({
+                id: `exec-test-${Date.now()}-${cfg.client_id}`,
+                clientId: cfg.client_id,
+                symbol: trade.symbol,
+                side: trade.type,
+                price: trade.entryPrice,
+                amount: execRes.sizing?.qty || 0,
+                costUsd: execRes.sizing?.notionalUsd || 0,
+                status: 'EXECUTED',
+                executedAt: Date.now(),
+                reason: `🧪 Ordem Demo/VST Executada BingX (Order: ${execRes.orderId || 'OK'} | Qty: ${execRes.sizing?.qty})`
+              });
+            } else {
+              this.emitLog({
+                id: `err-test-${Date.now()}-${cfg.client_id}`,
+                clientId: cfg.client_id,
+                symbol: trade.symbol,
+                side: trade.type,
+                price: trade.entryPrice,
+                amount: 0,
+                costUsd: 0,
+                status: 'BLOCKED_RISK_LIMIT',
+                executedAt: Date.now(),
+                reason: `⚠️ Falha ao executar na BingX (Demo/VST): ${execRes.error}`
+              });
+            }
+          } catch (err: any) {
+            console.error(`[CopyTrader] Erro ao executar para cliente testnet ${cfg.client_id}:`, err.message);
+          }
+        }));
+      }
+
+      if (tasks.length > 0) {
+        await Promise.allSettled(tasks);
       }
     } catch (dbErr: any) {
       console.error('[CopyTrader] Erro ao buscar clientes reais do banco:', dbErr.message);

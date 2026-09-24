@@ -247,7 +247,9 @@ export class BybitExecutionEngine {
 
       await ClientConfigDB.setApiConnected(clientId, true);
       await ClientConfigDB.setEnvironmentStatus(clientId, testnet, true);
-      await ClientConfigDB.updateBalance(clientId, accountInfo.walletBalance);
+      if (!testnet || config.bybit_testnet === 1) {
+        await ClientConfigDB.updateBalance(clientId, accountInfo.walletBalance);
+      }
 
       return {
         success: true,
@@ -421,16 +423,33 @@ export class BybitExecutionEngine {
   /**
    * Executa ordem de cópia com suporte nativo Bybit V5 (sem objetos no stopLoss/takeProfit)
    */
-  static async executeCopyTrade(clientId: string, payload: TradePayload): Promise<{ success: boolean; orderId?: string; sizing?: SizingResult; error?: string }> {
+  static async executeCopyTrade(clientId: string, payload: TradePayload, targetEnv?: 'REAL' | 'TESTNET'): Promise<{ success: boolean; orderId?: string; sizing?: SizingResult; error?: string }> {
     const config = await ClientConfigDB.findByClientId(clientId);
-    if (!config || Number(config.is_active) === 0 || !config.bybit_api_key_enc) {
-      return { success: false, error: 'Cliente inativo ou sem API Key configurada.' };
+    if (!config || Number(config.is_active) === 0) {
+      return { success: false, error: 'Cliente inativo.' };
+    }
+
+    let apiKeyEnc = config.bybit_api_key_enc;
+    let apiSecretEnc = config.bybit_api_secret_enc;
+    let testnet = config.bybit_testnet === 1;
+
+    if (targetEnv === 'TESTNET') {
+      apiKeyEnc = config.bybit_test_api_key_enc || config.bybit_api_key_enc;
+      apiSecretEnc = config.bybit_test_api_secret_enc || config.bybit_api_secret_enc;
+      testnet = true;
+    } else if (targetEnv === 'REAL') {
+      apiKeyEnc = config.bybit_real_api_key_enc || config.bybit_api_key_enc;
+      apiSecretEnc = config.bybit_real_api_secret_enc || config.bybit_api_secret_enc;
+      testnet = false;
+    }
+
+    if (!apiKeyEnc || !apiSecretEnc) {
+      return { success: false, error: `Chaves de API não configuradas para o ambiente ${targetEnv || 'padrão'}.` };
     }
 
     try {
-      const apiKey = decrypt(config.bybit_api_key_enc);
-      const apiSecret = decrypt(config.bybit_api_secret_enc!);
-      const testnet = config.bybit_testnet === 1;
+      const apiKey = decrypt(apiKeyEnc);
+      const apiSecret = decrypt(apiSecretEnc);
       const exchange = createBybitClient(apiKey, apiSecret, testnet);
 
       const ccxtSymbol = toBybitLinear(payload.symbol);
@@ -440,7 +459,7 @@ export class BybitExecutionEngine {
       const minQty = toValidNumber(market.limits?.amount?.min, 0.001);
       const qtyStep = toValidNumber(market.precision?.amount, 0.001);
 
-      const accountInfo = await BybitExecutionEngine.getAccountBalance(clientId);
+      const accountInfo = await BybitExecutionEngine.getAccountBalance(clientId, targetEnv);
       const balance = toValidNumber(accountInfo?.availableBalance || accountInfo?.walletBalance || Number(config.balance), 100);
 
       const baseRiskPct = toValidNumber(config.risk_pct, 1.0);
@@ -784,10 +803,28 @@ export class BybitExecutionEngine {
     }
   }
 
-  static async panicCloseAll(clientId: string): Promise<{ success: boolean; closedCount: number; cancelledCount: number; errors: string[] }> {
+  static async panicCloseAll(clientId: string, targetEnv?: 'REAL' | 'TESTNET'): Promise<{ success: boolean; closedCount: number; cancelledCount: number; errors: string[] }> {
     const config = await ClientConfigDB.findByClientId(clientId);
-    if (!config?.bybit_api_key_enc) {
-      return { success: false, closedCount: 0, cancelledCount: 0, errors: ['Chaves de API da Bybit não configuradas'] };
+    if (!config) {
+      return { success: false, closedCount: 0, cancelledCount: 0, errors: ['Cliente não encontrado'] };
+    }
+
+    let apiKeyEnc = config.bybit_api_key_enc;
+    let apiSecretEnc = config.bybit_api_secret_enc;
+    let testnet = config.bybit_testnet === 1;
+
+    if (targetEnv === 'TESTNET') {
+      apiKeyEnc = config.bybit_test_api_key_enc || config.bybit_api_key_enc;
+      apiSecretEnc = config.bybit_test_api_secret_enc || config.bybit_api_secret_enc;
+      testnet = true;
+    } else if (targetEnv === 'REAL') {
+      apiKeyEnc = config.bybit_real_api_key_enc || config.bybit_api_key_enc;
+      apiSecretEnc = config.bybit_real_api_secret_enc || config.bybit_api_secret_enc;
+      testnet = false;
+    }
+
+    if (!apiKeyEnc || !apiSecretEnc) {
+      return { success: false, closedCount: 0, cancelledCount: 0, errors: ['Chaves de API não configuradas para este ambiente'] };
     }
 
     const errors: string[] = [];
@@ -795,9 +832,9 @@ export class BybitExecutionEngine {
     let cancelledCount = 0;
 
     try {
-      const apiKey = decrypt(config.bybit_api_key_enc);
-      const apiSecret = decrypt(config.bybit_api_secret_enc!);
-      const exchange = createBybitClient(apiKey, apiSecret, config.bybit_testnet === 1);
+      const apiKey = decrypt(apiKeyEnc);
+      const apiSecret = decrypt(apiSecretEnc);
+      const exchange = createBybitClient(apiKey, apiSecret, testnet);
 
       try {
         const cancelled = await exchange.cancelAllOrders();

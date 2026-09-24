@@ -32,6 +32,7 @@ interface AccountInfo {
   isVitrine?: boolean;
   isExpired?: boolean;
   syncEnabled: boolean;
+  testSyncEnabled?: boolean;
   apiConnected: boolean;
   bybitTestnet: boolean;
   hasApiKeys: boolean;
@@ -151,6 +152,7 @@ export default function ClientDashboard() {
   const [masterSubTab, setMasterSubTab] = useState<'positions' | 'history' | 'logs'>('positions');
   const [loading, setLoading] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
+  const [syncLoadingEnv, setSyncLoadingEnv] = useState<'REAL' | 'TESTNET' | null>(null);
   const [panicLoading, setPanicLoading] = useState(false);
   const [notification, setNotification] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
@@ -160,6 +162,7 @@ export default function ClientDashboard() {
   const [showSecret, setShowSecret] = useState(false);
   const [testnet, setTestnet] = useState(true);
   const [testing, setTesting] = useState(false);
+  const [testingEnv, setTestingEnv] = useState<'REAL' | 'TESTNET' | null>(null);
   const [testResult, setTestResult] = useState<{ success: boolean; message?: string; error?: string; hint?: string; accountInfo?: any } | null>(null);
 
   // Risk form & Simulator
@@ -319,9 +322,15 @@ export default function ClientDashboard() {
   };
 
   // Toggle Sincronização (Com Pânico ao desligar)
-  const handleToggleSync = async () => {
-    if (!account?.hasApiKeys && !account?.syncEnabled) {
-      notify('Insira e conecte suas chaves de API da corretora antes de ligar a sincronização.', 'error');
+  const handleToggleSync = async (targetEnv: 'REAL' | 'TESTNET' = 'REAL') => {
+    const hasKeys = targetEnv === 'TESTNET'
+      ? Boolean(account?.hasTestKeys || (account?.bybitTestnet && account?.hasApiKeys))
+      : Boolean(account?.hasRealKeys || (!account?.bybitTestnet && account?.hasApiKeys));
+
+    const isCurrentlySync = targetEnv === 'TESTNET' ? Boolean(account?.testSyncEnabled) : Boolean(account?.syncEnabled);
+
+    if (!hasKeys && !isCurrentlySync) {
+      notify(`Insira e conecte suas chaves de API (${targetEnv === 'TESTNET' ? 'VST / Testnet' : 'Conta Real'}) antes de ligar a sincronização.`, 'error');
       return;
     }
 
@@ -331,15 +340,16 @@ export default function ClientDashboard() {
     }
 
     setSyncLoading(true);
-    const targetState = !account?.syncEnabled;
+    setSyncLoadingEnv(targetEnv);
+    const targetState = !isCurrentlySync;
     try {
       const res = await authFetch('/api/client/sync-toggle', {
         method: 'POST',
-        body: JSON.stringify({ enabled: targetState })
+        body: JSON.stringify({ enabled: targetState, env: targetEnv })
       });
       const data = await res.json();
       if (res.ok) {
-        notify(data.message || (targetState ? 'Sincronização ativada!' : 'Sincronização desligada.'));
+        notify(data.message || (targetState ? `Sincronização (${targetEnv}) ativada!` : `Sincronização (${targetEnv}) desligada.`));
         fetchAccount();
         fetchPositions();
       } else {
@@ -349,6 +359,7 @@ export default function ClientDashboard() {
       notify('Erro de conexão com o servidor.', 'error');
     } finally {
       setSyncLoading(false);
+      setSyncLoadingEnv(null);
     }
   };
 
@@ -414,6 +425,7 @@ export default function ClientDashboard() {
 
   const handleTestConnection = async (env?: 'REAL' | 'TESTNET') => {
     setTesting(true);
+    setTestingEnv(env || null);
     setTestResult(null);
     const res = await authFetch('/api/client/api-keys/test', { 
       method: 'POST',
@@ -424,6 +436,7 @@ export default function ClientDashboard() {
     if (data.success) { notify(`✅ Conexão com BingX ${env || ''} estabelecida!`); fetchAccount(); }
     else notify(data.error || 'Falha na conexão.', 'error');
     setTesting(false);
+    setTestingEnv(null);
   };
 
   const handleSaveRisk = async (e: React.FormEvent) => {
@@ -620,12 +633,12 @@ export default function ClientDashboard() {
               {/* Botões de Controle: Sincronização & Pânico */}
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={handleToggleSync}
+                  onClick={() => handleToggleSync(account?.hasRealKeys ? 'REAL' : (account?.hasTestKeys ? 'TESTNET' : 'REAL'))}
                   disabled={syncLoading}
                   className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
                     !isPlanActive
                       ? 'bg-surface text-slate-400 border-border/60 hover:border-amber-500/50 cursor-pointer'
-                      : account?.syncEnabled
+                      : (account?.syncEnabled || account?.testSyncEnabled)
                       ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/40 hover:bg-emerald-600/30'
                       : 'bg-rose-600/20 text-rose-400 border-rose-500/40 hover:bg-rose-600/30'
                   }`}
@@ -640,7 +653,15 @@ export default function ClientDashboard() {
                   ) : (
                     <>
                       <Power className="w-3.5 h-3.5" />
-                      <span>{account?.syncEnabled ? 'Sincronização LIGADA' : 'Sincronização DESLIGADA'}</span>
+                      <span>
+                        {account?.syncEnabled && account?.testSyncEnabled
+                          ? 'Sincronização LIGADA (Real + Demo)'
+                          : account?.syncEnabled
+                          ? 'Sincronização LIGADA (Real)'
+                          : account?.testSyncEnabled
+                          ? 'Sincronização LIGADA (Demo VST)'
+                          : 'Sincronização DESLIGADA'}
+                      </span>
                     </>
                   )}
                 </button>
@@ -1388,11 +1409,12 @@ export default function ClientDashboard() {
                         <div className="w-px h-8 bg-border/50" />
                         
                         <div className="flex flex-col items-center">
-                          <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Copy Trade</span>
+                          <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Copy Trade Real</span>
                           <button
-                            onClick={handleToggleSync}
+                            onClick={() => handleToggleSync('REAL')}
+                            disabled={syncLoading && syncLoadingEnv === 'REAL'}
                             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${account.syncEnabled ? 'bg-emerald-500' : 'bg-slate-700'}`}
-                            title={account.syncEnabled ? 'Desligar sincronização' : 'Ligar sincronização'}
+                            title={account.syncEnabled ? 'Desligar sincronização Real' : 'Ligar sincronização Real'}
                           >
                             <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${account.syncEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
                           </button>
@@ -1411,10 +1433,10 @@ export default function ClientDashboard() {
                         <button
                           type="button"
                           onClick={() => handleTestConnection('REAL')}
-                          disabled={testing}
+                          disabled={testing && testingEnv === 'REAL'}
                           className="px-3 py-1.5 rounded-lg bg-surface border border-emerald-500/30 text-xs text-emerald-300 hover:text-white hover:border-emerald-400 flex items-center space-x-1.5 transition-all"
                         >
-                          {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                          {testing && testingEnv === 'REAL' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                           <span>Testar Real</span>
                         </button>
                         <button
@@ -1445,7 +1467,7 @@ export default function ClientDashboard() {
                         <p className="text-xs text-slate-400 mt-1">Ambiente de simulação e testes com saldo fictício.</p>
                       </div>
                       
-                      {/* Status & Saldo Demo */}
+                      {/* Status, Saldo Demo & Toggle Copy Trade Demo */}
                       <div className="flex items-center space-x-4 bg-background p-3 rounded-xl border border-border/50">
                         <div className="flex flex-col">
                           <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Status Testnet</span>
@@ -1464,6 +1486,20 @@ export default function ClientDashboard() {
                             </span>
                           </div>
                         )}
+
+                        <div className="w-px h-8 bg-border/50" />
+                        
+                        <div className="flex flex-col items-center">
+                          <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Copy Trade Demo</span>
+                          <button
+                            onClick={() => handleToggleSync('TESTNET')}
+                            disabled={syncLoading && syncLoadingEnv === 'TESTNET'}
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${account.testSyncEnabled ? 'bg-amber-500' : 'bg-slate-700'}`}
+                            title={account.testSyncEnabled ? 'Desligar sincronização Demo' : 'Ligar sincronização Demo (VST)'}
+                          >
+                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${account.testSyncEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -1478,10 +1514,10 @@ export default function ClientDashboard() {
                         <button
                           type="button"
                           onClick={() => handleTestConnection('TESTNET')}
-                          disabled={testing}
+                          disabled={testing && testingEnv === 'TESTNET'}
                           className="px-3 py-1.5 rounded-lg bg-surface border border-amber-500/30 text-xs text-amber-300 hover:text-white hover:border-amber-400 flex items-center space-x-1.5 transition-all"
                         >
-                          {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                          {testing && testingEnv === 'TESTNET' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                           <span>Testar Testnet</span>
                         </button>
                         <button

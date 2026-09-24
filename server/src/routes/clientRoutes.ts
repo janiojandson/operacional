@@ -185,6 +185,7 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
     isVitrine,
     isExpired,
     syncEnabled: Number(config.sync_enabled) === 1,
+    testSyncEnabled: Number((config as any).test_sync_enabled) === 1,
     apiConnected: Number(config.api_connected) === 1,
     bybitTestnet: Number(config.bybit_testnet) === 1,
     hasApiKeys: !!(config.bybit_api_key_enc || realKeyEnc || testKeyEnc),
@@ -291,19 +292,24 @@ clientRouter.post('/sync-toggle', async (req: Request, res: Response) => {
   const clientId = await resolveClientId(req);
   if (!clientId) return res.status(400).json({ error: 'clientId não encontrado.' });
 
-  const { enabled } = req.body;
+  const { enabled, env } = req.body;
   if (typeof enabled !== 'boolean') {
     return res.status(400).json({ error: 'Campo enabled (boolean) é obrigatório.' });
   }
+
+  const targetEnv = env === 'TESTNET' ? 'TESTNET' : 'REAL';
 
   const config = await ClientConfigDB.findByClientId(clientId);
   if (!config) return res.status(404).json({ error: 'Configuração do cliente não encontrada.' });
 
   if (enabled) {
-    const hasKeys = !!(config.bybit_api_key_enc || (config as any).bybit_real_api_key_enc || (config as any).bybit_test_api_key_enc);
+    const hasKeys = targetEnv === 'TESTNET'
+      ? !!((config as any).bybit_test_api_key_enc || (config.bybit_testnet ? config.bybit_api_key_enc : null))
+      : !!((config as any).bybit_real_api_key_enc || (!config.bybit_testnet ? config.bybit_api_key_enc : null));
+
     if (!hasKeys) {
       return res.status(400).json({
-        error: 'Você precisa inserir e salvar suas chaves de API da corretora antes de ativar a sincronização.'
+        error: `Você precisa inserir e salvar suas chaves de API da BingX (${targetEnv === 'TESTNET' ? 'VST / Testnet' : 'Conta Real'}) antes de ativar a sincronização.`
       });
     }
 
@@ -317,21 +323,26 @@ clientRouter.post('/sync-toggle', async (req: Request, res: Response) => {
     }
   }
 
-  // Atualizar estado de sincronização no banco
-  await ClientConfigDB.setSyncEnabled(clientId, enabled);
+  // Atualizar estado de sincronização no banco de acordo com o ambiente
+  if (targetEnv === 'TESTNET') {
+    await ClientConfigDB.setTestSyncEnabled(clientId, enabled);
+  } else {
+    await ClientConfigDB.setSyncEnabled(clientId, enabled);
+  }
 
-  // Se estiver DESLIGANDO, aciona automaticamente o Pânico Bybit (cancela ordens e encerra posições)
+  // Se estiver DESLIGANDO, aciona automaticamente o Pânico Bybit/BingX no ambiente respectivo
   let panicResult = null;
   if (!enabled) {
-    panicResult = await BybitExecutionEngine.panicCloseAll(clientId);
+    panicResult = await BybitExecutionEngine.panicCloseAll(clientId, targetEnv);
   }
 
   res.json({
     success: true,
     syncEnabled: enabled,
+    targetEnv,
     message: enabled 
-      ? '✅ Sincronização com o Copy Trading ativada com sucesso!' 
-      : '🛑 Sincronização desativada. Protocolo de segurança acionado na Bybit.',
+      ? `✅ Sincronização com o Copy Trading (${targetEnv === 'TESTNET' ? 'VST / Testnet' : 'Conta Real'}) ativada com sucesso!` 
+      : `🛑 Sincronização (${targetEnv === 'TESTNET' ? 'VST / Testnet' : 'Conta Real'}) desativada. Protocolo de segurança acionado.`,
     panicResult
   });
 });
