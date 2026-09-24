@@ -74,8 +74,17 @@ export async function cleanupClientUsersForMaster(
   if (!masterEmail) throw new Error('Admin Master não configurado para a limpeza.');
 
   const admins = await operations.query("SELECT id, email, role FROM app_users WHERE role = 'ADMIN'");
-  if (admins.length !== 1 || admins[0].email.trim().toLowerCase() !== masterEmail) {
-    throw new Error('Admin Master não é único ou não corresponde à configuração; limpeza cancelada.');
+  const matchingMaster = admins.find(a => a.email.trim().toLowerCase() === masterEmail);
+  if (!matchingMaster) {
+    throw new Error(`Admin Master configurado (${masterEmail}) não foi localizado entre os administradores.`);
+  }
+
+  // Se houver mais de um admin legado, rebaixa os outros para CLIENT para serem limpos
+  if (admins.length > 1) {
+    const extraAdminIds = admins.filter(a => a.email.trim().toLowerCase() !== masterEmail).map(a => a.id);
+    if (extraAdminIds.length) {
+      await operations.execute("UPDATE app_users SET role = 'CLIENT' WHERE id = ANY($1)", [extraAdminIds]);
+    }
   }
 
   const clients = await operations.query("SELECT id, email, role, client_id FROM app_users WHERE role = 'CLIENT'");
