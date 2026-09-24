@@ -66,25 +66,22 @@ function toBybitLinear(symbol: string): string {
   return `${base}/${quote}:${quote}`;
 }
 
-function createBybitClient(apiKey: string, apiSecret: string, testnet: boolean, useAlternateDomain: boolean = false): any {
-  const exchange = new (ccxt as any).bybit({
+function createBybitClient(apiKey: string, apiSecret: string, testnet: boolean, _useAlternateDomain: boolean = false): any {
+  // Conexão direta com Binance USD-M Futures
+  const exchange = new (ccxt as any).binance({
     apiKey,
     secret: apiSecret,
     options: {
-      defaultType: 'linear',
-    }
+      defaultType: 'future',
+      adjustForTimeDifference: true,
+      recvWindow: 60000
+    },
+    enableRateLimit: true,
+    timeout: 15000
   });
 
   if (testnet) {
     exchange.setSandboxMode(true);
-  } else if (useAlternateDomain) {
-    exchange.urls['api'] = {
-      spot: 'https://api.bytick.com',
-      futures: 'https://api.bytick.com',
-      v2: 'https://api.bytick.com',
-      public: 'https://api.bytick.com',
-      private: 'https://api.bytick.com'
-    };
   }
 
   return exchange;
@@ -220,28 +217,17 @@ export class BybitExecutionEngine {
 
       const fetchAccountBal = async (ex: any) => {
         try {
-          return await ex.fetchBalance({ type: 'unified' });
+          return await ex.fetchBalance({ type: 'future' });
         } catch {
           try {
-            return await ex.fetchBalance({ type: 'contract' });
-          } catch {
             return await ex.fetchBalance();
+          } catch (e) {
+            return await ex.fetchBalance({ type: 'unified' });
           }
         }
       };
 
-      let balance: any;
-      try {
-        balance = await fetchAccountBal(exchange);
-      } catch (firstErr: any) {
-        if (firstErr.message?.includes('403') || firstErr.message?.includes('CloudFront') || firstErr.message?.includes('country')) {
-          console.warn(`[BybitEngine] 403 CloudFront detectado na Bybit para ${clientId}. Tentando rota alternativa (bytick.com)...`);
-          exchange = createBybitClient(apiKey, apiSecret, testnet, true);
-          balance = await fetchAccountBal(exchange);
-        } else {
-          throw firstErr;
-        }
-      }
+      const balance: any = await fetchAccountBal(exchange);
 
       const usdt = balance.USDT || balance.total;
       const totalBalance = Number(usdt?.total ?? balance?.free?.USDT ?? 0);
@@ -267,11 +253,13 @@ export class BybitExecutionEngine {
     } catch (err: any) {
       await ClientConfigDB.setApiConnected(clientId, false);
       await ClientConfigDB.setEnvironmentStatus(clientId, isTestnet, false);
-      console.error(`[BybitEngine] Falha ao conectar cliente ${clientId}:`, err.message);
+      console.error(`[BinanceEngine] Falha ao conectar cliente ${clientId}:`, err.message);
 
-      let friendlyError = `Erro de conexão com Bybit: ${err.message}`;
-      if (err.message?.includes('CloudFront') || err.message?.includes('country')) {
-        friendlyError = 'A Bybit bloqueou a requisição a partir da região dos servidores da nuvem (CloudFront 403). Ative a rota alternativa ou conecte as chaves via Mainnet.';
+      let friendlyError = `Erro de conexão com Binance: ${err.message}`;
+      if (err.message?.includes('API-key') || err.message?.includes('-2015') || err.message?.includes('-2014')) {
+        friendlyError = 'API Key ou Secret inválidos na Binance. Certifique-se de copiar as credenciais completas e habilitar "Ativar Futuros".';
+      } else if (err.message?.includes('IP') || err.message?.includes('-2010')) {
+        friendlyError = 'Restrição de IP ativa na chave da Binance. Libere o acesso sem restrição de IP ou vincule os IPs da nuvem.';
       }
 
       return {
@@ -293,44 +281,24 @@ export class BybitExecutionEngine {
 
       const fetchBal = async (ex: any) => {
         try {
-          return await ex.fetchBalance({ type: 'unified' });
+          return await ex.fetchBalance({ type: 'future' });
         } catch {
           try {
-            return await ex.fetchBalance({ type: 'contract' });
-          } catch {
             return await ex.fetchBalance();
+          } catch {
+            return await ex.fetchBalance({ type: 'unified' });
           }
         }
       };
 
-      let balance: any;
-      try {
-        balance = await fetchBal(exchange);
-      } catch (e: any) {
-        if (e.message?.includes('403') || e.message?.includes('CloudFront')) {
-          exchange = createBybitClient(apiKey, apiSecret, testnet, true);
-          balance = await fetchBal(exchange);
-        } else {
-          throw e;
-        }
-      }
+      const balance: any = await fetchBal(exchange);
 
       const usdt = balance.USDT;
       const totalBalance = Number(usdt?.total ?? balance?.free?.USDT ?? 0);
       const freeBalance = Number(usdt?.free ?? balance?.free?.USDT ?? 0);
-      const unifiedBrl = Number(balance.BRL?.total ?? balance?.free?.BRL ?? 0);
+      const brlBalance = Number(balance.BRL?.total ?? balance?.free?.BRL ?? 0);
 
-      let fundingUsdt = 0;
-      let fundingBrl = 0;
-      try {
-        const fundBal = await exchange.fetchBalance({ type: 'funding' });
-        fundingUsdt = Number(fundBal?.USDT?.total ?? fundBal?.free?.USDT ?? 0);
-        fundingBrl = Number(fundBal?.BRL?.total ?? fundBal?.free?.BRL ?? 0);
-      } catch { }
-
-      const brlBalance = unifiedBrl + fundingBrl;
-      const rawTotalEquity = Number(balance.info?.result?.list?.[0]?.totalEquity ?? 0);
-      const totalEquityUsd = rawTotalEquity > 0 ? rawTotalEquity : totalBalance;
+      const totalEquityUsd = totalBalance;
 
       return {
         walletBalance: isNaN(totalBalance) ? 0 : totalBalance,
@@ -338,14 +306,14 @@ export class BybitExecutionEngine {
         unrealisedPnl: 0,
         equity: totalEquityUsd,
         coin: 'USDT',
-        fundingUsdt: isNaN(fundingUsdt) ? 0 : fundingUsdt,
-        fundingBrl: isNaN(fundingBrl) ? 0 : fundingBrl,
-        unifiedBrl: isNaN(unifiedBrl) ? 0 : unifiedBrl,
+        fundingUsdt: 0,
+        fundingBrl: 0,
+        unifiedBrl: 0,
         brlBalance: isNaN(brlBalance) ? 0 : brlBalance,
         totalEquityUsd: isNaN(totalEquityUsd) ? 0 : totalEquityUsd
       };
     } catch (err: any) {
-      console.error(`[BybitEngine] Erro ao buscar saldo ${clientId}:`, err.message);
+      console.error(`[BinanceEngine] Erro ao buscar saldo ${clientId}:`, err.message);
       return null;
     }
   }
@@ -667,7 +635,7 @@ export class BybitExecutionEngine {
       );
       const entryOrderState = classifyBybitOrderState(order);
 
-      // Se o Trailing Stop estiver ATIVADO, programa no endpoint nativo da Bybit
+      // Se o Trailing Stop estiver ATIVADO, programa no endpoint nativo se suportado
       if (trailingAtivo && (entryOrderState === 'PREENCHIDA' || entryOrderState === 'PARCIAL')) {
         try {
           const rawSymbol = ccxtSymbol.replace('/', '').split(':')[0];
@@ -676,29 +644,31 @@ export class BybitExecutionEngine {
           const activationPrice = Number(exchange.priceToPrecision(ccxtSymbol, trailingConfiguration.activationPrice));
 
           if (!isNaN(callbackDistance) && callbackDistance > 0 && !isNaN(activationPrice) && activationPrice > 0) {
-            try {
-              await exchange.privatePostV5PositionSetTradingStop({
-                category: 'linear',
-                symbol: rawSymbol,
-                trailingStop: callbackDistance.toString(),
-                activePrice: activationPrice.toString(),
-                positionIdx: 0
-              });
-            } catch (posIdxErr: any) {
-              if (posIdxErr?.message?.includes('position idx') || posIdxErr?.message?.includes('10001')) {
-                const hedgeIdx = payload.side === 'BUY' ? 1 : 2;
+            if (typeof exchange.privatePostV5PositionSetTradingStop === 'function') {
+              try {
                 await exchange.privatePostV5PositionSetTradingStop({
                   category: 'linear',
                   symbol: rawSymbol,
                   trailingStop: callbackDistance.toString(),
                   activePrice: activationPrice.toString(),
-                  positionIdx: hedgeIdx
-                }).catch(() => { });
+                  positionIdx: 0
+                });
+              } catch (posIdxErr: any) {
+                if (posIdxErr?.message?.includes('position idx') || posIdxErr?.message?.includes('10001')) {
+                  const hedgeIdx = payload.side === 'BUY' ? 1 : 2;
+                  await exchange.privatePostV5PositionSetTradingStop({
+                    category: 'linear',
+                    symbol: rawSymbol,
+                    trailingStop: callbackDistance.toString(),
+                    activePrice: activationPrice.toString(),
+                    positionIdx: hedgeIdx
+                  }).catch(() => { });
+                }
               }
             }
           }
         } catch (e: any) {
-          console.warn(`[BybitEngine] Falha ao programar Trailing Stop nativo: ${e?.message}`);
+          console.warn(`[ExecutionEngine] Aviso ao programar Trailing Stop: ${e?.message}`);
         }
       }
 
@@ -718,10 +688,10 @@ export class BybitExecutionEngine {
         entry_time: Date.now()
       });
 
-      const feePaid = Number((sizing.notionalUsd * (isMaker ? 0.0004 : 0.0011)).toFixed(4));
+      const feePaid = Number((sizing.notionalUsd * (isMaker ? 0.0002 : 0.0005)).toFixed(4));
 
       (GoogleSheetsService.logTradeExecution as any)({
-        clientName: 'Bybit Linear (USD)',
+        clientName: 'Binance Futures (USD-M)',
         symbol: payload.symbol,
         side: payload.side,
         entryPrice: validEntryPrice,
@@ -738,10 +708,10 @@ export class BybitExecutionEngine {
 
       return { success: true, orderId: order.id, sizing };
     } catch (err: any) {
-      console.error(`[BybitEngine] Erro ao executar ordem ${clientId}:`, err.message);
+      console.error(`[BinanceEngine] Erro ao executar ordem ${clientId}:`, err.message);
 
       (GoogleSheetsService.logTradeExecution as any)({
-        clientName: 'Bybit Linear (USD)',
+        clientName: 'Binance Futures (USD-M)',
         symbol: payload.symbol,
         side: payload.side,
         entryPrice: payload.entryPrice || 0,

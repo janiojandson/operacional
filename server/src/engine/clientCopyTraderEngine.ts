@@ -157,11 +157,11 @@ export class ClientCopyTraderEngine {
                   costUsd: execRes.sizing?.notionalUsd || 0,
                   status: 'EXECUTED',
                   executedAt: Date.now(),
-                  reason: `✅ Ordem Real Executada Bybit (Order: ${execRes.orderId || 'OK'} | Qty: ${execRes.sizing?.qty})`
+                  reason: `✅ Ordem Real Executada Binance (Order: ${execRes.orderId || 'OK'} | Qty: ${execRes.sizing?.qty})`
                 });
 
                 if (cfg.notification_phone) {
-                  const msg = `⚡ *MarketFlow Pro — Ordem Real Executada*\n\nPar: *${trade.symbol}*\nTipo: *${trade.type}*\nPreço: *$${trade.entryPrice.toLocaleString()}*\nVolume: *$${execRes.sizing?.notionalUsd}*\nAlavancagem: *${execRes.sizing?.leverage}x*\nOrdem Bybit: \`${execRes.orderId}\``;
+                  const msg = `⚡ *MarketFlow Pro — Ordem Real Executada*\n\nPar: *${trade.symbol}*\nTipo: *${trade.type}*\nPreço: *$${trade.entryPrice.toLocaleString()}*\nVolume: *$${execRes.sizing?.notionalUsd}*\nAlavancagem: *${execRes.sizing?.leverage}x*\nOrdem Binance: \`${execRes.orderId}\``;
                   ComunicacaoService.sendWhatsApp({ to: cfg.notification_phone, message: msg }).catch(() => {});
                 }
               } else {
@@ -175,7 +175,7 @@ export class ClientCopyTraderEngine {
                   costUsd: 0,
                   status: 'BLOCKED_RISK_LIMIT',
                   executedAt: Date.now(),
-                  reason: `⚠️ Falha ao executar na Bybit: ${execRes.error}`
+                  reason: `⚠️ Falha ao executar na Binance: ${execRes.error}`
                 });
               }
             } catch (err: any) {

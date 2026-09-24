@@ -384,7 +384,7 @@ export default function ClientDashboard() {
 
   const handleDeleteApiKeys = async (env?: 'REAL' | 'TESTNET') => {
     const label = env ? (env === 'REAL' ? 'Conta Real' : 'Testnet') : 'todas as contas';
-    if (!window.confirm(`Tem certeza que deseja remover suas chaves de API da Bybit (${label})?`)) {
+    if (!window.confirm(`Tem certeza que deseja remover suas chaves de API da Binance (${label})?`)) {
       return;
     }
     try {
@@ -411,7 +411,7 @@ export default function ClientDashboard() {
     });
     const data = await res.json();
     setTestResult(data);
-    if (data.success) { notify(`✅ Conexão com Bybit ${env || ''} estabelecida!`); fetchAccount(); }
+    if (data.success) { notify(`✅ Conexão com Binance ${env || ''} estabelecida!`); fetchAccount(); }
     else notify(data.error || 'Falha na conexão.', 'error');
     setTesting(false);
   };
@@ -504,7 +504,7 @@ export default function ClientDashboard() {
         <nav className="flex items-center space-x-1 overflow-x-auto w-full md:w-auto py-1 md:py-0">
           {([
             { id: 'overview', icon: Activity, label: 'Visão Geral' },
-            { id: 'api-keys', icon: Key, label: 'API Bybit' },
+            { id: 'api-keys', icon: Key, label: 'API Binance' },
             { id: 'risk', icon: Shield, label: 'Simulador & Risco' },
             { id: 'history', icon: Clock, label: 'Histórico & Planilhas' }
           ] as const).map(tab => (
@@ -526,7 +526,7 @@ export default function ClientDashboard() {
         <div className="flex items-center space-x-3 ml-auto md:ml-4">
           <div className="flex items-center space-x-1.5">
             {account?.apiConnected
-              ? <><Wifi className="w-3.5 h-3.5 text-emerald-400" /><span className="text-xs text-emerald-400 font-mono hidden sm:inline">Bybit OK</span></>
+              ? <><Wifi className="w-3.5 h-3.5 text-emerald-400" /><span className="text-xs text-emerald-400 font-mono hidden sm:inline">Binance OK</span></>
               : <><WifiOff className="w-3.5 h-3.5 text-rose-400" /><span className="text-xs text-rose-400 font-mono hidden sm:inline">Sem API</span></>
             }
           </div>
@@ -640,21 +640,21 @@ export default function ClientDashboard() {
                   onClick={handlePanicClose}
                   disabled={panicLoading}
                   className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-300 hover:bg-rose-900 font-bold text-xs transition-all"
-                  title="Cancela todas as ordens e fecha todas as posições abertas na Bybit a mercado"
+                  title="Cancela todas as ordens e fecha todas as posições abertas na Binance a mercado"
                 >
                   {panicLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <AlertOctagon className="w-3.5 h-3.5 text-rose-400" />}
-                  <span>Pânico (Zerar Bybit)</span>
+                  <span>Pânico (Zerar Binance)</span>
                 </button>
 
-                {/* Botão de Atualizar Saldo ao vivo com a Bybit */}
+                {/* Botão de Atualizar Saldo ao vivo com a Binance */}
                 <button
                   onClick={handleRefreshBalance}
                   disabled={refreshingBalance}
                   className="flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-surface border border-border/60 hover:border-amber-500/50 text-slate-300 hover:text-white font-bold text-xs transition-all cursor-pointer"
-                  title="Consulta saldo e posições em tempo real diretamente na Bybit"
+                  title="Consulta saldo e posições em tempo real diretamente na Binance"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${refreshingBalance ? 'animate-spin' : ''}`} />
-                  <span>{refreshingBalance ? 'Atualizando...' : 'Atualizar Saldo Bybit'}</span>
+                  <span>{refreshingBalance ? 'Atualizando...' : 'Atualizar Saldo Binance'}</span>
                 </button>
               </div>
             </div>
@@ -664,13 +664,13 @@ export default function ClientDashboard() {
               <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start space-x-4 text-sm">
                 <AlertTriangle className="w-6 h-6 text-amber-400 shrink-0 mt-0.5" />
                 <div className="space-y-2">
-                  <p className="font-bold text-amber-400 text-base">API Bybit não conectada</p>
-                  <p className="text-amber-300/80 text-xs">Para que as ordens do Master sejam executadas automaticamente na sua conta com a alocação proporcional calibrada, conecte suas chaves na aba <strong>API Bybit</strong>.</p>
+                  <p className="font-bold text-amber-400 text-base">API Binance não conectada</p>
+                  <p className="text-amber-300/80 text-xs">Para que as ordens do Master sejam executadas automaticamente na sua conta com a alocação proporcional calibrada, conecte suas chaves na aba <strong>API Binance</strong>.</p>
                   <button
                     onClick={() => setActiveTab('api-keys')}
                     className="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 transition-all"
                   >
-                    Conectar Minha Bybit Agora
+                    Conectar Minha Binance Agora
                   </button>
                 </div>
               </div>
@@ -1163,11 +1163,11 @@ export default function ClientDashboard() {
                     <div className="p-3.5 rounded-xl bg-background/90 border border-border/50 font-mono text-[11px] space-y-2 max-h-56 overflow-y-auto">
                       <div className="text-emerald-400 flex items-center gap-2">
                         <span className="text-slate-500">[{new Date().toLocaleTimeString('pt-BR')}]</span>
-                        <span>🟢 Sincronização institucional 24/7 ATIVA na nuvem. Conta Bybit conectada (${account?.balance?.toFixed(2)} USDT livres).</span>
+                        <span>🟢 Sincronização institucional 24/7 ATIVA na nuvem. Conta Binance conectada (${account?.balance?.toFixed(2)} USDT livres).</span>
                       </div>
                       <div className="text-primary flex items-center gap-2">
                         <span className="text-slate-500">[{new Date().toLocaleTimeString('pt-BR')}]</span>
-                        <span>📡 Varredura autônoma ativa nos contratos perpétuos Bybit: BTC/USDT, ETH/USDT, SOL/USDT, BNB/USDT, XRP/USDT.</span>
+                        <span>📡 Varredura autônoma ativa nos contratos perpétuos Binance: BTC/USDT, ETH/USDT, SOL/USDT, BNB/USDT, XRP/USDT.</span>
                       </div>
                       {masterFeed?.recentLogs && masterFeed.recentLogs.length > 0 && masterFeed.recentLogs.map((lg, idx) => (
                         <div key={idx} className="text-slate-300 flex items-center gap-2 border-t border-border/20 pt-1.5">
@@ -1185,11 +1185,11 @@ export default function ClientDashboard() {
           </div>
         )}
 
-        {/* ── API BYBIT ── */}
+        {/* ── API BINANCE ── */}
         {activeTab === 'api-keys' && (
           <div className="max-w-2xl mx-auto space-y-5">
             <div>
-              <h2 className="text-xl font-bold text-white">Conectar API Bybit</h2>
+              <h2 className="text-xl font-bold text-white">Conectar API Binance</h2>
               <p className="text-xs text-slate-400 mt-1">Suas chaves são criptografadas com AES-256 no banco de dados e nunca são expostas.</p>
             </div>
 
@@ -1197,12 +1197,12 @@ export default function ClientDashboard() {
             <div className="p-5 rounded-2xl bg-accent/5 border border-accent/20 text-sm space-y-3">
               <p className="font-bold text-accent flex items-center space-x-1.5">
                 <HelpCircle className="w-4 h-4" />
-                <span>Passo a Passo Rápido na Bybit:</span>
+                <span>Passo a Passo Rápido na Binance:</span>
               </p>
               <ol className="list-decimal list-inside space-y-1.5 text-slate-300 text-xs font-mono">
-                <li>Acesse sua conta em <strong className="text-white">Bybit.com → Perfil → Gerenciamento de API</strong></li>
-                <li>Clique em <strong className="text-white">Criar Nova Chave</strong> → Escolha <em>"Chave de API gerada pelo sistema"</em></li>
-                <li>Habilite as permissões: ✅ <strong className="text-emerald-400">Contrato (Contract - Order / Leitura e Escrita)</strong></li>
+                <li>Acesse sua conta em <strong className="text-white">Binance.com → Perfil → Gerenciamento de API</strong></li>
+                <li>Clique em <strong className="text-white">Criar API</strong> → Escolha <em>"Gerada pelo sistema"</em></li>
+                <li>Habilite as permissões: ✅ <strong className="text-emerald-400">Ativar Futuros (Enable Futures)</strong> e ✅ <strong className="text-emerald-400">Leitura</strong></li>
                 <li>⚠️ <strong>NÃO</strong> marque Saques (Withdrawals). Nossa plataforma nunca solicita acesso a saques.</li>
                 <li>Cole a API Key e o Secret abaixo e salve.</li>
               </ol>
@@ -1214,7 +1214,7 @@ export default function ClientDashboard() {
                 <ShieldAlert className="w-4 h-4" />
                 <span>Gestão Inteligente de Lotes:</span>
               </span>
-              O MarketFlow Pro lê automaticamente seu saldo real em USDT na Bybit a cada sinal e calcula o tamanho dos lotes dinamicamente. <br/><br/>
+              O MarketFlow Pro lê automaticamente seu saldo real em USDT na Binance a cada sinal e calcula o tamanho dos lotes dinamicamente. <br/><br/>
               Recomendamos uma banca mínima de <strong className="text-white">100 a 200 USDT</strong> para garantir margem suficiente para os lotes mínimos das corretoras sem risco de liquidação por spread.
             </div>
 
@@ -1237,7 +1237,7 @@ export default function ClientDashboard() {
 
               {testnet && (
                 <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 font-mono">
-                  ⚠️ Modo Testnet ativo — use as chaves do testnet.bybit.com para testar sem dinheiro real.
+                  ⚠️ Modo Testnet ativo — use as chaves do testnet.binancefuture.com para testar sem dinheiro real.
                 </div>
               )}
 
@@ -1287,12 +1287,12 @@ export default function ClientDashboard() {
                       <div>
                         <div className="flex items-center space-x-2">
                           <Lock className="w-4 h-4 text-emerald-400" />
-                          <h3 className="text-sm font-bold text-white">Chave Bybit — CONTA REAL</h3>
+                          <h3 className="text-sm font-bold text-white">Chave Binance — CONTA REAL</h3>
                           <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                             MAINNET ATIVA
                           </span>
                         </div>
-                        <p className="text-xs text-slate-400 mt-1">Conexão oficial para operações com saldo real na Bybit.</p>
+                        <p className="text-xs text-slate-400 mt-1">Conexão oficial para operações com saldo real na Binance.</p>
                       </div>
                       
                       {/* Status & Toggle */}
@@ -1359,7 +1359,7 @@ export default function ClientDashboard() {
                       <div>
                         <div className="flex items-center space-x-2">
                           <Lock className="w-4 h-4 text-amber-400" />
-                          <h3 className="text-sm font-bold text-white">Chave Bybit — TESTNET (Sem Risco)</h3>
+                          <h3 className="text-sm font-bold text-white">Chave Binance — TESTNET (Sem Risco)</h3>
                           <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
                             TESTNET
                           </span>
@@ -1427,7 +1427,7 @@ export default function ClientDashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold text-white">Simulador de Risco & Alavancagem</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Calcule o peso das operações e dimensione o tamanho exato dos lotes na Bybit.</p>
+                <p className="text-xs text-slate-400 mt-0.5">Calcule o peso das operações e dimensione o tamanho exato dos lotes na Binance.</p>
               </div>
             </div>
 
@@ -1605,7 +1605,7 @@ export default function ClientDashboard() {
                   </div>
                   <div className="p-2.5 rounded-xl bg-background/60 border border-border/40">
                     <span className="text-slate-400 text-[10px] block">Proteção Stop Loss</span>
-                    <span className="text-rose-400 font-bold text-sm">Técnico na Bybit</span>
+                    <span className="text-rose-400 font-bold text-sm">Técnico na Binance</span>
                   </div>
                 </div>
               )}
@@ -1652,7 +1652,7 @@ export default function ClientDashboard() {
                   className={`w-full accent-accent ${autoConfig ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
                 />
                 <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1">
-                  <span>1x (Sem alavancar)</span><span>10x (Padrão Bybit / Projeto)</span><span>50x (Máximo)</span>
+                  <span>1x (Sem alavancar)</span><span>10x (Padrão Binance / Projeto)</span><span>50x (Máximo)</span>
                 </div>
               </div>
 
