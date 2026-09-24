@@ -156,6 +156,7 @@ authRouter.post('/signup', async (req: Request, res: Response) => {
       name: name.trim(),
       whatsapp: cleanPhone,
       whatsappValidado: false,
+      emailVerified: true,
       planActive: true
     });
 
@@ -314,7 +315,11 @@ authRouter.post('/register', requireAdmin, async (req: Request, res: Response) =
     return res.status(409).json({ error: 'Email já cadastrado.' });
   }
 
-  const cleanPhone = whatsapp ? String(whatsapp).replace(/\D/g, '') : null;
+  let cleanPhone = whatsapp ? String(whatsapp).trim() : null;
+  if (cleanPhone) {
+    const digits = cleanPhone.replace(/\D/g, '');
+    cleanPhone = cleanPhone.startsWith('+') ? `+${digits}` : `+55${digits}`;
+  }
   const hash = await bcrypt.hash(password, 12);
   const userId = `usr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const clientId = role === 'CLIENT' ? `cli-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` : undefined;
@@ -329,6 +334,7 @@ authRouter.post('/register', requireAdmin, async (req: Request, res: Response) =
       name: name.trim(),
       whatsapp: cleanPhone || undefined,
       whatsappValidado: false,
+      emailVerified: true,
       planActive: true
     });
 

@@ -47,13 +47,25 @@ export function normalizeShadowPnlPct(value: number): number | null {
 }
 
 export function recordShadowOpportunity(input: Omit<ShadowOpportunity, 'id' | 'timestamp'>): ShadowOpportunity {
+  const timestamp = new Date().toISOString();
   const record: ShadowOpportunity = {
     ...input,
     id: `shadow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    timestamp: new Date().toISOString()
+    timestamp
   };
   shadowOpportunities.unshift(record);
   if (shadowOpportunities.length > 500) shadowOpportunities.pop();
+
+  const decisionLabel = record.approved ? 'PERMITIDO 🟢' : 'BLOQUEADO 🛑';
+  const reasonText = record.reasons.length > 0 ? record.reasons.join(' / ') : 'Confluência aprovada';
+  const logLine = `[SHADOW AUDIT] | Ativo: ${record.symbol} (${record.side}) | Modo: ${record.mode} | Modo Novo: ${decisionLabel} | Motivo: ${reasonText}`;
+  try {
+    const logFilePath = path.resolve(process.cwd(), RISK_CONFIG.LOG_FILE_PATH);
+    fs.appendFileSync(logFilePath, `[${timestamp}] ${logLine}\n`, 'utf8');
+  } catch (fsErr: any) {
+    // Falha silenciosa de disco
+  }
+
   return record;
 }
 

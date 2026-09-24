@@ -62,12 +62,13 @@ export default function LoginPage() {
         setIsLoading(false);
         return;
       }
-      const rawPhone = whatsapp.replace(/\D/g, '');
-      if (rawPhone.length < 10) {
+      const digitsPhone = whatsapp.replace(/\D/g, '');
+      if (digitsPhone.length < 10) {
         setError('Por favor, informe um número de WhatsApp válido com DDD.');
         setIsLoading(false);
         return;
       }
+      const formattedPhone = whatsapp.trim().startsWith('+') ? `+${digitsPhone}` : `+55${digitsPhone}`;
       if (password !== confirmPassword) {
         setError('As senhas digitadas não coincidem.');
         setIsLoading(false);
@@ -79,7 +80,7 @@ export default function LoginPage() {
         return;
       }
 
-      const result = await signup(name.trim(), email.trim(), password, rawPhone);
+      const result = await signup(name.trim(), email.trim(), password, formattedPhone, confirmPassword);
       if (!result.success) {
         setError(result.error || 'Erro ao realizar cadastro.');
       }

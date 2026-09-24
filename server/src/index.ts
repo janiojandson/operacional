@@ -546,15 +546,32 @@ app.get('/api/clients', requireAuth, (req, res) => {
 });
 
 // Endpoint de Logs do Shadow Mode (Modo Fantasma)
-app.get('/api/audit-logs', requireAuth, (req, res) => {
+app.get('/api/audit-logs', requireAuth, async (req, res) => {
   try {
-    const logFilePath = path.resolve(process.cwd(), RISK_CONFIG.LOG_FILE_PATH);
-    if (fs.existsSync(logFilePath)) {
-      const content = fs.readFileSync(logFilePath, 'utf8');
-      res.json({ logs: content, count: content.split('\n').filter(Boolean).length });
-    } else {
-      res.json({ logs: 'Aguardando primeiros registros de auditoria em modo fantasma...', count: 0 });
+    const logFilePath1 = path.resolve(process.cwd(), RISK_CONFIG.LOG_FILE_PATH);
+    const logFilePath2 = path.resolve(rootDir, RISK_CONFIG.LOG_FILE_PATH);
+    const logPath = fs.existsSync(logFilePath1) ? logFilePath1 : (fs.existsSync(logFilePath2) ? logFilePath2 : null);
+
+    if (logPath) {
+      const content = await fs.promises.readFile(logPath, 'utf8');
+      if (content.trim()) {
+        const lines = content.trim().split('\n');
+        const lastLines = lines.slice(-1000).join('\n');
+        return res.json({ logs: lastLines, count: lines.length });
+      }
     }
+
+    const opps = getShadowOpportunities();
+    if (opps.length > 0) {
+      const generatedLines = opps.map(item => {
+        const decisionLabel = item.approved ? 'PERMITIDO 🟢' : 'BLOQUEADO 🛑';
+        const reasonText = item.reasons.length > 0 ? item.reasons.join(' / ') : 'Confluência aprovada';
+        return '[' + item.timestamp + '] [SHADOW AUDIT] | Ativo: ' + item.symbol + ' (' + item.side + ') | Modo: ' + item.mode + ' | Modo Novo: ' + decisionLabel + ' | Motivo: ' + reasonText;
+      });
+      return res.json({ logs: generatedLines.join('\n'), count: generatedLines.length });
+    }
+
+    res.json({ logs: 'Aguardando primeiros registros de auditoria em modo fantasma...', count: 0 });
   } catch (err: any) {
     res.status(500).json({ error: 'Erro ao ler logs de auditoria', message: err.message });
   }
@@ -782,29 +799,6 @@ app.get('/api/strategy/health-report', requireAuth, (req, res) => {
   res.json(report);
 });
 
-// ─── Shadow Mode Auditoria Logs ──────────────────────────────────────────
-app.get('/api/audit-logs', requireAuth, async (req, res) => {
-  try {
-    const logPath1 = path.resolve(process.cwd(), 'audit_shadow_mode.log');
-    const logPath2 = path.resolve(rootDir, 'audit_shadow_mode.log');
-    const logPath = fs.existsSync(logPath1) ? logPath1 : (fs.existsSync(logPath2) ? logPath2 : null);
-
-    if (!logPath) {
-      return res.json({ logs: 'Log de auditoria ainda não foi gerado. Aguardando a primeira operação...' });
-    }
-
-    const data = await fs.promises.readFile(logPath, 'utf8');
-    if (!data.trim()) {
-      return res.json({ logs: 'Log de auditoria ainda não foi gerado. Aguardando a primeira operação...' });
-    }
-
-    const lines = data.trim().split('\n');
-    const lastLines = lines.slice(-1000).join('\n');
-    res.json({ logs: lastLines });
-  } catch (err: any) {
-    res.status(500).json({ logs: `Erro ao ler logs de auditoria: ${err.message}` });
-  }
-});
 
 app.get('/api/shadow-opportunities', requireAuth, async (req, res) => {
   try {

@@ -151,13 +151,18 @@ export default function AdminDashboard() {
 
   const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanEmail = newEmail.trim().toLowerCase();
+    const cleanName = newName.trim();
+    const digits = newWhatsApp.replace(/\D/g, '');
+    const cleanPhone = newWhatsApp.trim().startsWith('+') ? `+${digits}` : (digits ? `+55${digits}` : '');
+
     const res = await authFetch('/api/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email: newEmail, password: newPassword, name: newName, whatsapp: newWhatsApp, role: 'CLIENT' })
+      body: JSON.stringify({ email: cleanEmail, password: newPassword, name: cleanName, whatsapp: cleanPhone, role: 'CLIENT' })
     });
     const data = await res.json();
     if (res.ok) {
-      notify(`✅ Cliente ${newName} criado com sucesso!`);
+      notify(`✅ Cliente ${cleanName} criado com sucesso!`);
       setShowNewClient(false); setNewEmail(''); setNewPassword(''); setNewName(''); setNewWhatsApp('');
       fetchClients();
     } else {

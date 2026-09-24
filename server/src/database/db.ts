@@ -244,7 +244,8 @@ export async function initDatabase(): Promise<void> {
   // Migrações seguras de colunas
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS whatsapp TEXT`).catch(() => { });
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS whatsapp_validado INTEGER NOT NULL DEFAULT 0`).catch(() => { });
-  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 0`).catch(() => { });
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 1`).catch(() => { });
+  await query(`UPDATE app_users SET email_verified = 1 WHERE email_verified = 0`).catch(() => { });
   await relaxLegacyPasswordColumnIfPresent();
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS sync_enabled INTEGER NOT NULL DEFAULT 0`).catch(() => { });
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_active INTEGER NOT NULL DEFAULT 1`).catch(() => { });
