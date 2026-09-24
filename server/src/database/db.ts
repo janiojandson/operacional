@@ -51,8 +51,63 @@ export async function bootstrapAdministrator(
     await operations.execute(`UPDATE app_users SET password_hash = $1, role = 'ADMIN', name = $2, email_verified = 1, is_active = 1, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $3`, [passwordHash, name, existing.id]);
     return { created: false, email };
   }
-  await operations.execute(`INSERT INTO app_users (id, email, password_hash, role, name, email_verified) VALUES ($1, $2, $3, 'ADMIN', $4, 1)`, [`admin-${Date.now()}`, email, passwordHash, name]);
+  await operations.execute(`INSERT INTO app_users (id, email, password_hash, role, name, email_verified, is_active)
+    VALUES ($1, $2, $3, 'ADMIN', $4, 1, 1)
+    ON CONFLICT (email) DO UPDATE SET
+      password_hash = EXCLUDED.password_hash,
+      role = 'ADMIN',
+      name = EXCLUDED.name,
+      email_verified = 1,
+      is_active = 1,
+      updated_at = EXTRACT(EPOCH FROM NOW()) * 1000`, [`admin-${Date.now()}`, email, passwordHash, name]);
   return { created: true, email };
+}
+
+export async function cleanupClientUsersForMaster(
+  environment: NodeJS.ProcessEnv,
+  operations: {
+    query: (text: string, params?: unknown[]) => Promise<Array<{ id: string; email: string; role: string; client_id?: string | null }>>;
+    execute: (text: string, params?: unknown[]) => Promise<unknown>;
+  }
+): Promise<{ deletedClients: number }> {
+  const masterEmail = environment.ADMIN_EMAIL?.trim().toLowerCase();
+  if (!masterEmail) throw new Error('Admin Master não configurado para a limpeza.');
+
+  const admins = await operations.query("SELECT id, email, role FROM app_users WHERE role = 'ADMIN'");
+  if (admins.length !== 1 || admins[0].email.trim().toLowerCase() !== masterEmail) {
+    throw new Error('Admin Master não é único ou não corresponde à configuração; limpeza cancelada.');
+  }
+
+  const clients = await operations.query("SELECT id, email, role, client_id FROM app_users WHERE role = 'CLIENT'");
+  if (clients.length === 0) return { deletedClients: 0 };
+
+  const clientIds = clients.map(client => client.client_id).filter((value): value is string => Boolean(value));
+  const userIds = clients.map(client => client.id);
+  const emails = clients.map(client => client.email);
+  if (clientIds.length) await operations.execute('DELETE FROM trade_history WHERE client_id = ANY($1)', [clientIds]);
+  await operations.execute('DELETE FROM client_configs WHERE user_id = ANY($1)', [userIds]);
+  if (clientIds.length) await operations.execute('DELETE FROM client_configs WHERE client_id = ANY($1)', [clientIds]);
+  await operations.execute('DELETE FROM password_reset_otps WHERE email = ANY($1)', [emails]);
+  await operations.execute("DELETE FROM app_users WHERE role = 'CLIENT'");
+  return { deletedClients: clients.length };
+}
+
+export async function relaxLegacyPasswordColumnIfPresent(execute: (text: string, params?: unknown[]) => Promise<unknown> = query): Promise<void> {
+  await execute(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'app_users'
+          AND column_name = 'password'
+          AND is_nullable = 'NO'
+      ) THEN
+        ALTER TABLE public.app_users ALTER COLUMN password DROP NOT NULL;
+      END IF;
+    END $$;
+  `);
 }
 
 // ─── Inicialização das Tabelas ─────────────────────────────────────────────
@@ -181,6 +236,7 @@ export async function initDatabase(): Promise<void> {
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS whatsapp TEXT`).catch(() => { });
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS whatsapp_validado INTEGER NOT NULL DEFAULT 0`).catch(() => { });
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 0`).catch(() => { });
+  await relaxLegacyPasswordColumnIfPresent();
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS sync_enabled INTEGER NOT NULL DEFAULT 0`).catch(() => { });
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_active INTEGER NOT NULL DEFAULT 1`).catch(() => { });
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS plan_expires_at BIGINT`).catch(() => { });
@@ -225,7 +281,9 @@ export async function initDatabase(): Promise<void> {
     throw new Error('ADMIN_EMAIL e ADMIN_PASSWORD devem estar configurados antes da inicialização.');
   }
 
-  const existingAdmin = await queryOne<UserRow>('SELECT * FROM app_users WHERE role = $1 LIMIT 1', ['ADMIN']);
+  // O bootstrap acima é a única fonte de verdade do Admin Master.
+  // Evita uma segunda inserção concorrente no mesmo e-mail durante o boot.
+  const existingAdmin = { email: adminEmail } as UserRow;
   if (!existingAdmin) {
     const hash = await bcrypt.hash(adminPassword, 12);
     const adminId = `admin-${Date.now()}`;
@@ -245,6 +303,14 @@ export async function initDatabase(): Promise<void> {
   }
 
   // Seed: Anúncio de boas-vindas
+  if (process.env.CLEANUP_CLIENT_USERS_ON_BOOT === 'true') {
+    const result = await cleanupClientUsersForMaster(process.env, {
+      query: (text, params) => query<any>(text, params as any),
+      execute: (text, params) => query(text, params as any)
+    });
+    console.log(`[DB] Limpeza administrativa concluída: ${result.deletedClients} conta(s) CLIENT removida(s).`);
+  }
+
   const existingAnnouncements = await queryOne('SELECT id FROM announcements LIMIT 1');
   if (!existingAnnouncements) {
     await query(
