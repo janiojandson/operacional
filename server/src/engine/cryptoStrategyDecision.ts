@@ -64,7 +64,7 @@ export function evaluateCryptoOpportunity(input: CryptoOpportunityInput): Strate
   const isBuy = input.signalSide === 'BUY';
   const stopLoss = roundPrice(input.price * (isBuy ? 1 - profile.stopLossPct : 1 + profile.stopLossPct));
   const takeProfit = roundPrice(input.price * (isBuy ? 1 + profile.takeProfitPct : 1 - profile.takeProfitPct));
-  const trailingTrigger = roundPrice(input.price * (isBuy ? 1 + profile.takeProfitPct * 0.8 : 1 - profile.takeProfitPct * 0.8));
+  const trailingTrigger = roundPrice(input.price * (isBuy ? 1 + profile.takeProfitPct * 0.5 : 1 - profile.takeProfitPct * 0.5));
 
   return { approved, score, reasons, profileVersion: CRYPTO_STRATEGY_VERSION, entrySide: input.signalSide, stopLoss, takeProfit, trailingTrigger };
 }

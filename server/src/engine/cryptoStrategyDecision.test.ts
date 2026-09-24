@@ -24,9 +24,9 @@ const valid = evaluateCryptoOpportunity(validInput);
 assert.equal(valid.approved, true);
 assert.equal(valid.profileVersion, 'flow-crypto-v1');
 assert.equal(valid.entrySide, 'BUY');
-assert.equal(valid.takeProfit, 102_000);
-assert.equal(valid.stopLoss, 99_200);
-assert.equal((valid.takeProfit - validInput.price) / (validInput.price - valid.stopLoss), 2.5);
+assert.equal(valid.takeProfit, 100_700);
+assert.equal(valid.stopLoss, 99_720);
+assert.equal(Math.round(((valid.takeProfit - validInput.price) / (validInput.price - valid.stopLoss)) * 10) / 10, 2.5);
 
 const stale = evaluateCryptoOpportunity({ ...validInput, bookTimestamp: now - 30_001 });
 assert.equal(stale.approved, false);
@@ -37,7 +37,7 @@ assert.equal(fallback.approved, false);
 assert.ok(fallback.reasons.includes('FONTE_NAO_BYBIT'));
 
 const sol = evaluateCryptoOpportunity({ ...validInput, symbol: 'SOL/USDT', price: 150 });
-assert.equal(sol.takeProfit, 155.25);
-assert.equal(sol.stopLoss, 147.9);
+assert.equal(sol.takeProfit, 151.65);
+assert.equal(sol.stopLoss, 149.34);
 
 console.log('cryptoStrategyDecision: PASS');

@@ -104,7 +104,7 @@ export function calculateTrailingConfiguration(input: {
   if (!Number.isFinite(targetDistancePct) || targetDistancePct <= 0 || !Number.isFinite(input.entryPrice) || input.entryPrice <= 0) return null;
   const direction = input.side === 'BUY' ? 1 : -1;
   return {
-    activationPrice: Number((input.entryPrice * (1 + direction * targetDistancePct * 0.8)).toFixed(8)),
+    activationPrice: Number((input.entryPrice * (1 + direction * targetDistancePct * 0.5)).toFixed(8)),
     callbackDistance: Number((input.entryPrice * targetDistancePct * 0.2).toFixed(8))
   };
 }
