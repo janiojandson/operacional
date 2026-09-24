@@ -164,7 +164,11 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
         if (res.ok) {
           const data = await res.json();
-          setCandleSource(data?.source === 'BYBIT' ? 'BYBIT' : 'LOCAL_FALLBACK');
+          if (data?.source === 'BINANCE' || data?.source === 'BYBIT') {
+            setCandleSource(data.source);
+          } else {
+            setCandleSource('LOCAL_FALLBACK');
+          }
           const rawCandles = Array.isArray(data) ? data : (Array.isArray(data.candles) ? data.candles : []);
 
           if (!isCancelled && rawCandles.length > 0) {
@@ -198,6 +202,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
       const liveCandles = candlesRef.current;
       if (!isCancelled && selectedTf === '1m' && liveCandles.length > 0) {
+        setCandleSource((prev) => (prev === 'UNAVAILABLE' ? 'LOCAL_FALLBACK' : prev));
         const chartCandles = liveCandles.map(c => ({
           time: c.time,
           open: Number(c.open),

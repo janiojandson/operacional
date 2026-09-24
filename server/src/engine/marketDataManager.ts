@@ -29,10 +29,8 @@ const BYBIT_CATEGORIES: Record<string, 'crypto' | 'forex'> = {
 };
 
 function toExchangeLinear(symbol: string): string {
-  if (symbol.includes(':')) return symbol;
-  const [base, quote] = symbol.split('/');
-  if (!base || !quote) return symbol;
-  return `${base}/${quote}:${quote}`;
+  if (symbol.includes(':')) return symbol.split(':')[0];
+  return symbol;
 }
 
 export class MarketDataManager {
@@ -51,8 +49,8 @@ export class MarketDataManager {
     this.flowEngine = flowEngine;
     this.onBroadcast = onBroadcast;
     this.exchange = new (ccxt as any).binance({
-      options: { defaultType: 'future' },
-      enableRateLimit: true
+      enableRateLimit: true,
+      timeout: 10000
     });
   }
 
@@ -61,15 +59,14 @@ export class MarketDataManager {
     await this.loadInitialData();
     this.startStreaming();
     this.isInitialized = true;
-    console.log('[MarketData] ✅ Dados reais da Bybit inicializados');
+    console.log('[MarketData] ✅ Dados reais da Binance inicializados');
   }
 
   private async loadInitialData(): Promise<void> {
     await Promise.all(DEFAULT_SYMBOLS.map(async (symbol) => {
       try {
         const ccxtSymbol = toExchangeLinear(symbol);
-        await this.exchange.loadMarkets();
-
+        
         const [ohlcv, ticker] = await Promise.all([
           this.exchange.fetchOHLCV(ccxtSymbol, '1m', undefined, 200),
           this.exchange.fetchTicker(ccxtSymbol)
