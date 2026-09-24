@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { PaperAccount } from '../../../../shared/paperTypes';
 import { PairPerformance, DynamicPairStatus } from '../../../../shared/types';
 import { Bot, Zap, Power, Flame, CheckCircle, XCircle } from 'lucide-react';
+import { positionRiskSummary } from './positionRiskSummary';
 
 interface PaperTradingPanelProps {
   account: PaperAccount | null;
@@ -218,9 +219,10 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {account.openPositions.map((pos: { id: string; symbol: string; type: string; pnlUsd: number; pnlPct: number; entryPrice: number; takeProfit: number; stopLoss: number }) => {
+              {account.openPositions.map((pos) => {
                 const isBuy = pos.type === 'BUY';
                 const isProfit = pos.pnlUsd >= 0;
+                const sizing = positionRiskSummary(pos);
 
                 return (
                   <div
@@ -232,6 +234,9 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
                         <span className="font-bold text-text-primary text-xs">{pos.symbol}</span>
                         <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${isBuy ? 'bg-trade-green/20 text-trade-green border border-trade-green/30' : 'bg-trade-red/20 text-trade-red border border-trade-red/30'}`}>
                           {isBuy ? 'Posição (Buy)' : 'Posição (Sell)'}
+                        </span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 font-bold border border-indigo-500/30">
+                          10x ISOLADA
                         </span>
                       </div>
                       <div className={`font-bold text-xs ${isProfit ? 'text-trade-green' : 'text-trade-red'}`}>
@@ -252,6 +257,13 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
                         <span className="text-trade-red text-[9px] block">STOP (SL)</span>
                         <span className="text-trade-red font-bold">${pos.stopLoss.toLocaleString()}</span>
                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-4 text-[9px] bg-slate-950/40 p-1.5 rounded border border-border-panel text-center">
+                      <div><span className="text-text-muted block">NOTIONAL</span><span className="text-accent font-bold">{sizing.notionalUsd}</span></div>
+                      <div><span className="text-text-muted block">RISCO</span><span className="text-amber-400 font-bold">{sizing.riskUsd}</span></div>
+                      <div><span className="text-text-muted block">MARGEM</span><span className="text-text-primary font-bold">{sizing.marginUsd}</span></div>
+                      <div><span className="text-text-muted block">EXPOSIÇÃO</span><span className="text-purple-300 font-bold">{sizing.exposurePct}</span></div>
                     </div>
                   </div>
                 );

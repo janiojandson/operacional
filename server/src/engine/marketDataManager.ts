@@ -28,7 +28,7 @@ const BYBIT_CATEGORIES: Record<string, 'crypto' | 'forex'> = {
   'BNB/USDT': 'crypto', 'XRP/USDT': 'crypto'
 };
 
-function toBybitLinear(symbol: string): string {
+function toExchangeLinear(symbol: string): string {
   if (symbol.includes(':')) return symbol;
   const [base, quote] = symbol.split('/');
   if (!base || !quote) return symbol;
@@ -50,8 +50,8 @@ export class MarketDataManager {
   constructor(flowEngine: FlowEngine, onBroadcast?: (type: string, data: any) => void) {
     this.flowEngine = flowEngine;
     this.onBroadcast = onBroadcast;
-    this.exchange = new (ccxt as any).bybit({
-      options: { defaultType: 'linear' },
+    this.exchange = new (ccxt as any).binance({
+      options: { defaultType: 'future' },
       enableRateLimit: true
     });
   }
@@ -67,7 +67,7 @@ export class MarketDataManager {
   private async loadInitialData(): Promise<void> {
     await Promise.all(DEFAULT_SYMBOLS.map(async (symbol) => {
       try {
-        const ccxtSymbol = toBybitLinear(symbol);
+        const ccxtSymbol = toExchangeLinear(symbol);
         await this.exchange.loadMarkets();
 
         const [ohlcv, ticker] = await Promise.all([
@@ -164,7 +164,7 @@ export class MarketDataManager {
         bidDepthTotal: bidTotal,
         askDepthTotal: askTotal,
         imbalanceRatio: +(bidTotal / Math.max(askTotal, 1)).toFixed(2),
-        source: 'BYBIT'
+        source: 'BINANCE'
       };
     } catch {
       return this.generateRealisticBook(symbol, currentPrice, 'crypto');
@@ -184,7 +184,7 @@ export class MarketDataManager {
   private async updateTickers(): Promise<void> {
     for (const [symbol, state] of this.symbols.entries()) {
       try {
-        const ccxtSymbol = toBybitLinear(symbol);
+        const ccxtSymbol = toExchangeLinear(symbol);
         const [ticker, rawTrades] = await Promise.all([
           this.exchange.fetchTicker(ccxtSymbol),
           this.exchange.fetchTrades(ccxtSymbol, undefined, 50).catch(() => [])
@@ -293,7 +293,7 @@ export class MarketDataManager {
   private async updateCandlesAndBooks(): Promise<void> {
     for (const [symbol, state] of this.symbols.entries()) {
       try {
-        const ccxtSymbol = toBybitLinear(symbol);
+        const ccxtSymbol = toExchangeLinear(symbol);
         const ohlcv = await this.exchange.fetchOHLCV(ccxtSymbol, '1m', undefined, 200);
 
         const newCandles = this.normalizeCandles(ohlcv, symbol);
@@ -325,7 +325,7 @@ export class MarketDataManager {
     try {
       for (const [symbol, state] of this.symbols.entries()) {
         try {
-          const book = await this.fetchOrderBook(toBybitLinear(symbol), state.lastPrice);
+          const book = await this.fetchOrderBook(toExchangeLinear(symbol), state.lastPrice);
           book.symbol = symbol;
           state.book = book;
           if (this.onBroadcast) this.onBroadcast('book', book);
@@ -340,7 +340,7 @@ export class MarketDataManager {
 
   public async getKlines(symbol: string, tf: string, limit = 400): Promise<CandleData[] | null> {
     try {
-      const ccxtSymbol = toBybitLinear(symbol);
+      const ccxtSymbol = toExchangeLinear(symbol);
       const ccxtTf = tf === '1D' ? '1d' : tf === '1W' ? '1w' : tf;
       const ohlcv = await this.exchange.fetchOHLCV(ccxtSymbol, ccxtTf as any, undefined, limit);
       if (!Array.isArray(ohlcv) || ohlcv.length === 0) return null;

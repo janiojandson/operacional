@@ -42,7 +42,7 @@ export function calculateMasterMirrorSize(input: MasterMirrorSizingInput): Maste
   const minimumBankUsd = money(minNotionalUsd / masterExposureRatio);
 
   if (qty < minQty) {
-    return { status: 'BLOCKED_MIN_LOT', qty: 0, notionalUsd: 0, marginUsd: 0, openFeeUsd: 0, minimumBankUsd, reason: 'O lote mínimo da Bybit excede a exposição proporcional da banca.' };
+    return { status: 'BLOCKED_MIN_LOT', qty: 0, notionalUsd: 0, marginUsd: 0, openFeeUsd: 0, minimumBankUsd, reason: 'O lote mínimo da corretora excede a exposição proporcional da banca.' };
   }
 
   const notionalUsd = money(qty * entryPrice);

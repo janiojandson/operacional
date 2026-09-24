@@ -34,7 +34,7 @@ assert.ok(stale.reasons.includes('BOOK_DESATUALIZADO'));
 
 const fallback = evaluateCryptoOpportunity({ ...validInput, source: 'LOCAL_FALLBACK' as const });
 assert.equal(fallback.approved, false);
-assert.ok(fallback.reasons.includes('FONTE_NAO_BYBIT'));
+assert.ok(fallback.reasons.includes('FONTE_NAO_EXCHANGE'));
 
 const sol = evaluateCryptoOpportunity({ ...validInput, symbol: 'SOL/USDT', price: 150 });
 assert.equal(sol.takeProfit, 151.65);

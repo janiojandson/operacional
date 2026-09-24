@@ -1,6 +1,7 @@
 import React from 'react';
 import { OrderBookData } from '../../../../shared/types';
 import { Layers } from 'lucide-react';
+import { bookStatus } from './bookStatus';
 
 interface DOMBookProps {
   book: OrderBookData | null;
@@ -16,6 +17,7 @@ export const DOMBook: React.FC<DOMBookProps> = ({ book }) => {
   }
 
   const maxDepthTotal = Math.max(book.bidDepthTotal, book.askDepthTotal, 1);
+  const status = bookStatus(book);
   const asksReversed = [...book.asks.slice(0, 12)].reverse();
   const bids = book.bids.slice(0, 12);
 
@@ -27,8 +29,9 @@ export const DOMBook: React.FC<DOMBookProps> = ({ book }) => {
           <Layers className="w-3.5 h-3.5 text-accent" />
           <span className="text-[11px] font-bold text-text-primary tracking-wide uppercase">DOM — Book L2</span>
         </div>
-        <div className="text-[10px] font-mono text-text-muted">
-          Spread: <span className="text-text-primary font-semibold">{book.spread}</span>
+        <div className="text-[10px] font-mono text-text-muted text-right">
+          <div>Spread: <span className="text-text-primary font-semibold">{book.spread}</span></div>
+          <div className={status.stale ? 'text-amber-400' : 'text-trade-green'}>{status.source} · {status.age}</div>
         </div>
       </div>
 

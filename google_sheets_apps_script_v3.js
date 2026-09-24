@@ -80,7 +80,7 @@ function refreshDashboardFromTrigger() {
     props.setProperty('MARKETFLOW_DASHBOARD_LAST_REFRESH', String(Date.now()));
   } finally {
     props.deleteProperty('MARKETFLOW_DASHBOARD_REFRESH_PENDING');
-    ScriptApp.getProjectTriggers().forEach(function(trigger) {
+    ScriptApp.getProjectTriggers().forEach(function (trigger) {
       if (trigger.getHandlerFunction() === 'refreshDashboardFromTrigger') ScriptApp.deleteTrigger(trigger);
     });
   }
@@ -174,41 +174,41 @@ function initSheetTrades(ss, forceRefresh) {
   if (!sheet) sheet = ss.insertSheet(name);
 
   var headers = [
-      'Data / Hora',
-      'Conta / Origem',
-      'Par Bybit',
-      'Direção',
-      'Tipo Ordem',
-      'Preço Entrada ($)',
-      'Volume (Qty)',
-      'Stop Loss ($)',
-      'Take Profit ($)',
-      'Trailing Stop',
-      'Status',
-      'Resultado',
-      'Lucro Bruto ($)',
-      'Taxas Bybit ($)',
-      'Lucro Líquido Real ($)',
-      'Fee Drag (%)',
-      'Lucro Teórico Shadow ($)',
-      'Retorno Bruto (%)',
-      'Retorno Líquido (%)',
-      'R-Múltiplo',
-      'Detalhes / Auditoria',
-      'Trade ID',
-      'Evento',
-      'Notional Master ($)',
-      'ExposiÃ§Ã£o Master (%)',
-      'Margem Master ($)',
-      'PotÃªncia',
-      'Alavancagem',
-      'Lote MÃ­nimo',
-      'Shadow Filter',
-      'R Bruto Estrutural',
-      'R LÃ­quido Estimado',
-      'Risco por Trade ($)',
-      'Motivos / ValidaÃ§Ã£o de Risco'
-    ];
+    'Data / Hora',
+    'Conta / Origem',
+    'Par Bybit',
+    'Direção',
+    'Tipo Ordem',
+    'Preço Entrada ($)',
+    'Volume (Qty)',
+    'Stop Loss ($)',
+    'Take Profit ($)',
+    'Trailing Stop',
+    'Status',
+    'Resultado',
+    'Lucro Bruto ($)',
+    'Taxas Bybit ($)',
+    'Lucro Líquido Real ($)',
+    'Fee Drag (%)',
+    'Lucro Teórico Shadow ($)',
+    'Retorno Bruto (%)',
+    'Retorno Líquido (%)',
+    'R-Múltiplo',
+    'Detalhes / Auditoria',
+    'Trade ID',
+    'Evento',
+    'Notional Master ($)',
+    'ExposiÃ§Ã£o Master (%)',
+    'Margem Master ($)',
+    'PotÃªncia',
+    'Alavancagem',
+    'Lote MÃ­nimo',
+    'Shadow Filter',
+    'R Bruto Estrutural',
+    'R LÃ­quido Estimado',
+    'Risco por Trade ($)',
+    'Motivos / ValidaÃ§Ã£o de Risco'
+  ];
   if (sheet.getLastRow() === 0 || forceRefresh) {
     if (sheet.getLastRow() === 0) {
       sheet.appendRow(headers);
@@ -243,8 +243,8 @@ function logTrade(ss, data) {
   var netPctVal = notional > 0 ? (netPnl / notional) : 0;
   var rMultipleVal = Number(data.rMultiple || 0);
 
-  var shadowTheoreticalPnl = (data.shadowTheoreticalPnl !== undefined) 
-    ? Number(data.shadowTheoreticalPnl) 
+  var shadowTheoreticalPnl = (data.shadowTheoreticalPnl !== undefined)
+    ? Number(data.shadowTheoreticalPnl)
     : (String(data.shadowDecision || '').toUpperCase().indexOf('BLOQUEADO') !== -1 ? 0.00 : netPnl);
 
   var isTrailing = String(data.trailingStopAtivo || 'SIM').toUpperCase() === 'SIM';
@@ -411,7 +411,7 @@ function initSheetComparativo(ss, forceRefresh) {
 
   if (sheet.getLastRow() === 0 || forceRefresh) {
     sheet.clear();
-    
+
     // Banner Superior
     sheet.getRange('A1:N1').merge()
       .setValue('PAINEL DE VIABILIDADE ECONÔMICA REAL: BANCA $500 (MICRO) vs BANCA $10,000 (INSTITUCIONAL) — USD ONLY')

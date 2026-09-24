@@ -1,7 +1,7 @@
 import { CRYPTO_STRATEGY_VERSION, getCryptoStrategyProfile } from './cryptoStrategyProfile.js';
 
 export type StrategyEntrySide = 'BUY' | 'SELL';
-export type StrategyDataSource = 'BYBIT' | 'LOCAL_FALLBACK' | 'UNAVAILABLE';
+export type StrategyDataSource = 'BINANCE' | 'BYBIT' | 'LOCAL_FALLBACK' | 'UNAVAILABLE';
 
 export interface CryptoOpportunityInput {
   symbol: string;
@@ -42,7 +42,7 @@ export function evaluateCryptoOpportunity(input: CryptoOpportunityInput): Strate
 
   if (!profile) reasons.push('PAR_SEM_PERFIL');
   if (!Number.isFinite(input.price) || input.price <= 0) reasons.push('PRECO_INVALIDO');
-  if (input.source !== 'BYBIT') reasons.push('FONTE_NAO_BYBIT');
+  if (input.source !== 'BINANCE' && input.source !== 'BYBIT') reasons.push('FONTE_NAO_EXCHANGE');
   if (!Number.isFinite(input.bookTimestamp) || input.now - input.bookTimestamp > (profile?.maxBookAgeMs ?? 0)) reasons.push('BOOK_DESATUALIZADO');
   if (!Number.isFinite(input.spreadPct) || input.spreadPct < 0 || input.spreadPct > (profile?.maxSpreadPct ?? 0)) reasons.push('SPREAD_EXCESSIVO');
   if (input.hasOpenPosition) reasons.push('POSICAO_JA_ABERTA');

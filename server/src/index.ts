@@ -574,7 +574,7 @@ app.get('/api/client/master-feed', requireAuth, (req, res) => {
 
   res.json({
     masterOnline: true,
-    autonomiaStatus: '100% ATIVA (24/7 Bybit Perpétuos)',
+    autonomiaStatus: '100% ATIVA (24/7 Binance Perpétuos - 10x Isolada)',
     metrics: {
       winRate: account.winRate,
       totalTrades: account.totalTrades,
@@ -887,7 +887,7 @@ app.get('/api/assets/:symbol/klines', requireAuth, async (req, res) => {
 
   const direct = await marketManager.getKlines(symbol, tf, 400);
   if (direct && direct.length > 0) {
-    return res.json({ symbol, tf, candles: direct, source: 'BYBIT' });
+    return res.json({ symbol, tf, candles: direct, source: 'BINANCE' });
   }
 
   const baseCandles = state.candles || [];

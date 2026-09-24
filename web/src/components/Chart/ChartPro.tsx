@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createChart } from 'lightweight-charts';
 import { Eye, EyeOff, Activity } from 'lucide-react';
+import { chartHistoryKey } from './chartRefreshPolicy.js';
 
 export interface CandleData {
   time: any;
@@ -46,6 +47,8 @@ export const ChartPro: React.FC<ChartProProps> = ({
   const chartRef = useRef<any>(null);
   const candleSeriesRef = useRef<any>(null);
   const volumeSeriesRef = useRef<any>(null);
+  const candlesRef = useRef<CandleData[]>(candles);
+  const historyKeyRef = useRef<string | null>(null);
 
   const entryLineRef = useRef<any>(null);
   const tpLineRef = useRef<any>(null);
@@ -55,7 +58,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
   const [showFlowMarkers, setShowFlowMarkers] = useState(true);
   const [selectedTf, setSelectedTf] = useState<'1m' | '3m' | '5m' | '15m' | '1h' | '4h' | '1D'>('1m');
-  const [candleSource, setCandleSource] = useState<'BYBIT' | 'LOCAL_FALLBACK' | 'UNAVAILABLE'>('UNAVAILABLE');
+  const [candleSource, setCandleSource] = useState<'BYBIT' | 'BINANCE' | 'LOCAL_FALLBACK' | 'UNAVAILABLE'>('UNAVAILABLE');
 
   // Cálculo da pressão institucional blindado contra undefined e divisão por zero
   const buyVol = Number(activeCandle?.buyVolume ?? 0);
@@ -68,6 +71,10 @@ export const ChartPro: React.FC<ChartProProps> = ({
   const buyPressurePct = Math.round(buyRatio * 100);
   const sellPressurePct = 100 - buyPressurePct;
   const dominantSide = buyPressurePct > 55 ? 'BUY' : sellPressurePct > 55 ? 'SELL' : 'NEUTRAL';
+
+  useEffect(() => {
+    candlesRef.current = candles;
+  }, [candles]);
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -144,6 +151,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
   useEffect(() => {
     let isCancelled = false;
+    const historyKey = chartHistoryKey(symbol, selectedTf);
 
     const loadTimeframeData = async () => {
       if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
@@ -176,7 +184,10 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
             candleSeriesRef.current.setData(chartCandles);
             volumeSeriesRef.current.setData(chartVolume);
-            chartRef.current?.timeScale().fitContent();
+            if (historyKeyRef.current !== historyKey) {
+              chartRef.current?.timeScale().fitContent();
+              historyKeyRef.current = historyKey;
+            }
             return;
           }
         }
@@ -185,8 +196,9 @@ export const ChartPro: React.FC<ChartProProps> = ({
         setCandleSource('UNAVAILABLE');
       }
 
-      if (!isCancelled && selectedTf === '1m' && candles && candles.length > 0) {
-        const chartCandles = candles.map(c => ({
+      const liveCandles = candlesRef.current;
+      if (!isCancelled && selectedTf === '1m' && liveCandles.length > 0) {
+        const chartCandles = liveCandles.map(c => ({
           time: c.time,
           open: Number(c.open),
           high: Number(c.high),
@@ -194,7 +206,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
           close: Number(c.close)
         }));
 
-        const chartVolume = candles.map(c => ({
+        const chartVolume = liveCandles.map(c => ({
           time: c.time,
           value: Number(c.volume || 0),
           color: Number(c.close) >= Number(c.open) ? 'rgba(14, 203, 129, 0.4)' : 'rgba(246, 70, 93, 0.4)'
@@ -202,6 +214,10 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
         candleSeriesRef.current.setData(chartCandles);
         volumeSeriesRef.current.setData(chartVolume);
+        if (historyKeyRef.current !== historyKey) {
+          chartRef.current?.timeScale().fitContent();
+          historyKeyRef.current = historyKey;
+        }
       }
     };
 
@@ -210,7 +226,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [symbol, selectedTf, candles]);
+  }, [symbol, selectedTf]);
 
   useEffect(() => {
     if (!activeCandle || !candleSeriesRef.current || !volumeSeriesRef.current) return;
@@ -303,7 +319,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
           lineWidth: 2,
           lineStyle: 0,
           axisLabelVisible: true,
-          title: `POSIÇÃO (${isPosLong ? 'COMPRA' : 'VENDA'})`,
+          title: `POSIÇÃO (${isPosLong ? 'COMPRA' : 'VENDA'}) [10x ISOLADA]`,
         });
       }
 
@@ -378,8 +394,8 @@ export const ChartPro: React.FC<ChartProProps> = ({
         <div className="flex items-center justify-between px-3 py-1.5">
           <div className="flex items-center space-x-2.5">
             <span className="font-mono font-bold text-sm text-text-primary tracking-wider">{symbol}</span>
-            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${candleSource === 'BYBIT' ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10' : candleSource === 'LOCAL_FALLBACK' ? 'text-amber-300 border-amber-500/40 bg-amber-500/10' : 'text-rose-300 border-rose-500/40 bg-rose-500/10'}`}>
-              {candleSource === 'BYBIT' ? 'BYBIT AO VIVO' : candleSource === 'LOCAL_FALLBACK' ? 'FALLBACK LOCAL' : 'DADOS INDISPONIVEIS'}
+            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${(candleSource === 'BINANCE' || candleSource === 'BYBIT') ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10' : candleSource === 'LOCAL_FALLBACK' ? 'text-amber-300 border-amber-500/40 bg-amber-500/10' : 'text-rose-300 border-rose-500/40 bg-rose-500/10'}`}>
+              {candleSource === 'BINANCE' ? 'BINANCE AO VIVO' : candleSource === 'BYBIT' ? 'BYBIT AO VIVO' : candleSource === 'LOCAL_FALLBACK' ? 'FALLBACK LOCAL' : 'DADOS INDISPONIVEIS'}
             </span>
 
             <div className="flex items-center bg-bg-app p-0.5 rounded border border-border-panel text-[11px] font-mono">
@@ -471,7 +487,10 @@ export const ChartPro: React.FC<ChartProProps> = ({
               {currentTrade.type || currentTrade.side || 'TRADE'}
             </span>
             <div>
-              <div className="text-[10px] text-text-muted">ENTRADA EM CURSO</div>
+              <div className="text-[10px] text-text-muted flex items-center gap-1.5">
+                <span>ENTRADA EM CURSO</span>
+                <span className="px-1 py-0.2 rounded bg-indigo-500/20 text-indigo-400 font-bold border border-indigo-500/40 text-[9px]">10x ISOLADA</span>
+              </div>
               <div className="text-text-primary font-bold">${tradeEntryPrice.toLocaleString()}</div>
             </div>
           </div>

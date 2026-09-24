@@ -5,7 +5,13 @@
 
 
 
-const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzMTad90G0F_-VqJMRbPeoHqazT_-R5MqR4ZmYswyCII-K0vslKiWV_BuB2nIpu9tFkkQ/exec';
+import { randomUUID } from 'node:crypto';
+
+const WEB_APP_URL = process.env.GOOGLE_SHEETS_WEB_APP_URL || 'https://script.google.com/macros/s/AKfycbzMTad90G0F_-VqJMRbPeoHqazT_-R5MqR4ZmYswyCII-K0vslKiWV_BuB2nIpu9tFkkQ/exec';
+
+export function createSheetWebhookPayload<T extends Record<string, unknown>>(data: T, requestId: string = randomUUID()): T & { requestId: string } {
+  return { ...data, requestId };
+}
 
 export interface TradeLogPayload {
   type: 'TRADE';
@@ -84,12 +90,13 @@ export class GoogleSheetsService {
     if (!WEB_APP_URL) return;
 
     try {
+      const payload = createSheetWebhookPayload(data);
       const response = await fetch(WEB_APP_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(data),
+        body: JSON.stringify(payload),
       });
       const body = await response.text();
       if (!response.ok) throw new Error(`HTTP ${response.status}`);

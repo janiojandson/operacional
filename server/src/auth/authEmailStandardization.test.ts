@@ -24,6 +24,25 @@ test('bootstraps the Railway administrator as verified from environment values',
   });
   assert.deepEqual(result, { created: true, email: 'admin@railway.app' });
   assert.equal(statements.length, 1);
+  assert.match(String(statements[0][0]), /ON CONFLICT \(email\)/);
+});
+
+test('relaxes only the required legacy password column without changing user data', async () => {
+  const statements: unknown[][] = [];
+  await database.relaxLegacyPasswordColumnIfPresent?.(async (...args: unknown[]) => { statements.push(args); });
+  assert.equal(statements.length, 1);
+  assert.match(String(statements[0][0]), /ALTER COLUMN password DROP NOT NULL/);
+  assert.doesNotMatch(String(statements[0][0]), /DROP COLUMN|DELETE|UPDATE app_users/i);
+});
+
+test('refuses client cleanup unless exactly one configured admin master exists', async () => {
+  await assert.rejects(
+    database.cleanupClientUsersForMaster?.({ ADMIN_EMAIL: 'master@example.com' }, {
+      query: async () => [{ id: 'admin-1', email: 'other@example.com', role: 'ADMIN' }],
+      execute: async () => { throw new Error('must not delete'); }
+    }),
+    /Admin Master/i
+  );
 });
 
 test('reports a Resend error instead of treating mail delivery as successful', async () => {

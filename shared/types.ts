@@ -24,7 +24,7 @@ export interface OrderBookData {
   bidDepthTotal: number;
   askDepthTotal: number;
   imbalanceRatio: number; // > 1 indicates bullish book, < 1 bearish
-  source?: 'BYBIT' | 'LOCAL_FALLBACK';
+  source?: 'BYBIT' | 'BINANCE' | 'LOCAL_FALLBACK';
 }
 
 export interface CandleData {
