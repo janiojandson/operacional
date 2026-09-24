@@ -58,7 +58,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
   const [showFlowMarkers, setShowFlowMarkers] = useState(true);
   const [selectedTf, setSelectedTf] = useState<'1m' | '3m' | '5m' | '15m' | '1h' | '4h' | '1D'>('1m');
-  const [candleSource, setCandleSource] = useState<'BYBIT' | 'BINANCE' | 'LOCAL_FALLBACK' | 'UNAVAILABLE'>('UNAVAILABLE');
+  const [candleSource, setCandleSource] = useState<'BINGX' | 'BINANCE' | 'BYBIT' | 'LOCAL_FALLBACK' | 'UNAVAILABLE'>('UNAVAILABLE');
 
   // Cálculo da pressão institucional blindado contra undefined e divisão por zero
   const buyVol = Number(activeCandle?.buyVolume ?? 0);
@@ -164,7 +164,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
         if (res.ok) {
           const data = await res.json();
-          if (data?.source === 'BINANCE' || data?.source === 'BYBIT') {
+          if (data?.source === 'BINGX' || data?.source === 'BINANCE' || data?.source === 'BYBIT') {
             setCandleSource(data.source);
           } else {
             setCandleSource('LOCAL_FALLBACK');
@@ -399,8 +399,8 @@ export const ChartPro: React.FC<ChartProProps> = ({
         <div className="flex items-center justify-between px-3 py-1.5">
           <div className="flex items-center space-x-2.5">
             <span className="font-mono font-bold text-sm text-text-primary tracking-wider">{symbol}</span>
-            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${(candleSource === 'BINANCE' || candleSource === 'BYBIT') ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10' : candleSource === 'LOCAL_FALLBACK' ? 'text-amber-300 border-amber-500/40 bg-amber-500/10' : 'text-rose-300 border-rose-500/40 bg-rose-500/10'}`}>
-              {candleSource === 'BINANCE' ? 'BINANCE AO VIVO' : candleSource === 'BYBIT' ? 'BYBIT AO VIVO' : candleSource === 'LOCAL_FALLBACK' ? 'FALLBACK LOCAL' : 'DADOS INDISPONIVEIS'}
+            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${(candleSource === 'BINGX' || candleSource === 'BINANCE' || candleSource === 'BYBIT') ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10' : candleSource === 'LOCAL_FALLBACK' ? 'text-amber-300 border-amber-500/40 bg-amber-500/10' : 'text-rose-300 border-rose-500/40 bg-rose-500/10'}`}>
+              {candleSource === 'BINGX' ? 'BINGX AO VIVO' : candleSource === 'BINANCE' ? 'BINANCE AO VIVO' : candleSource === 'BYBIT' ? 'BYBIT AO VIVO' : candleSource === 'LOCAL_FALLBACK' ? 'FALLBACK LOCAL' : 'DADOS INDISPONIVEIS'}
             </span>
 
             <div className="flex items-center bg-bg-app p-0.5 rounded border border-border-panel text-[11px] font-mono">

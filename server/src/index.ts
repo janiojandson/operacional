@@ -414,7 +414,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
 
     const profile = getCryptoStrategyProfile(signal.symbol);
     const account = paperTrading.getAccountState();
-    if (!profile || (book?.source !== 'BINANCE' && book?.source !== 'BYBIT')) return;
+    if (!profile || (book?.source !== 'BINGX' && book?.source !== 'BINANCE' && book?.source !== 'BYBIT')) return;
     const powerMultiplier = Math.max(paperTrading.getMinTemperature(), pairConfig?.powerMultiplier || 1.5);
     const requestedNotionalUsd = Math.max(100, account.balance * 0.20) * (powerMultiplier / 1.5);
     const existingAggregateRiskUsd = account.openPositions.reduce((sum, position) => {
@@ -887,7 +887,7 @@ app.get('/api/assets/:symbol/klines', requireAuth, async (req, res) => {
 
   const direct = await marketManager.getKlines(symbol, tf, 400);
   if (direct && direct.length > 0) {
-    return res.json({ symbol, tf, candles: direct, source: 'BINANCE' });
+    return res.json({ symbol, tf, candles: direct, source: 'BINGX' });
   }
 
   const baseCandles = state.candles || [];

@@ -10,6 +10,10 @@ test('marks a fresh Binance book with its source and age', () => {
   assert.deepEqual(bookStatus({ source: 'BINANCE', timestamp: 99_000 }, 100_000), { source: 'BINANCE', age: '1s', stale: false });
 });
 
+test('marks a fresh BingX book with its source and age', () => {
+  assert.deepEqual(bookStatus({ source: 'BINGX', timestamp: 99_000 }, 100_000), { source: 'BINGX', age: '1s', stale: false });
+});
+
 test('marks an old fallback book as stale', () => {
   assert.deepEqual(bookStatus({ source: 'LOCAL_FALLBACK', timestamp: 80_000 }, 100_000), { source: 'SIMULADO', age: '20s', stale: true });
 });

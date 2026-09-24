@@ -8,7 +8,10 @@ export function verifyIsolatedLeverage(positions: any[], symbol: string, expecte
     candidate?.info?.symbol === normSym.replace('/', '')
   );
   if (!position) {
-    // Na Binance, se ainda não há posição aberta para o par, as APIs setMarginMode e setLeverage já aplicaram a configuração
+    if (positions.length === 0) {
+      return { verified: false, reason: 'NENHUMA_POSICAO_ENCONTRADA' };
+    }
+    // Na BingX/Binance, se posições existem mas ainda não para este par específico
     return { verified: true };
   }
 

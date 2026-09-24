@@ -34,7 +34,7 @@ export interface ShadowOpportunity {
   mode: 'AUDIT' | 'FILTER';
   approved: boolean;
   reasons: string[];
-  source: 'BYBIT' | 'BINANCE' | 'LOCAL_FALLBACK' | 'UNAVAILABLE';
+  source: 'BINGX' | 'BYBIT' | 'BINANCE' | 'LOCAL_FALLBACK' | 'UNAVAILABLE';
   timestamp: string;
 }
 

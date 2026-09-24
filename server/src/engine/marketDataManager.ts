@@ -29,8 +29,10 @@ const BYBIT_CATEGORIES: Record<string, 'crypto' | 'forex'> = {
 };
 
 function toExchangeLinear(symbol: string): string {
-  if (symbol.includes(':')) return symbol.split(':')[0];
-  return symbol;
+  if (symbol.includes(':')) return symbol;
+  const [base, quote] = symbol.split('/');
+  if (!base || !quote) return symbol;
+  return `${base}/${quote}:${quote}`;
 }
 
 export class MarketDataManager {
@@ -48,7 +50,10 @@ export class MarketDataManager {
   constructor(flowEngine: FlowEngine, onBroadcast?: (type: string, data: any) => void) {
     this.flowEngine = flowEngine;
     this.onBroadcast = onBroadcast;
-    this.exchange = new (ccxt as any).binance({
+    this.exchange = new (ccxt as any).bingx({
+      options: {
+        defaultType: 'swap'
+      },
       enableRateLimit: true,
       timeout: 10000
     });
@@ -59,7 +64,7 @@ export class MarketDataManager {
     await this.loadInitialData();
     this.startStreaming();
     this.isInitialized = true;
-    console.log('[MarketData] ✅ Dados reais da Binance inicializados');
+    console.log('[MarketData] ✅ Dados reais da BingX Swap inicializados');
   }
 
   private async loadInitialData(): Promise<void> {
@@ -161,7 +166,7 @@ export class MarketDataManager {
         bidDepthTotal: bidTotal,
         askDepthTotal: askTotal,
         imbalanceRatio: +(bidTotal / Math.max(askTotal, 1)).toFixed(2),
-        source: 'BINANCE'
+        source: 'BINGX'
       };
     } catch {
       return this.generateRealisticBook(symbol, currentPrice, 'crypto');
