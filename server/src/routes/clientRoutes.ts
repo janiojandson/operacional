@@ -278,6 +278,13 @@ clientRouter.post('/sync-toggle', async (req: Request, res: Response) => {
   if (!config) return res.status(404).json({ error: 'Configuração do cliente não encontrada.' });
 
   if (enabled) {
+    const hasKeys = !!(config.bybit_api_key_enc || (config as any).bybit_real_api_key_enc || (config as any).bybit_test_api_key_enc);
+    if (!hasKeys) {
+      return res.status(400).json({
+        error: 'Você precisa inserir e salvar suas chaves de API da corretora antes de ativar a sincronização.'
+      });
+    }
+
     const isVitrine = config.plan_type === 'VITRINE' || Number(config.plan_active) === 0;
     const now = Date.now();
     const isExpired = config.plan_expires_at ? Number(config.plan_expires_at) < now : false;

@@ -344,7 +344,7 @@ authRouter.post('/register', requireAdmin, async (req: Request, res: Response) =
         userId, 
         name: name.trim(),
         notificationPhone: cleanPhone || undefined,
-        syncEnabled: true 
+        syncEnabled: false 
       });
     }
 

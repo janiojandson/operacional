@@ -315,6 +315,11 @@ export default function ClientDashboard() {
 
   // Toggle Sincronização (Com Pânico ao desligar)
   const handleToggleSync = async () => {
+    if (!account?.hasApiKeys && !account?.syncEnabled) {
+      notify('Insira e conecte suas chaves de API da corretora antes de ligar a sincronização.', 'error');
+      return;
+    }
+
     if (!isPlanActive) {
       notify('Seu plano está inativo. Assine para ativar a sincronização automatizada.', 'error');
       return;

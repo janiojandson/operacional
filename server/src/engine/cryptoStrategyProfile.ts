@@ -16,11 +16,11 @@ export type CryptoStrategyProfile = {
 export const CRYPTO_STRATEGY_VERSION = 'flow-crypto-v1';
 
 export const CRYPTO_STRATEGY_PROFILES: Record<string, CryptoStrategyProfile> = {
-  'BTC/USDT': { symbol: 'BTC/USDT', stopLossPct: 0.0028, takeProfitPct: 0.0070, maxSpreadPct: 0.0003, maxBookAgeMs: 30_000, minBookImbalance: 2.8, maxBookImbalance: 0.35, minScore: 2, atrMultiplier: 1.2, maxRiskPct: 0.0025, maxAggregateRiskPct: 0.01, slippageBufferPct: 0.0002 },
-  'ETH/USDT': { symbol: 'ETH/USDT', stopLossPct: 0.0032, takeProfitPct: 0.0080, maxSpreadPct: 0.0005, maxBookAgeMs: 30_000, minBookImbalance: 2.6, maxBookImbalance: 0.38, minScore: 2, atrMultiplier: 1.3, maxRiskPct: 0.0025, maxAggregateRiskPct: 0.01, slippageBufferPct: 0.0003 },
-  'SOL/USDT': { symbol: 'SOL/USDT', stopLossPct: 0.0044, takeProfitPct: 0.0110, maxSpreadPct: 0.0008, maxBookAgeMs: 20_000, minBookImbalance: 3.0, maxBookImbalance: 0.33, minScore: 2, atrMultiplier: 1.6, maxRiskPct: 0.002, maxAggregateRiskPct: 0.01, slippageBufferPct: 0.0004 },
-  'BNB/USDT': { symbol: 'BNB/USDT', stopLossPct: 0.0032, takeProfitPct: 0.0080, maxSpreadPct: 0.0006, maxBookAgeMs: 30_000, minBookImbalance: 2.7, maxBookImbalance: 0.37, minScore: 2, atrMultiplier: 1.3, maxRiskPct: 0.0025, maxAggregateRiskPct: 0.01, slippageBufferPct: 0.0003 },
-  'XRP/USDT': { symbol: 'XRP/USDT', stopLossPct: 0.0040, takeProfitPct: 0.0100, maxSpreadPct: 0.001, maxBookAgeMs: 20_000, minBookImbalance: 3.2, maxBookImbalance: 0.31, minScore: 2, atrMultiplier: 1.5, maxRiskPct: 0.002, maxAggregateRiskPct: 0.01, slippageBufferPct: 0.0005 }
+  'BTC/USDT': { symbol: 'BTC/USDT', stopLossPct: 0.0080, takeProfitPct: 0.0200, maxSpreadPct: 0.0008, maxBookAgeMs: 30_000, minBookImbalance: 2.8, maxBookImbalance: 0.35, minScore: 2, atrMultiplier: 1.5, maxRiskPct: 0.010, maxAggregateRiskPct: 0.05, slippageBufferPct: 0.0003 },
+  'ETH/USDT': { symbol: 'ETH/USDT', stopLossPct: 0.0100, takeProfitPct: 0.0250, maxSpreadPct: 0.0010, maxBookAgeMs: 30_000, minBookImbalance: 2.6, maxBookImbalance: 0.38, minScore: 2, atrMultiplier: 1.5, maxRiskPct: 0.010, maxAggregateRiskPct: 0.05, slippageBufferPct: 0.0004 },
+  'SOL/USDT': { symbol: 'SOL/USDT', stopLossPct: 0.0140, takeProfitPct: 0.0350, maxSpreadPct: 0.0015, maxBookAgeMs: 25_000, minBookImbalance: 3.0, maxBookImbalance: 0.33, minScore: 2, atrMultiplier: 1.8, maxRiskPct: 0.010, maxAggregateRiskPct: 0.05, slippageBufferPct: 0.0005 },
+  'BNB/USDT': { symbol: 'BNB/USDT', stopLossPct: 0.0090, takeProfitPct: 0.0225, maxSpreadPct: 0.0012, maxBookAgeMs: 30_000, minBookImbalance: 2.7, maxBookImbalance: 0.37, minScore: 2, atrMultiplier: 1.5, maxRiskPct: 0.010, maxAggregateRiskPct: 0.05, slippageBufferPct: 0.0004 },
+  'XRP/USDT': { symbol: 'XRP/USDT', stopLossPct: 0.0120, takeProfitPct: 0.0300, maxSpreadPct: 0.0018, maxBookAgeMs: 25_000, minBookImbalance: 3.2, maxBookImbalance: 0.31, minScore: 2, atrMultiplier: 1.6, maxRiskPct: 0.010, maxAggregateRiskPct: 0.05, slippageBufferPct: 0.0006 }
 };
 
 export function getCryptoStrategyProfile(symbol: string): CryptoStrategyProfile | undefined {

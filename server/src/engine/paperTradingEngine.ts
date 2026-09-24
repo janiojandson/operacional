@@ -228,7 +228,7 @@ export class PaperTradingEngine {
 
     // ─── 1. VERIFICAÇÃO DO GATILHO E GESTÃO DO TRAILING STOP ─────────────────
     // Só persegue o preço se o botão Trailing Stop estiver ATIVADO
-    if (this.trailingStopEnabled && (progressRatio >= 0.50 - 1e-9 || trade.trailingActive)) {
+    if (this.trailingStopEnabled && (progressRatio >= 0.80 - 1e-9 || trade.trailingActive)) {
       trade.trailingActive = true;
 
       if (trade.type === 'BUY') {
