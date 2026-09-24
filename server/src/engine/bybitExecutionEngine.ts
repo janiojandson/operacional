@@ -229,16 +229,20 @@ export class BybitExecutionEngine {
 
       const balance: any = await fetchAccountBal(exchange);
 
+      const vst = balance.VST;
       const usdt = balance.USDT || balance.total;
-      const totalBalance = Number(usdt?.total ?? balance?.free?.USDT ?? 0);
-      const freeBalance = Number(usdt?.free ?? balance?.free?.USDT ?? 0);
+      const isVst = testnet && (Number(vst?.total || 0) > 0 || Number(vst?.free || 0) > 0);
+      const chosen = isVst ? vst : (usdt || vst);
+
+      const totalBalance = Number(chosen?.total ?? balance?.free?.USDT ?? balance?.free?.VST ?? 0);
+      const freeBalance = Number(chosen?.free ?? balance?.free?.USDT ?? balance?.free?.VST ?? 0);
 
       const accountInfo: BybitAccountInfo = {
         walletBalance: isNaN(totalBalance) ? 0 : totalBalance,
         availableBalance: isNaN(freeBalance) ? 0 : freeBalance,
         unrealisedPnl: 0,
         equity: isNaN(totalBalance) ? 0 : totalBalance,
-        coin: 'USDT'
+        coin: isVst ? 'VST' : 'USDT'
       };
 
       await ClientConfigDB.setApiConnected(clientId, true);
@@ -269,14 +273,29 @@ export class BybitExecutionEngine {
     }
   }
 
-  static async getAccountBalance(clientId: string): Promise<BybitAccountInfo | null> {
+  static async getAccountBalance(clientId: string, targetEnv?: 'REAL' | 'TESTNET'): Promise<BybitAccountInfo | null> {
     const config = await ClientConfigDB.findByClientId(clientId);
-    if (!config?.bybit_api_key_enc || !config?.bybit_api_secret_enc) return null;
+    if (!config) return null;
+
+    let apiKeyEnc = config.bybit_api_key_enc;
+    let apiSecretEnc = config.bybit_api_secret_enc;
+    let testnet = config.bybit_testnet === 1;
+
+    if (targetEnv === 'TESTNET') {
+      apiKeyEnc = config.bybit_test_api_key_enc || config.bybit_api_key_enc;
+      apiSecretEnc = config.bybit_test_api_secret_enc || config.bybit_api_secret_enc;
+      testnet = true;
+    } else if (targetEnv === 'REAL') {
+      apiKeyEnc = config.bybit_real_api_key_enc || config.bybit_api_key_enc;
+      apiSecretEnc = config.bybit_real_api_secret_enc || config.bybit_api_secret_enc;
+      testnet = false;
+    }
+
+    if (!apiKeyEnc || !apiSecretEnc) return null;
 
     try {
-      const apiKey = decrypt(config.bybit_api_key_enc);
-      const apiSecret = decrypt(config.bybit_api_secret_enc);
-      const testnet = config.bybit_testnet === 1;
+      const apiKey = decrypt(apiKeyEnc);
+      const apiSecret = decrypt(apiSecretEnc);
       let exchange = createBybitClient(apiKey, apiSecret, testnet, false);
 
       const fetchBal = async (ex: any) => {
@@ -293,9 +312,13 @@ export class BybitExecutionEngine {
 
       const balance: any = await fetchBal(exchange);
 
+      const vst = balance.VST;
       const usdt = balance.USDT;
-      const totalBalance = Number(usdt?.total ?? balance?.free?.USDT ?? 0);
-      const freeBalance = Number(usdt?.free ?? balance?.free?.USDT ?? 0);
+      const isVst = testnet && (Number(vst?.total || 0) > 0 || Number(vst?.free || 0) > 0);
+      const chosen = isVst ? vst : (usdt || vst);
+
+      const totalBalance = Number(chosen?.total ?? balance?.free?.USDT ?? balance?.free?.VST ?? 0);
+      const freeBalance = Number(chosen?.free ?? balance?.free?.USDT ?? balance?.free?.VST ?? 0);
       const brlBalance = Number(balance.BRL?.total ?? balance?.free?.BRL ?? 0);
 
       const totalEquityUsd = totalBalance;
@@ -305,7 +328,7 @@ export class BybitExecutionEngine {
         availableBalance: isNaN(freeBalance) ? 0 : freeBalance,
         unrealisedPnl: 0,
         equity: totalEquityUsd,
-        coin: 'USDT',
+        coin: isVst ? 'VST' : 'USDT',
         fundingUsdt: 0,
         fundingBrl: 0,
         unifiedBrl: 0,

@@ -41,6 +41,8 @@ interface AccountInfo {
   hasTestKeys?: boolean;
   testMaskedKey?: string;
   testConnected?: boolean;
+  testBalance?: number;
+  testCoin?: string;
   notificationPhone?: string;
   planType?: string;
   planExpiresAt?: number | null;
@@ -722,12 +724,19 @@ export default function ClientDashboard() {
             <div className="grid grid-cols-4 gap-4">
               <div className="bg-surface border border-border/60 rounded-2xl p-5 shadow-lg shadow-black/20 relative group">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-slate-400 font-mono uppercase">Saldo Total</span>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="text-xs text-slate-400 font-mono uppercase">Saldo Total</span>
+                    {account?.bybitTestnet && (
+                      <span className="text-[10px] px-1.5 py-0.2 rounded font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        DEMO (VST)
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center space-x-1.5">
                     <button
                       onClick={handleRefreshBalance}
                       disabled={refreshingBalance}
-                      title="Sincronizar saldo ao vivo na Bybit"
+                      title="Sincronizar saldo ao vivo na BingX"
                       className="p-1 rounded-md hover:bg-white/10 text-amber-400 transition-colors"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${refreshingBalance ? 'animate-spin' : ''}`} />
@@ -739,7 +748,7 @@ export default function ClientDashboard() {
                   ${(account?.balance ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
                 <div className="flex items-center justify-between text-xs text-slate-400 mt-1">
-                  <span>USDT margem futuros</span>
+                  <span>{account?.bybitTestnet ? 'VST margem futuros (Simulado)' : 'USDT margem futuros (Real)'}</span>
                 </div>
               </div>
 
@@ -1372,17 +1381,25 @@ export default function ClientDashboard() {
                         <p className="text-xs text-slate-400 mt-1">Ambiente de simulação e testes com saldo fictício.</p>
                       </div>
                       
-                      {/* Status */}
+                      {/* Status & Saldo Demo */}
                       <div className="flex items-center space-x-4 bg-background p-3 rounded-xl border border-border/50">
                         <div className="flex flex-col">
                           <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Status Testnet</span>
                           <div className="flex items-center space-x-1.5">
                             <div className={`w-2 h-2 rounded-full ${account.testConnected ?? account.apiConnected ? 'bg-amber-500 animate-pulse' : 'bg-rose-500'}`} />
                             <span className={`text-xs font-bold ${account.testConnected ?? account.apiConnected ? 'text-amber-400' : 'text-rose-400'}`}>
-                              {account.testConnected ?? account.apiConnected ? '🟡 Pronta para teste' : '🔴 Pendente / Erro'}
+                              {account.testConnected ?? account.apiConnected ? '🟡 Conectada (VST)' : '🔴 Pendente / Erro'}
                             </span>
                           </div>
                         </div>
+                        {(account.testConnected ?? account.apiConnected) && (
+                          <div className="flex flex-col border-l border-border/60 pl-4">
+                            <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Saldo Demo (VST)</span>
+                            <span className="text-xs font-mono font-black text-amber-300">
+                              ${((account.bybitTestnet ? account.balance : account.testBalance) ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {account.testCoin || 'VST'}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
 

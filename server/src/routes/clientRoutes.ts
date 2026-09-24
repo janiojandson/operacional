@@ -179,6 +179,8 @@ clientRouter.get('/account', async (req: Request, res: Response) => {
     hasTestKeys: !!testKeyEnc,
     testMaskedKey: testKeyEnc ? `${decrypt(testKeyEnc).substring(0, 5)}...` : null,
     testConnected,
+    testBalance: (config.bybit_testnet === 1) ? (bybitAccount?.walletBalance ?? Number(config.balance)) : undefined,
+    testCoin: (config.bybit_testnet === 1) ? (bybitAccount?.coin || 'VST') : 'VST',
     autoConfigEnabled: (config as any).auto_config_enabled !== undefined ? Number((config as any).auto_config_enabled) === 1 : true,
     notificationPhone: config.notification_phone,
     planType: config.plan_type || 'ACTIVE',
