@@ -14,7 +14,8 @@ import {
   Zap,
   Briefcase,
   BookOpen,
-  Clock
+  Clock,
+  RefreshCw
 } from 'lucide-react';
 
 export default function TradingTerminal() {
@@ -26,6 +27,7 @@ export default function TradingTerminal() {
   // Estados dos Botões Operacionais
   const [trailingStopEnabled, setTrailingStopEnabled] = useState<boolean>(true);
   const [shadowFilterActive, setShadowFilterActive] = useState<boolean>(false);
+  const [resetTimer, setResetTimer] = useState<number>(0);
 
   // Splitter States
   const [leftColWidthPct, setLeftColWidthPct] = useState<number>(65);
@@ -153,6 +155,20 @@ export default function TradingTerminal() {
   };
 
   const handleResetData = async () => {
+    if (!window.confirm('Deseja realmente zerar todo o histórico, ordens e banco do Master aguardando 15s para sincronização?')) {
+      return;
+    }
+    setResetTimer(15);
+    const interval = setInterval(() => {
+      setResetTimer((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
     try {
       await fetch('/api/paper-trading/reset', {
         method: 'POST',
@@ -227,6 +243,27 @@ export default function TradingTerminal() {
             <span className="flex items-center gap-1.5">
               <span className={`w-2 h-2 rounded-full ${shadowFilterActive ? 'bg-purple-400 animate-pulse' : 'bg-amber-400'}`} />
               <span>Shadow Mode: <b className="text-white">{shadowFilterActive ? 'EXECUTOR REAL' : 'MODO FANTASMA'}</b></span>
+            </span>
+          </button>
+
+          {/* Botão Direto Zerar Sessão (Acesso Imediato) */}
+          <button
+            onClick={handleResetData}
+            disabled={resetTimer > 0}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg border font-mono text-xs font-semibold transition-all ${
+              resetTimer > 0
+                ? 'bg-amber-950/60 border-amber-500/60 text-amber-300 cursor-not-allowed'
+                : 'bg-rose-950/40 border-rose-500/50 text-rose-300 hover:bg-rose-900/60 shadow-sm shadow-rose-950/20'
+            }`}
+            title="Zera histórico, ordens e banco do Master aguardando 15s para sincronização total"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-rose-400 ${resetTimer > 0 ? 'animate-spin' : ''}`} />
+            <span>
+              {resetTimer > 0 ? (
+                <span>SINCRONIZANDO: <b className="text-white">{resetTimer}s</b></span>
+              ) : (
+                <span>ZERAR SESSÃO</span>
+              )}
             </span>
           </button>
         </div>

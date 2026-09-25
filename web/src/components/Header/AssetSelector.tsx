@@ -60,6 +60,15 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
 
   const [resetCountdown, setResetCountdown] = useState<number>(0);
 
+  const handleSaveBalance = (e: React.FormEvent) => {
+    e.preventDefault();
+    const val = parseFloat(customBalanceInput);
+    if (!isNaN(val) && val > 0) {
+      onUpdateBalance(val);
+      setIsSettingsOpen(false);
+    }
+  };
+
   const handleTriggerReset = () => {
     if (window.confirm('Deseja realmente zerar todas as informações do Master, Shadow Mode e aguardar 15 segundos para sincronização?')) {
       onResetData();
@@ -232,34 +241,41 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
       </div>
 
       {isSettingsOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-bg-panel border border-border-panel rounded-md p-5 max-w-sm w-full space-y-4 shadow-2xl font-mono">
-            <div className="flex items-center justify-between pb-3 border-b border-border-panel">
-              <div className="flex items-center space-x-2 text-text-primary">
-                <Settings className="w-4 h-4 text-accent" />
+        <div 
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setIsSettingsOpen(false)}
+        >
+          <div 
+            className="bg-slate-900 border border-slate-700/80 rounded-xl p-5 max-w-sm w-full space-y-4 shadow-2xl font-mono text-slate-200 relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-2 text-white">
+                <Settings className="w-4 h-4 text-cyan-400" />
                 <span className="text-xs font-bold uppercase tracking-wider">Configurações da Sessão</span>
               </div>
               <button
+                type="button"
                 onClick={() => setIsSettingsOpen(false)}
-                className="text-text-muted hover:text-text-primary p-1"
+                className="text-slate-400 hover:text-white p-1 hover:bg-slate-800 rounded transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <form onSubmit={handleSaveBalance} className="space-y-2">
-              <label className="text-[11px] text-text-primary font-bold block">Ajustar Saldo da Banca ($)</label>
+              <label className="text-[11px] text-slate-300 font-bold block">Ajustar Saldo da Banca ($)</label>
               <div className="flex space-x-2">
                 <input
                   type="number"
                   step="any"
                   value={customBalanceInput}
                   onChange={(e) => setCustomBalanceInput(e.target.value)}
-                  className="flex-1 bg-bg-app border border-border-panel rounded px-3 py-2 text-text-primary text-xs font-mono focus:outline-none focus:border-accent"
+                  className="flex-1 bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-xs font-mono focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400"
                 />
                 <button
                   type="submit"
-                  className="px-3 py-2 rounded bg-accent hover:bg-accent/80 text-white text-xs font-bold transition-all flex items-center space-x-1"
+                  className="px-3 py-2 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-all flex items-center space-x-1 shadow-md shadow-cyan-950/30"
                 >
                   <Check className="w-3.5 h-3.5" />
                   <span>Salvar</span>
@@ -267,8 +283,8 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
               </div>
             </form>
 
-            <div className="pt-2 border-t border-border-panel">
-              <label className="text-[11px] text-text-muted block mb-1.5">Reiniciar Métricas e Histórico</label>
+            <div className="pt-2 border-t border-slate-800">
+              <label className="text-[11px] text-slate-400 block mb-1.5 font-medium">Reiniciar Métricas e Histórico</label>
               <button
                 onClick={handleTriggerReset}
                 disabled={resetCountdown > 0}
