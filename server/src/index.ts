@@ -506,6 +506,14 @@ setInterval(() => {
   recalculateAllPairs();
 }, 2000);
 
+// Sincronização periódica da Planilha Google (mantém posições ativas e flutuantes atualizadas a cada 60 segundos)
+setInterval(() => {
+  const openPos = paperTrading.getAccountState().openPositions;
+  if (openPos.length > 0) {
+    void GoogleSheetsService.syncOpenPositions(openPos, paperTrading.getAccountState().balance).catch(() => {});
+  }
+}, 60000);
+
 // ─── REST Endpoints (Trading Terminal) ────────────────────────────────────
 // Endpoints públicos de mercado (sem auth, dados públicos)
 app.get('/api/health', (req, res) => {
@@ -1091,6 +1099,11 @@ initDatabase()
     }
     io.emit('paper_account_update', paperTrading.getAccountState());
     io.emit('mirror_account_update', mirrorTrading.getAccountState());
+    
+    // Sincroniza posições ativas do Master na Planilha Google
+    if (paperTrading.getAccountState().openPositions.length > 0) {
+      void GoogleSheetsService.syncOpenPositions(paperTrading.getAccountState().openPositions, masterAccount.balance).catch(() => {});
+    }
     
     server.listen(Number(PORT), '0.0.0.0', () => {
       console.log(`🚀 MarketFlow Pro SaaS Backend running at http://0.0.0.0:${PORT}`);

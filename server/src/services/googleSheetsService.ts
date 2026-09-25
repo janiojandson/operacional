@@ -124,6 +124,53 @@ export class GoogleSheetsService {
     this.sendData({ ...log, type: 'SHADOW_OPPORTUNITY' }).catch(() => {});
   }
 
+  static async syncOpenPositions(openPositions: any[], masterBalance: number = 10000): Promise<void> {
+    if (!openPositions || openPositions.length === 0) return;
+    for (const pos of openPositions) {
+      const qty = Number(pos.qty ?? 0);
+      const entryPrice = Number(pos.entryPrice ?? 0);
+      const notional = Number(pos.notionalUsd ?? (entryPrice * qty));
+      const pnlUsd = Number(pos.pnlUsd ?? 0);
+      const pnlPct = Number(pos.pnlPct ?? 0);
+      const rMultiple = Number(pos.rMultiple ?? 0);
+
+      this.logTradeExecution({
+        clientName: '👑 Master Quant (Estratégia)',
+        symbol: pos.symbol,
+        side: pos.type,
+        entryPrice,
+        qty,
+        stopLoss: pos.stopLoss,
+        takeProfit: pos.takeProfit,
+        status: 'MASTER_ABERTO',
+        outcome: 'EM ANDAMENTO ⏳',
+        pnlUsd,
+        pnlPct,
+        rMultiple,
+        orderType: pos.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET',
+        trailingStopAtivo: pos.trailingActive ? 'SIM' : 'NÃO',
+        feePaid: Number(pos.fee ?? 0),
+        tradeId: pos.id,
+        eventKind: 'OPEN',
+        masterBalanceAtEntry: Number(pos.masterBalanceAtEntry ?? masterBalance),
+        masterNotionalUsd: notional,
+        masterExposureRatio: Number(pos.masterExposureRatio ?? (masterBalance > 0 ? notional / masterBalance : 0)),
+        masterMarginUsd: Number(pos.marginUsd ?? (notional / 10)),
+        powerMultiplier: Number(pos.powerMultiplier ?? 1.5),
+        leverage: 10,
+        exchangeMinQty: 0.0001,
+        qtyStep: 0.0001,
+        shadowFilterActive: false,
+        grossR: Number(pos.grossR ?? 0),
+        netR: Number(pos.netR ?? 0),
+        riskUsd: Number(pos.riskUsd ?? 0),
+        riskReasons: pos.decisionFactors ?? [],
+        timestamp: new Date().toISOString(),
+        errorMsg: pos.signalReason || 'Sincronização Ativa de Posição em Aberto'
+      });
+    }
+  }
+
   static async resetSpreadsheet(): Promise<void> {
     await this.sendData({ type: 'RESET_SESSION', timestamp: new Date().toISOString() });
   }
