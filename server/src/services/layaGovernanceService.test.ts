@@ -209,3 +209,61 @@ test('LayaGovernanceService - Test 5: Métricas p50/p95 e gravação de contrafa
   assert.equal(metrics.recentDecisions.length, 1);
   assert.equal(metrics.recentDecisions[0].decisionId, 'shadow-dec-1');
 });
+
+test('LayaGovernanceService - Test 6: Gatekeeper VETO bloqueia execução no modo ACTIVE', async () => {
+  const now = Date.now();
+  const vetoResponse: LayaGovernanceResponse = {
+    decisionId: 'veto-dec-1',
+    stateVersion: 1,
+    issuedAt: now,
+    expiresAt: now + 2000,
+    action: 'VETO',
+    symbol: 'BTC/USDT',
+    powerMultiplier: 1.0,
+    riskPct: 0.5,
+    governance: {},
+    rationaleCode: 'SPOOFING_DETECTED_VETO',
+    trace: { l2DepthTop20: 100, imbalanceRatio: 1.0, cvdDelta60s: -200, spoofScore: 0.85, betaDivergence: true }
+  };
+
+  const service = new LayaGovernanceService({
+    fetchImpl: (async () => new Response(JSON.stringify(vetoResponse), { status: 200 })) as any,
+    mode: 'ACTIVE'
+  });
+
+  const res = await service.requestGovernance(createMockRequest('AUTHORIZE'));
+  assert.equal(res.executed, false);
+  assert.equal(res.decision.action, 'VETO');
+  assert.equal(res.decision.rationaleCode, 'SPOOFING_DETECTED_VETO');
+});
+
+test('LayaGovernanceService - Test 7: Micro-stop TIGHTEN é aprovado e recebido pelo motor', async () => {
+  const now = Date.now();
+  const microStopResponse: LayaGovernanceResponse = {
+    decisionId: 'micro-stop-1',
+    stateVersion: 1,
+    issuedAt: now,
+    expiresAt: now + 2000,
+    action: 'AUTHORIZE',
+    symbol: 'BTC/USDT',
+    powerMultiplier: 2.0,
+    riskPct: 1.0,
+    governance: {
+      stopLossProposalPct: 0.40,
+      stopLossMoveDirection: 'TIGHTEN'
+    },
+    rationaleCode: 'MICRO_STOP_REORGANIZATION',
+    trace: { l2DepthTop20: 500000, imbalanceRatio: 3.0, cvdDelta60s: 250, spoofScore: 0.02, betaDivergence: false }
+  };
+
+  const service = new LayaGovernanceService({
+    fetchImpl: (async () => new Response(JSON.stringify(microStopResponse), { status: 200 })) as any,
+    mode: 'ACTIVE'
+  });
+
+  const res = await service.requestGovernance(createMockRequest('AUTHORIZE'));
+  assert.equal(res.executed, true);
+  assert.equal(res.decision.governance.stopLossProposalPct, 0.40);
+  assert.equal(res.decision.governance.stopLossMoveDirection, 'TIGHTEN');
+});
+

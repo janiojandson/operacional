@@ -7,6 +7,8 @@ import { calculateMasterMirrorSize } from './masterMirrorSizing.js';
 import type { StrategyDecision } from './cryptoStrategyDecision.js';
 import type { AdaptiveRiskResult } from './adaptiveRisk.js';
 import { evaluateActivePositionRisk } from './flowEngine.js';
+import { layaGovernanceService } from '../services/layaGovernanceService.js';
+import type { LayaGovernanceResponse } from '../../../shared/layaGovernanceTypes.js';
 
 export interface SimulatedTradeWithTrailing extends SimulatedTrade {
   trailingActive?: boolean;
@@ -111,7 +113,7 @@ export class PaperTradingEngine {
   }
 
   // Executa uma entrada automatizada SEM REPAINT quando um sinal de fluxo qualificado ocorre
-  public handleSignal(signal: FlowSignal, currentPrice: number, decision?: StrategyDecision, adaptiveRisk?: AdaptiveRiskResult) {
+  public handleSignal(signal: FlowSignal, currentPrice: number, decision?: StrategyDecision, adaptiveRisk?: AdaptiveRiskResult, layaProposal?: LayaGovernanceResponse) {
     // 1. Verificar se o par está habilitado pelo usuário
     if (!this.activePairs.has(signal.symbol)) {
       return;
@@ -148,8 +150,18 @@ export class PaperTradingEngine {
 
     if (!tradeType || decision.entrySide !== tradeType) return;
 
-    // 🛡️ Alvos e Stops: Adaptive Risk prevalece sobre o perfil estático
-    const stopLoss = adaptiveRisk?.stopLoss ?? decision.stopLoss;
+    // 🛡️ Alvos e Stops: Se Laya propôs Micro-Stop TIGHTEN válido, usa distância reduzida
+    let stopLoss = adaptiveRisk?.stopLoss ?? decision.stopLoss;
+    if (layaProposal?.governance?.stopLossMoveDirection === 'TIGHTEN' && layaProposal.governance.stopLossProposalPct) {
+      const tightDistance = currentPrice * (layaProposal.governance.stopLossProposalPct / 100);
+      const tightStop = tradeType === 'BUY' ? currentPrice - tightDistance : currentPrice + tightDistance;
+      // Garante que o micro-stop seja mais favorável (mais próximo do preço) do que o SL mecânico
+      if (tradeType === 'BUY' && tightStop > stopLoss) {
+        stopLoss = Number(tightStop.toFixed(8));
+      } else if (tradeType === 'SELL' && tightStop < stopLoss) {
+        stopLoss = Number(tightStop.toFixed(8));
+      }
+    }
     const takeProfit = adaptiveRisk?.takeProfit ?? decision.takeProfit;
     const targetDistance = Math.abs((takeProfit || currentPrice) - currentPrice);
     const trailingTriggerPrice = Number((currentPrice + (tradeType === 'BUY' ? 1 : -1) * targetDistance).toFixed(8));

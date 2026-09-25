@@ -120,4 +120,30 @@ assert.ok(fixedTpEngine.getLastExitTimestamp('BTC/USDT') !== undefined, 'closing
 assert.equal(fixedTpEngine.isCooldownActive('BTC/USDT', 15 * 60 * 1000), true, '15-min cooldown must be active right after close');
 assert.equal(fixedTpEngine.isCooldownActive('ETH/USDT', 15 * 60 * 1000), false, 'untraded pair must not be in cooldown');
 
+// Teste de Micro-Stop sugerido pela Laya
+const microStopEngine = new PaperTradingEngine();
+microStopEngine.handleSignal(signal, 100_000, decision, {
+  approved: true, reasons: [], stopLoss: 98_000, takeProfit: 105_000,
+  stopDistancePct: 0.02, notionalUsd: 1_000, riskUsd: 20, grossR: 2.5, netR: 2.31
+}, {
+  decisionId: 'micro-test',
+  stateVersion: 1,
+  issuedAt: Date.now(),
+  expiresAt: Date.now() + 2000,
+  action: 'AUTHORIZE',
+  symbol: 'BTC/USDT',
+  powerMultiplier: 2.0,
+  riskPct: 1.0,
+  governance: {
+    stopLossProposalPct: 0.50, // 0.50% de 100_000 = stop em 99_500 (mais justo que 98_000)
+    stopLossMoveDirection: 'TIGHTEN'
+  },
+  rationaleCode: 'MICRO_STOP_REORGANIZATION',
+  trace: { l2DepthTop20: 100, imbalanceRatio: 2, cvdDelta60s: 10, spoofScore: 0, betaDivergence: false }
+});
+
+const microTrade = microStopEngine.getAccountState().openPositions[0];
+assert.ok(microTrade, 'Trade must be opened with micro stop');
+assert.equal(microTrade.stopLoss, 99_500, 'Stop loss must be tightened to 99,500 based on Laya micro-stop proposal');
+
 console.log('paperTradingEngine: PASS');

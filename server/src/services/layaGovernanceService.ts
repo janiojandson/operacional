@@ -197,7 +197,8 @@ export class LayaGovernanceService {
       }
 
       // Sucesso na governança
-      const executed = this.mode === 'ACTIVE';
+      const isApprovedAction = proposal.action !== 'VETO' && proposal.action !== 'NO_ACTION';
+      const executed = this.mode === 'ACTIVE' && isApprovedAction;
       if (executed && (proposal.action === 'OVERRIDE_COOLDOWN' || proposal.governance?.cooldownOverride)) {
         this.overridesUsedSession++;
       }

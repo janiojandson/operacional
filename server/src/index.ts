@@ -26,6 +26,7 @@ import { RISK_CONFIG } from './config/riskConfig.js';
 import { evaluateCryptoOpportunity } from './engine/cryptoStrategyDecision.js';
 import { calculateAdaptiveRisk } from './engine/adaptiveRisk.js';
 import { getCryptoStrategyProfile } from './engine/cryptoStrategyProfile.js';
+import { layaGovernanceService } from './services/layaGovernanceService.js';
 // SaaS: Autenticação e Rotas
 import { authRouter } from './auth/authRoutes.js';
 import { adminRouter, bindMasterControlHandler } from './routes/adminRoutes.js';
@@ -387,9 +388,30 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
 
     const pairConfig = AutoPairSelectorEngine.getPairConfig(signal.symbol);
     const book = asset.book;
-    const cooldownActive = paperTrading.isCooldownActive(signal.symbol);
+    let cooldownActive = paperTrading.isCooldownActive(signal.symbol);
     if (cooldownActive) {
-      console.log(`[COOLDOWN ATIVO] Aguardando respiro estrutural para ${signal.symbol}`);
+      const pardonResult = await layaGovernanceService.requestGovernance({
+        stateVersion: 1,
+        symbol: signal.symbol,
+        side,
+        currentPrice: asset.lastPrice,
+        requestedAction: 'OVERRIDE_COOLDOWN',
+        lastExitMsAgo: Date.now() - (paperTrading.getLastExitTimestamp(signal.symbol) || 0),
+        regime: pairConfig?.regime ?? 'TREND',
+        trace: {
+          l2DepthTop20: book?.bids?.reduce((s, b) => s + b.amount, 0) || 0,
+          imbalanceRatio: book?.imbalanceRatio || 1.0,
+          cvdDelta60s: flowEngine.getRecentAggression(signal.symbol)?.whaleCount || 0,
+          spoofScore: 0.0,
+          betaDivergence: false
+        }
+      });
+      if (pardonResult.executed && (pardonResult.decision.action === 'OVERRIDE_COOLDOWN' || pardonResult.decision.governance?.cooldownOverride)) {
+        console.log(`[LAYA OVERRIDE] Cooldown perdoado para ${signal.symbol} | Razão: ${pardonResult.decision.rationaleCode}`);
+        cooldownActive = false;
+      } else {
+        console.log(`[COOLDOWN ATIVO] Aguardando respiro estrutural para ${signal.symbol}`);
+      }
     }
 
     const decision = evaluateCryptoOpportunity({
@@ -481,9 +503,36 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       }
     }
 
+    // 🧠 Governança Laya Sistema 1: Gatekeeper & Micro-Stop
+    const layaResult = await layaGovernanceService.requestGovernance({
+      stateVersion: 1,
+      symbol: signal.symbol,
+      side,
+      currentPrice: asset.lastPrice,
+      requestedAction: 'AUTHORIZE',
+      regime: pairConfig?.regime ?? 'TREND',
+      trace: {
+        l2DepthTop20: book?.bids?.reduce((s, b) => s + b.amount, 0) || 0,
+        imbalanceRatio: book?.imbalanceRatio || 1.0,
+        cvdDelta60s: flowEngine.getRecentAggression(signal.symbol)?.whaleCount || 0,
+        spoofScore: 0.0,
+        betaDivergence: false
+      }
+    });
+
+    if (layaResult.decision.action === 'VETO') {
+      console.log(`[LAYA VETO] Entrada vetada em ${signal.symbol} | Razão: ${layaResult.decision.rationaleCode}`);
+      if (layaGovernanceService.getMode() === 'ACTIVE') {
+        decision.approved = false;
+        decision.reasons.push(`LAYA_VETO: ${layaResult.decision.rationaleCode}`);
+        publishOpportunity();
+        return;
+      }
+    }
+
     // Registra auditoria apenas na entrada confirmada do Master
     publishOpportunity();
-    paperTrading.handleSignal(signal, asset.lastPrice, decision, adaptiveRisk);
+    paperTrading.handleSignal(signal, asset.lastPrice, decision, adaptiveRisk, layaResult.decision);
   })();
 });
 
