@@ -32,6 +32,8 @@ interface AssetSelectorProps {
   currentBalance?: number;
   walletBalance?: number;
   openPnl?: number;
+  marginUsed?: number;
+  availableMargin?: number;
   onUpdateBalance: (balance: number) => void;
   onResetData: () => void;
 }
@@ -47,6 +49,8 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
   currentBalance = 10000,
   walletBalance,
   openPnl = 0,
+  marginUsed = 0,
+  availableMargin,
   onUpdateBalance,
   onResetData
 }) => {
@@ -90,27 +94,53 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
 
         {/* ─── BANCA VIVA COM PNL AO VIVO ─── */}
         <div
-          className="flex items-center space-x-2 bg-bg-app px-3 py-1 rounded border border-border-panel text-xs font-mono shrink-0 shadow-sm transition-all"
+          className="flex items-center space-x-2 bg-slate-900/90 px-3 py-1 rounded-lg border border-slate-700/80 text-xs font-mono shrink-0 shadow-sm transition-all"
           title={`Saldo Caixa: $${cashBalance.toFixed(2)} | PnL Aberto: ${floatingPnl >= 0 ? '+' : ''}$${floatingPnl.toFixed(2)}`}
         >
           <div className="flex flex-col text-right">
-            <span className="text-text-muted text-[9px] uppercase tracking-wider leading-tight font-semibold">
+            <span className="text-slate-400 text-[9px] uppercase tracking-wider leading-tight font-semibold">
               Banca Viva (Equity)
             </span>
-            <span className="font-bold text-text-primary tracking-tight text-xs sm:text-sm">
+            <span className="font-bold text-white tracking-tight text-xs sm:text-sm">
               ${safeBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
 
           {floatingPnl !== 0 && (
             <div className={`px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center border ${floatingPnl > 0
-                ? 'bg-trade-green/15 text-trade-green border-trade-green/30 animate-pulse'
-                : 'bg-trade-red/15 text-trade-red border-trade-red/30 animate-pulse'
+                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 animate-pulse'
+                : 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-pulse'
               }`}>
               {floatingPnl > 0 ? `+${floatingPnl.toFixed(2)}` : floatingPnl.toFixed(2)}
             </div>
           )}
         </div>
+
+        {/* ─── MARGEM ALOCADA & DISPONÍVEL (HUD LIVE TIKTOK) ─── */}
+        {marginUsed > 0 && (
+          <div
+            className="hidden sm:flex items-center space-x-2 bg-slate-900/90 px-2.5 py-1 rounded-lg border border-amber-500/30 text-xs font-mono shrink-0 shadow-sm transition-all"
+            title={`Margem em Operação: $${marginUsed.toFixed(2)} | Livre: $${(availableMargin ?? (safeBalance - marginUsed)).toFixed(2)}`}
+          >
+            <div className="flex flex-col text-right">
+              <span className="text-amber-400/90 text-[9px] uppercase tracking-wider leading-tight font-bold">
+                Margem Alocada
+              </span>
+              <span className="font-black text-amber-300 tracking-tight text-xs">
+                ${marginUsed.toFixed(2)} <span className="text-[10px] text-slate-400 font-normal">({safeBalance > 0 ? ((marginUsed / safeBalance) * 100).toFixed(1) : 0}%)</span>
+              </span>
+            </div>
+            <div className="w-px h-6 bg-slate-700/80" />
+            <div className="flex flex-col text-left">
+              <span className="text-emerald-400/90 text-[9px] uppercase tracking-wider leading-tight font-bold">
+                Margem Livre
+              </span>
+              <span className="font-black text-emerald-400 tracking-tight text-xs">
+                ${(availableMargin ?? Math.max(0, safeBalance - marginUsed)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Lista de Ativos */}
         <div className="flex items-center space-x-1.5 overflow-x-auto py-0.5 max-w-full no-scrollbar">

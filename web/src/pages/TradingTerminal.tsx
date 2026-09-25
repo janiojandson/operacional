@@ -50,15 +50,21 @@ export default function TradingTerminal() {
 
   const activePosition = paperAccount?.openPositions?.find((p: any) => p.symbol === activeSymbol);
 
-  // ─── 4. CÁLCULO DA BANCA VIVA (LIVE EQUITY EM TEMPO REAL) ────────────────
+  // ─── 4. CÁLCULO DA BANCA VIVA (LIVE EQUITY EM TEMPO REAL) & MARGENS ─────
   const walletBalance = Number(paperAccount?.balance || 10000);
   const openPositionsList = paperAccount?.openPositions || [];
   const totalUnrealizedPnl = openPositionsList.reduce(
     (acc: number, pos: any) => acc + Number(pos.pnlUsd || pos.unrealizedPnl || 0),
     0
   );
+  // Margem total comprometida nas posições abertas
+  const totalMarginUsed = openPositionsList.reduce((acc: number, pos: any) => {
+    const margin = Number(pos.marginUsd || (pos.notionalUsd ? pos.notionalUsd / 10 : 0));
+    return acc + (isNaN(margin) ? 0 : margin);
+  }, 0);
   // Banca Viva = Caixa + Soma do PnL flutuante de todas as posições abertas
   const liveEquity = Number((walletBalance + totalUnrealizedPnl).toFixed(2));
+  const availableMargin = Math.max(0, Number((walletBalance - totalMarginUsed).toFixed(2)));
 
   // ─── 3. MONITORAMENTO DE PERDA MÁXIMA DIÁRIA & PISO DE BANCA ─────────────
   useEffect(() => {
@@ -168,23 +174,25 @@ export default function TradingTerminal() {
         currentBalance={liveEquity}
         walletBalance={walletBalance}
         openPnl={totalUnrealizedPnl}
+        marginUsed={totalMarginUsed}
+        availableMargin={availableMargin}
         onUpdateBalance={handleUpdateBalance}
         onResetData={handleResetData}
       />
 
       {/* Barra de Controle de Estratégias no Cabeçalho */}
-      <div className="bg-[#0f172a] border-b border-slate-800 px-3 py-1.5 flex items-center justify-between z-20 shrink-0 text-xs">
+      <div className="bg-[#0b1120] border-b border-slate-800/80 px-3.5 py-1.5 flex items-center justify-between z-20 shrink-0 text-xs shadow-md">
         <div className="flex items-center gap-2.5 flex-wrap">
-          <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider hidden sm:inline">
+          <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold hidden sm:inline">
             Controle Operacional:
           </span>
 
           {/* Botão Trailing Stop */}
           <button
             onClick={handleToggleTrailing}
-            className={`flex items-center gap-2 px-3 py-1 rounded border font-mono transition-all ${trailingStopEnabled
-                ? 'bg-emerald-950/50 border-emerald-500/60 text-emerald-400 hover:bg-emerald-900/60'
-                : 'bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-800'
+            className={`flex items-center gap-2 px-3 py-1 rounded-lg border font-mono text-xs font-semibold transition-all ${trailingStopEnabled
+                ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/50 shadow-sm shadow-emerald-950/20'
+                : 'bg-slate-900/90 border-slate-700/80 text-slate-400 hover:bg-slate-800'
               }`}
             title="Alternar Trailing Stop (80%/20%) vs Alvo Fixo (100%)"
           >
@@ -193,16 +201,16 @@ export default function TradingTerminal() {
             </svg>
             <span className="flex items-center gap-1.5">
               <span className={`w-2 h-2 rounded-full ${trailingStopEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
-              <span>Trailing Stop: <b>{trailingStopEnabled ? 'ATIVADO (80%/20%)' : 'DESATIVADO (FIXO)'}</b></span>
+              <span>Trailing Stop: <b className="text-white">{trailingStopEnabled ? 'ATIVADO (80%/20%)' : 'DESATIVADO (FIXO)'}</b></span>
             </span>
           </button>
 
           {/* Botão Shadow Mode */}
           <button
             onClick={handleToggleShadow}
-            className={`flex items-center gap-2 px-3 py-1 rounded border font-mono transition-all ${shadowFilterActive
-                ? 'bg-purple-950/60 border-purple-500/70 text-purple-300 hover:bg-purple-900/70'
-                : 'bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-800'
+            className={`flex items-center gap-2 px-3 py-1 rounded-lg border font-mono text-xs font-semibold transition-all ${shadowFilterActive
+                ? 'bg-purple-950/50 border-purple-500/60 text-purple-300 hover:bg-purple-900/60 shadow-sm shadow-purple-950/20'
+                : 'bg-slate-900/90 border-slate-700/80 text-slate-400 hover:bg-slate-800'
               }`}
             title="Alternar Executor Real (Bloqueia ordens) vs Modo Fantasma (Auditor)"
           >
@@ -211,26 +219,33 @@ export default function TradingTerminal() {
             </svg>
             <span className="flex items-center gap-1.5">
               <span className={`w-2 h-2 rounded-full ${shadowFilterActive ? 'bg-purple-400 animate-pulse' : 'bg-amber-400'}`} />
-              <span>Shadow Mode: <b>{shadowFilterActive ? 'EXECUTOR REAL' : 'MODO FANTASMA'}</b></span>
+              <span>Shadow Mode: <b className="text-white">{shadowFilterActive ? 'EXECUTOR REAL' : 'MODO FANTASMA'}</b></span>
             </span>
           </button>
         </div>
 
-        <div className="hidden lg:flex items-center gap-2 text-[11px] font-mono text-slate-400">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-          <span>PostgreSQL Railway Conectado</span>
+        <div className="hidden lg:flex items-center gap-2.5 text-[11px] font-mono text-slate-400">
+          <span className="flex items-center gap-1 text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+            <span>BingX V2 AO VIVO</span>
+          </span>
+          <span className="text-slate-500">|</span>
+          <span className="flex items-center gap-1 text-slate-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            <span>PostgreSQL Railway Conectado</span>
+          </span>
         </div>
       </div>
 
       {/* Layout Desktop */}
-      <main className="flex-1 hidden lg:flex overflow-hidden relative p-1.5 gap-1.5 bg-bg-app">
+      <main className="flex-1 hidden lg:flex overflow-hidden relative p-2 gap-2 bg-[#060913]">
         <section
           style={{ width: `${leftColWidthPct}%` }}
-          className="flex flex-col h-full overflow-hidden gap-1.5"
+          className="flex flex-col h-full overflow-hidden gap-2"
         >
           <div
             style={{ height: `${chartHeightPct}%` }}
-            className="w-full min-h-[150px] relative overflow-hidden bg-bg-panel border border-border-panel rounded-md shadow-sm"
+            className="w-full min-h-[150px] relative overflow-hidden bg-slate-950/80 border border-slate-800 rounded-xl shadow-lg"
           >
             <ChartPro
               symbol={activeSymbol}
@@ -244,7 +259,7 @@ export default function TradingTerminal() {
 
           <div
             title="Arraste para ajustar a altura"
-            className="h-1.5 w-full bg-border-panel/40 hover:bg-accent cursor-row-resize flex justify-center items-center group transition-colors select-none z-20 shrink-0 rounded-full"
+            className="h-2 w-full bg-slate-800/40 hover:bg-cyan-500/80 cursor-row-resize flex justify-center items-center group transition-colors select-none z-20 shrink-0 rounded-full"
             onMouseDown={(e) => {
               e.preventDefault();
               const startY = e.clientY;
@@ -268,18 +283,18 @@ export default function TradingTerminal() {
 
           <div
             style={{ height: `${100 - chartHeightPct}%` }}
-            className="w-full min-h-[120px] flex overflow-hidden gap-1.5"
+            className="w-full min-h-[120px] flex overflow-hidden gap-2"
           >
             <div
               style={{ width: `${signalsWidthPct}%` }}
-              className="h-full overflow-hidden bg-bg-panel border border-border-panel rounded-md shadow-sm"
+              className="h-full overflow-hidden bg-slate-950/80 border border-slate-800 rounded-xl shadow-lg"
             >
               <SignalsFeed signals={signals} />
             </div>
 
             <div
               title="Arraste para ajustar largura"
-              className="w-1.5 h-full bg-border-panel/40 hover:bg-accent cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-10 shrink-0 rounded-full"
+              className="w-2 h-full bg-slate-800/40 hover:bg-cyan-500/80 cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-10 shrink-0 rounded-full"
               onMouseDown={(e) => {
                 e.preventDefault();
                 const startX = e.clientX;
@@ -298,12 +313,12 @@ export default function TradingTerminal() {
                 window.addEventListener('mouseup', handleMouseUp);
               }}
             >
-              <div className="w-0.5 h-6 bg-slate-600 group-hover:bg-white rounded-full" />
+              <div className="w-0.5 h-8 bg-slate-600 group-hover:bg-cyan-300 rounded-full" />
             </div>
 
             <div
               style={{ width: `${100 - signalsWidthPct}%` }}
-              className="h-full overflow-hidden bg-bg-panel border border-border-panel rounded-md shadow-sm"
+              className="h-full overflow-hidden bg-slate-950/80 border border-slate-800 rounded-xl shadow-lg"
             >
               <PaperTradingPanel
                 account={paperAccount}
@@ -317,7 +332,7 @@ export default function TradingTerminal() {
 
         <div
           title="Arraste para ajustar largura"
-          className="w-1.5 h-full bg-border-panel/40 hover:bg-accent cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-20 shrink-0 rounded-full"
+          className="w-2 h-full bg-slate-800/40 hover:bg-cyan-500/80 cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-20 shrink-0 rounded-full"
           onMouseDown={(e) => {
             e.preventDefault();
             const startX = e.clientX;
@@ -335,23 +350,23 @@ export default function TradingTerminal() {
             window.addEventListener('mouseup', handleMouseUp);
           }}
         >
-          <div className="w-0.5 h-8 bg-slate-600 group-hover:bg-white rounded-full" />
+          <div className="w-0.5 h-10 bg-slate-600 group-hover:bg-cyan-300 rounded-full" />
         </div>
 
         <section
           style={{ width: `${100 - leftColWidthPct}%` }}
-          className="flex h-full overflow-hidden gap-1.5"
+          className="flex h-full overflow-hidden gap-2"
         >
           <div
             style={{ width: `${domWidthPct}%` }}
-            className="h-full overflow-hidden bg-bg-panel border border-border-panel rounded-md shadow-sm"
+            className="h-full overflow-hidden bg-slate-950/80 border border-slate-800 rounded-xl shadow-lg"
           >
             <DOMBook book={book} />
           </div>
 
           <div
             title="Arraste para ajustar largura"
-            className="w-1.5 h-full bg-border-panel/40 hover:bg-accent cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-10 shrink-0 rounded-full"
+            className="w-2 h-full bg-slate-800/40 hover:bg-cyan-500/80 cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-10 shrink-0 rounded-full"
             onMouseDown={(e) => {
               e.preventDefault();
               const startX = e.clientX;
@@ -370,12 +385,12 @@ export default function TradingTerminal() {
               window.addEventListener('mouseup', handleMouseUp);
             }}
           >
-            <div className="w-0.5 h-6 bg-slate-600 group-hover:bg-white rounded-full" />
+            <div className="w-0.5 h-8 bg-slate-600 group-hover:bg-cyan-300 rounded-full" />
           </div>
 
           <div
             style={{ width: `${100 - domWidthPct}%` }}
-            className="h-full overflow-hidden bg-bg-panel border border-border-panel rounded-md shadow-sm"
+            className="h-full overflow-hidden bg-slate-950/80 border border-slate-800 rounded-xl shadow-lg"
           >
             <TapeReader trades={trades} />
           </div>
