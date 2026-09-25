@@ -58,12 +58,22 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
   const safeBalance = Number(currentBalance || 10000);
   const [customBalanceInput, setCustomBalanceInput] = useState(String(safeBalance));
 
-  const handleSaveBalance = (e: React.FormEvent) => {
-    e.preventDefault();
-    const val = parseFloat(customBalanceInput);
-    if (!isNaN(val) && val > 0) {
-      onUpdateBalance(val);
+  const [resetCountdown, setResetCountdown] = useState<number>(0);
+
+  const handleTriggerReset = () => {
+    if (window.confirm('Deseja realmente zerar todas as informações do Master, Shadow Mode e aguardar 15 segundos para sincronização?')) {
+      onResetData();
+      setResetCountdown(15);
       setIsSettingsOpen(false);
+      const interval = setInterval(() => {
+        setResetCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
     }
   };
 
@@ -195,6 +205,13 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
           <span className="hidden sm:inline">CONSULTOR IA</span>
         </button>
 
+        {resetCountdown > 0 && (
+          <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-mono shrink-0 animate-pulse">
+            <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />
+            <span>SINCRONIZANDO: {resetCountdown}s</span>
+          </div>
+        )}
+
         <div className="flex items-center space-x-1 px-2.5 py-1.5 rounded bg-bg-app border border-border-panel text-[11px] font-mono shrink-0">
           <Radio className={`w-3.5 h-3.5 ${isConnected ? 'text-trade-green animate-pulse' : 'text-trade-red'}`} />
           <span className={`font-bold ${isConnected ? 'text-trade-green' : 'text-trade-red'}`}>
@@ -253,16 +270,19 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
             <div className="pt-2 border-t border-border-panel">
               <label className="text-[11px] text-text-muted block mb-1.5">Reiniciar Métricas e Histórico</label>
               <button
-                onClick={() => {
-                  if (window.confirm('Deseja realmente zerar todo o histórico e reiniciar as métricas da sessão?')) {
-                    onResetData();
-                    setIsSettingsOpen(false);
-                  }
-                }}
-                className="w-full py-2 rounded bg-trade-red/15 hover:bg-trade-red/25 text-trade-red border border-trade-red/30 text-xs font-bold transition-all flex items-center justify-center space-x-1.5"
+                onClick={handleTriggerReset}
+                disabled={resetCountdown > 0}
+                className={`w-full py-2 rounded text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${resetCountdown > 0
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 cursor-not-allowed'
+                  : 'bg-trade-red/15 hover:bg-trade-red/25 text-trade-red border border-trade-red/30'
+                }`}
               >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>Zerar Histórico da Sessão</span>
+                <RefreshCw className={`w-3.5 h-3.5 ${resetCountdown > 0 ? 'animate-spin' : ''}`} />
+                <span>
+                  {resetCountdown > 0
+                    ? `Sincronizando... (${resetCountdown}s)`
+                    : 'Zerar Histórico da Sessão'}
+                </span>
               </button>
             </div>
           </div>

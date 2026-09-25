@@ -295,7 +295,23 @@ export default function ClientDashboard() {
       fetchAccount();
       fetchMasterFeed();
     }, 15000);
-    return () => clearInterval(interval);
+
+    // Escuta direta via WebSocket para sincronizar na hora se o Master for zerado
+    const handleMessage = (e: MessageEvent) => {
+      try {
+        const d = JSON.parse(e.data);
+        if (d?.type === 'trading_reset' || d?.type === 'master_feed_update') {
+          fetchMasterFeed();
+          fetchAccount();
+        }
+      } catch {}
+    };
+    window.addEventListener('message', handleMessage);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('message', handleMessage);
+    };
   }, []);
 
   // Presets inteligentes baseados no simulador de banca

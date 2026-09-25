@@ -355,9 +355,16 @@ bindMasterControlHandler({
   setShadowFilterActive: (active) => { masterShadowFilterActive = active; }
 });
 
+let masterResetCooldownUntil = 0;
+
 const flowEngine = new FlowEngine((signal: FlowSignal) => {
   console.log('[Flow] sinal emitido:', signal.type, signal.symbol);
   io.emit('flow_signal', signal);
+  if (Date.now() < masterResetCooldownUntil) {
+    const remainingSec = Math.ceil((masterResetCooldownUntil - Date.now()) / 1000);
+    console.log(`[Flow] ⏳ Reset recente: aguardando sincronização (${remainingSec}s restantes)...`);
+    return;
+  }
   const asset = marketManager.getSymbolState(signal.symbol);
   if (!asset) return;
   void (async () => {
@@ -529,11 +536,38 @@ app.post('/api/trading/reset', requireAuth, async (req, res) => {
     paperTrading.resetData(result.masterBalance);
     mirrorTrading.resetData(result.mirrorBalance);
     
-    io.emit('paper_account_update', paperTrading.getAccountState());
-    io.emit('mirror_account_update', mirrorTrading.getAccountState());
-    io.emit('trading_reset', result);
+    // Zera o Shadow Mode Auditor e histórico de oportunidades
+    clearShadowAudits();
+    void query('DELETE FROM shadow_opportunities').catch(() => {});
+    io.emit('shadow_audit_reset');
+
+    // Zera logs do Copy Trader
+    clientCopyTrader.clearLogs();
+    io.emit('client_logs_cleared');
+
+    // Zera planilha Google de forma segura
+    void GoogleSheetsService.resetSpreadsheet().catch(() => {});
+
+    // Recalcula métricas
+    recalculateAllPairs();
+
+    // Inicia período de pausa de 15 segundos para estabilização e sincronização
+    masterResetCooldownUntil = Date.now() + 15000;
+
+    const paperState = paperTrading.getAccountState();
+    const mirrorState = mirrorTrading.getAccountState();
+    io.emit('paper_account_update', paperState);
+    io.emit('mirror_account_update', mirrorState);
+    io.emit('master_feed_update', { metrics: paperState, masterOpenPositions: [], masterHistory: [] });
+    io.emit('trading_reset', { ...result, cooldownSeconds: 15, cooldownUntil: masterResetCooldownUntil });
     
-    res.json({ success: true, ...result, message: 'Bancas Master e Mirror resetadas com sucesso' });
+    res.json({ 
+      success: true, 
+      ...result, 
+      cooldownSeconds: 15,
+      cooldownUntil: masterResetCooldownUntil,
+      message: 'Bancas Master e Mirror resetadas. Aguardando 15s para sincronização total do mercado e clientes.' 
+    });
   } catch (err: any) {
     console.error('[TradingReset] Erro:', err.message);
     res.status(500).json({ success: false, error: err.message });
@@ -688,6 +722,7 @@ app.post('/api/paper-trading/reset', requireAuth, async (req, res) => {
 
     // 2. Zera o Shadow Mode Auditor (arquivo de log e auditorias pendentes)
     clearShadowAudits();
+    void query('DELETE FROM shadow_opportunities').catch(() => {});
     io.emit('shadow_audit_reset');
 
     // 3. Zera os logs do Copy Trader dos clientes
@@ -695,14 +730,21 @@ app.post('/api/paper-trading/reset', requireAuth, async (req, res) => {
     io.emit('client_logs_cleared');
 
     // 4. Zera as abas de trades e auditoria na Planilha Google
-    await GoogleSheetsService.resetSpreadsheet();
+    void GoogleSheetsService.resetSpreadsheet().catch(() => {});
 
     // 5. Recalcula métricas e status dos pares
     recalculateAllPairs();
 
+    // 6. Ativa cooldown de 15 segundos para sincronização completa de dados
+    masterResetCooldownUntil = Date.now() + 15000;
+    io.emit('master_feed_update', { metrics: updated, masterOpenPositions: [], masterHistory: [] });
+    io.emit('trading_reset', { masterBalance: newBalance, cooldownSeconds: 15, cooldownUntil: masterResetCooldownUntil });
+
     res.json({ 
       success: true, 
-      message: 'Sessão zerada com sucesso em todas as frentes (Master Quant, Shadow Mode e Planilha Google sincronizados)', 
+      message: 'Sessão zerada com sucesso em todas as frentes (Master Quant, Shadow Mode e Planilha Google). Aguardando 15s para sincronização total.', 
+      cooldownSeconds: 15,
+      cooldownUntil: masterResetCooldownUntil,
       account: updated
     });
   } catch (err: any) {
