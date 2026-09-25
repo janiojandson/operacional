@@ -48,6 +48,7 @@ export function evaluateCryptoOpportunity(input: CryptoOpportunityInput): Strate
   if (input.hasOpenPosition) reasons.push('POSICAO_JA_ABERTA');
   if (input.cooldownActive) reasons.push('COOLDOWN_ATIVO');
   if (!input.orderExecutable) reasons.push('ORDEM_NAO_EXECUTAVEL');
+  if (input.regime === 'CHOPPY_RANGING') reasons.push('REGIME_CHOPPY_BLOQUEADO');
 
   if (input.flowConfirmed) score++;
   if (input.regime === 'TREND' || input.regime === 'HIGH_TREND' || input.regime === 'EXPANSION_FLOW') score++;

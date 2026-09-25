@@ -387,6 +387,11 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
 
     const pairConfig = AutoPairSelectorEngine.getPairConfig(signal.symbol);
     const book = asset.book;
+    const cooldownActive = paperTrading.isCooldownActive(signal.symbol);
+    if (cooldownActive) {
+      console.log(`[COOLDOWN ATIVO] Aguardando respiro estrutural para ${signal.symbol}`);
+    }
+
     const decision = evaluateCryptoOpportunity({
       symbol: signal.symbol,
       price: asset.lastPrice,
@@ -399,7 +404,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       flowConfirmed: signal.type === 'ABSORPTION_BUY' || signal.type === 'ABSORPTION_SELL',
       regime: pairConfig?.regime ?? 'TREND',
       hasOpenPosition: paperTrading.getAccountState().openPositions.some(position => position.symbol === signal.symbol),
-      cooldownActive: false,
+      cooldownActive,
       orderExecutable: true,
       source: book?.source ?? 'LOCAL_FALLBACK'
     });

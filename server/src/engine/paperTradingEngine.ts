@@ -38,9 +38,24 @@ export class PaperTradingEngine {
   private activePairs: Set<string> = new Set(['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT']);
   private minTemperature: number = 1.5;
   private trailingStopEnabled: boolean = true;
+  private lastExitTimestamp: Map<string, number> = new Map();
 
   public setTrailingStopEnabled(enabled: boolean) {
     this.trailingStopEnabled = enabled;
+  }
+
+  public isCooldownActive(symbol: string, cooldownMs = 15 * 60 * 1000): boolean {
+    const lastExit = this.lastExitTimestamp.get(symbol);
+    if (!lastExit) return false;
+    return Date.now() - lastExit < cooldownMs;
+  }
+
+  public getLastExitTimestamp(symbol: string): number | undefined {
+    return this.lastExitTimestamp.get(symbol);
+  }
+
+  public setLastExitTimestamp(symbol: string, timestampMs = Date.now()) {
+    this.lastExitTimestamp.set(symbol, timestampMs);
   }
 
   constructor(onUpdate?: (account: PaperAccount, newTradeEvent?: SimulatedTrade) => void) {
@@ -338,6 +353,7 @@ export class PaperTradingEngine {
       this.history.unshift(trade);
       if (this.history.length > 100) this.history.pop();
       this.openPositions.delete(symbol);
+      this.lastExitTimestamp.set(symbol, Date.now());
       this.broadcastUpdate(trade);
     } else {
       this.broadcastUpdate();
@@ -403,6 +419,7 @@ export class PaperTradingEngine {
     this.history.unshift(trade);
     if (this.history.length > 100) this.history.pop();
     this.openPositions.delete(symbol);
+    this.lastExitTimestamp.set(symbol, Date.now());
     this.broadcastUpdate(trade);
 
     return { success: true, pnl: netPnl };

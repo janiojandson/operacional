@@ -40,4 +40,12 @@ const sol = evaluateCryptoOpportunity({ ...validInput, symbol: 'SOL/USDT', price
 assert.equal(sol.takeProfit, 155.25);
 assert.equal(sol.stopLoss, 147.9);
 
+const choppy = evaluateCryptoOpportunity({ ...validInput, regime: 'CHOPPY_RANGING' });
+assert.equal(choppy.approved, false);
+assert.ok(choppy.reasons.includes('REGIME_CHOPPY_BLOQUEADO'), 'must block entries during CHOPPY_RANGING regime');
+
+const cooling = evaluateCryptoOpportunity({ ...validInput, cooldownActive: true });
+assert.equal(cooling.approved, false);
+assert.ok(cooling.reasons.includes('COOLDOWN_ATIVO'), 'must block entries during post-exit cooldown');
+
 console.log('cryptoStrategyDecision: PASS');

@@ -115,4 +115,9 @@ const fixedClosed = fixedTpEngine.getAccountState().history[0];
 assert.equal(fixedClosed.closeReason, 'FIXED_TP');
 assert.equal(fixedClosed.rMultiple, 2.5);
 
+// Teste de Cooldown pós-saída registrado no engine
+assert.ok(fixedTpEngine.getLastExitTimestamp('BTC/USDT') !== undefined, 'closing position must register lastExitTimestamp');
+assert.equal(fixedTpEngine.isCooldownActive('BTC/USDT', 15 * 60 * 1000), true, '15-min cooldown must be active right after close');
+assert.equal(fixedTpEngine.isCooldownActive('ETH/USDT', 15 * 60 * 1000), false, 'untraded pair must not be in cooldown');
+
 console.log('paperTradingEngine: PASS');
