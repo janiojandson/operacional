@@ -658,19 +658,25 @@ export class BybitExecutionEngine {
         side: payload.side
       });
 
-      // ─── CORREÇÃO DEFINITIVA: STOP LOSS COMO STRING DIRETA (NUNCA OBJETO) ───
+      // ─── BINGX NATIVE SL & TP (Formato dicionário exigido pela API BingX Swap) ───
       if (validStopLoss > 0) {
-        orderParams['stopLoss'] = exchange.priceToPrecision(ccxtSymbol, validStopLoss).toString();
-        orderParams['slOrderType'] = 'Market';
-        orderParams['tpslMode'] = 'Full';
+        orderParams['stopLoss'] = {
+          stopPrice: Number(exchange.priceToPrecision(ccxtSymbol, validStopLoss)),
+          type: 'STOP_MARKET',
+          workingType: 'MARK_PRICE'
+        };
       }
 
-      // Se o Trailing Stop estiver DESLIGADO, envia o Take Profit fixo como string direta
+      // Se o Trailing Stop estiver DESLIGADO, envia o Take Profit fixo na BingX
       if (!trailingAtivo && validTakeProfit > 0) {
-        orderParams['takeProfit'] = exchange.priceToPrecision(ccxtSymbol, validTakeProfit).toString();
-        orderParams['tpOrderType'] = 'Market';
-        orderParams['tpslMode'] = 'Full';
+        orderParams['takeProfit'] = {
+          stopPrice: Number(exchange.priceToPrecision(ccxtSymbol, validTakeProfit)),
+          type: 'TAKE_PROFIT_MARKET',
+          workingType: 'MARK_PRICE'
+        };
       }
+
+      orderParams['hedged'] = true;
 
       // Disparo da ordem principal
       const order = await exchange.createOrder(
