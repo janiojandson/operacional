@@ -11,6 +11,7 @@ import {
   Activity
 } from 'lucide-react';
 import { TenantSelector } from './TenantSelector';
+import { LayaGovernanceControl } from './LayaGovernanceControl';
 
 export interface AssetSummary {
   symbol: string;
@@ -190,6 +191,8 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
       </div>
 
       <div className="flex items-center space-x-2 shrink-0">
+        <LayaGovernanceControl />
+
         <button
           onClick={onOpenShadowAudit}
           className="flex items-center space-x-1.5 px-3 py-1.5 rounded bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-400 border border-cyan-500/40 text-xs font-bold font-mono transition-all whitespace-nowrap shadow-sm shadow-cyan-500/10"
