@@ -352,7 +352,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
           lineWidth: 1,
           lineStyle: 2,
           axisLabelVisible: true,
-          title: 'GATILHO TRAILING (80%)',
+          title: 'GATILHO RUNNER (100%)',
         });
       }
 

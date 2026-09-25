@@ -217,14 +217,14 @@ export default function TradingTerminal() {
                 ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/50 shadow-sm shadow-emerald-950/20'
                 : 'bg-slate-900/90 border-slate-700/80 text-slate-400 hover:bg-slate-800'
               }`}
-            title="Alternar Trailing Stop (80%/20%) vs Alvo Fixo (100%)"
+            title="Alternar Trailing Stop (Runner Mode 100% / Piso 2.3R) vs Alvo Fixo (100% / 2.5R)"
           >
             <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
             </svg>
             <span className="flex items-center gap-1.5">
               <span className={`w-2 h-2 rounded-full ${trailingStopEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
-              <span>Trailing Stop: <b className="text-white">{trailingStopEnabled ? 'ATIVADO (80%/20%)' : 'DESATIVADO (FIXO)'}</b></span>
+              <span>Trailing Stop: <b className="text-white">{trailingStopEnabled ? 'ATIVADO (RUNNER 100%)' : 'DESATIVADO (FIXO)'}</b></span>
             </span>
           </button>
 
