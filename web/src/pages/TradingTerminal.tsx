@@ -59,7 +59,14 @@ export default function TradingTerminal() {
   );
   // Margem total comprometida nas posições abertas
   const totalMarginUsed = openPositionsList.reduce((acc: number, pos: any) => {
-    const margin = Number(pos.marginUsd || (pos.notionalUsd ? pos.notionalUsd / 10 : 0));
+    let margin = Number(pos.marginUsd || 0);
+    if (!margin && pos.notionalUsd) {
+      margin = Number(pos.notionalUsd) / 10;
+    }
+    if (!margin && pos.qty && (pos.entryPrice || pos.currentPrice)) {
+      const price = Number(pos.entryPrice || pos.currentPrice || 0);
+      margin = (Number(pos.qty) * price) / 10;
+    }
     return acc + (isNaN(margin) ? 0 : margin);
   }, 0);
   // Banca Viva = Caixa + Soma do PnL flutuante de todas as posições abertas

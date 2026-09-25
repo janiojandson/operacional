@@ -505,6 +505,11 @@ export const ChartPro: React.FC<ChartProProps> = ({
             <div className={`font-bold ${tradePnlValue >= 0 ? 'text-trade-green' : 'text-trade-red'}`}>
               {tradePnlValue >= 0 ? `+$${tradePnlValue.toFixed(2)}` : `-$${Math.abs(tradePnlValue).toFixed(2)}`} ({tradePnlPercentage.toFixed(2)}%)
             </div>
+            {currentTrade.marginUsd && (
+              <div className="text-[10px] text-amber-400 font-medium">
+                Margem: ${Number(currentTrade.marginUsd).toFixed(2)}
+              </div>
+            )}
           </div>
 
           <div className="border-l border-border-panel pl-3 text-[10px] space-y-0.5">

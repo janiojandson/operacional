@@ -117,30 +117,31 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
         </div>
 
         {/* ─── MARGEM ALOCADA & DISPONÍVEL (HUD LIVE TIKTOK) ─── */}
-        {marginUsed > 0 && (
-          <div
-            className="hidden sm:flex items-center space-x-2 bg-slate-900/90 px-2.5 py-1 rounded-lg border border-amber-500/30 text-xs font-mono shrink-0 shadow-sm transition-all"
-            title={`Margem em Operação: $${marginUsed.toFixed(2)} | Livre: $${(availableMargin ?? (safeBalance - marginUsed)).toFixed(2)}`}
-          >
-            <div className="flex flex-col text-right">
-              <span className="text-amber-400/90 text-[9px] uppercase tracking-wider leading-tight font-bold">
-                Margem Alocada
+        <div
+          className="flex items-center space-x-2 bg-slate-900/95 px-2.5 py-1 rounded-lg border border-amber-500/40 text-xs font-mono shrink-0 shadow-md transition-all"
+          title={`Margem em Operação: $${marginUsed.toFixed(2)} | Livre: $${(availableMargin ?? (safeBalance - marginUsed)).toFixed(2)}`}
+        >
+          <div className="flex flex-col text-right">
+            <span className="text-amber-400 text-[9px] uppercase tracking-wider leading-tight font-bold">
+              Margem Alocada
+            </span>
+            <span className="font-black text-amber-300 tracking-tight text-xs">
+              ${marginUsed.toFixed(2)}{' '}
+              <span className="text-[10px] text-slate-400 font-normal">
+                ({safeBalance > 0 ? ((marginUsed / safeBalance) * 100).toFixed(1) : '0.0'}%)
               </span>
-              <span className="font-black text-amber-300 tracking-tight text-xs">
-                ${marginUsed.toFixed(2)} <span className="text-[10px] text-slate-400 font-normal">({safeBalance > 0 ? ((marginUsed / safeBalance) * 100).toFixed(1) : 0}%)</span>
-              </span>
-            </div>
-            <div className="w-px h-6 bg-slate-700/80" />
-            <div className="flex flex-col text-left">
-              <span className="text-emerald-400/90 text-[9px] uppercase tracking-wider leading-tight font-bold">
-                Margem Livre
-              </span>
-              <span className="font-black text-emerald-400 tracking-tight text-xs">
-                ${(availableMargin ?? Math.max(0, safeBalance - marginUsed)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
-            </div>
+            </span>
           </div>
-        )}
+          <div className="w-px h-6 bg-slate-700/80" />
+          <div className="flex flex-col text-left">
+            <span className="text-emerald-400 text-[9px] uppercase tracking-wider leading-tight font-bold">
+              Margem Livre
+            </span>
+            <span className="font-black text-emerald-400 tracking-tight text-xs">
+              ${(availableMargin ?? Math.max(0, safeBalance - marginUsed)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+          </div>
+        </div>
 
         {/* Lista de Ativos */}
         <div className="flex items-center space-x-1.5 overflow-x-auto py-0.5 max-w-full no-scrollbar">
