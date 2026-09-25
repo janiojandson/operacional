@@ -3,6 +3,8 @@ import { requireAdmin } from '../auth/authMiddleware.js';
 import { UserDB, ClientConfigDB, TradeHistoryDB, AnnouncementDB, query, queryOne, UserRow, ClientConfigRow } from '../database/db.js';
 import { BybitExecutionEngine } from '../engine/bybitExecutionEngine.js';
 import { sanitizeCsvField, escapeHtml } from '../utils/sanitizer.js';
+import { layaGovernanceService } from '../services/layaGovernanceService.js';
+import type { LayaMode } from '../../../shared/layaGovernanceTypes.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
@@ -524,3 +526,34 @@ adminRouter.delete('/clients/:id', async (req: Request, res: Response) => {
   await UserDB.deleteClient(user.id, user.client_id);
   res.json({ success: true, message: `Cliente ${user.name || user.email} excluído com sucesso.` });
 });
+
+// GET /api/admin/laya/status — Métricas e decisões recentes da governança Laya
+adminRouter.get('/laya/status', (_req: Request, res: Response) => {
+  const mode = layaGovernanceService.getMode();
+  const metrics = layaGovernanceService.getMetrics();
+  res.json({
+    mode,
+    metrics: {
+      latencyP50: metrics.p50LatencyMs,
+      latencyP95: metrics.p95LatencyMs,
+      sessionPardonsUsed: metrics.overridesUsedSession,
+      maxSessionPardons: metrics.maxOverridesPerSession,
+      totalDecisions: metrics.recentDecisions.length,
+      counterfactualPnL: metrics.pnlAttributedOverrides
+    },
+    recentDecisions: metrics.recentDecisions
+  });
+});
+
+// POST /api/admin/laya/mode — Alternar modo operacional (OFF, SHADOW, ACTIVE)
+adminRouter.post('/laya/mode', (req: Request, res: Response) => {
+  const { mode } = req.body || {};
+  const validModes: LayaMode[] = ['OFF', 'SHADOW', 'ACTIVE'];
+  if (!mode || !validModes.includes(mode)) {
+    return res.status(400).json({ error: 'Modo inválido. Valores permitidos: OFF, SHADOW, ACTIVE' });
+  }
+  layaGovernanceService.setMode(mode);
+  console.log(`[LAYA ADMIN] Modo operacional alterado para: ${mode}`);
+  res.json({ success: true, mode: layaGovernanceService.getMode() });
+});
+
