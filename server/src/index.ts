@@ -391,21 +391,23 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       source: book?.source ?? 'LOCAL_FALLBACK'
     });
     const publishOpportunity = () => {
-    const shadowOpportunity = recordShadowOpportunity({
-      symbol: signal.symbol,
-      side,
-      mode: masterShadowFilterActive ? 'FILTER' : 'AUDIT',
-      approved: decision.approved,
-      reasons: decision.reasons,
-      source: book?.source ?? 'LOCAL_FALLBACK'
-    });
-    void query(
-      `INSERT INTO shadow_opportunities (id, symbol, side, mode, approved, reasons, source, created_at) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8) ON CONFLICT (id) DO NOTHING`,
-      [shadowOpportunity.id, shadowOpportunity.symbol, shadowOpportunity.side, shadowOpportunity.mode, shadowOpportunity.approved ? 1 : 0, JSON.stringify(shadowOpportunity.reasons), shadowOpportunity.source, Date.parse(shadowOpportunity.timestamp)]
-    ).catch((error: any) => console.error('[Shadow] Falha não-fatal ao persistir oportunidade:', error.message));
-    GoogleSheetsService.logShadowOpportunity(shadowOpportunity);
-    io.emit('shadow_opportunity', shadowOpportunity);
-    io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
+      const shadowOpportunity = recordShadowOpportunity({
+        symbol: signal.symbol,
+        side,
+        mode: masterShadowFilterActive ? 'FILTER' : 'AUDIT',
+        approved: decision.approved,
+        reasons: decision.reasons,
+        source: book?.source ?? 'LOCAL_FALLBACK'
+      });
+      void query(
+        `INSERT INTO shadow_opportunities (id, symbol, side, mode, approved, reasons, source, created_at) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8) ON CONFLICT (id) DO NOTHING`,
+        [shadowOpportunity.id, shadowOpportunity.symbol, shadowOpportunity.side, shadowOpportunity.mode, shadowOpportunity.approved ? 1 : 0, JSON.stringify(shadowOpportunity.reasons), shadowOpportunity.source, Date.parse(shadowOpportunity.timestamp)]
+      ).catch((error: any) => console.error('[Shadow] Falha não-fatal ao persistir oportunidade:', error.message));
+      GoogleSheetsService.logShadowOpportunity(shadowOpportunity);
+      io.emit('shadow_opportunity', shadowOpportunity);
+      io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
+    };
+
     if (!decision.approved) {
       io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
       return;
