@@ -43,8 +43,10 @@ export class MarketDataManager {
   private bookInterval?: NodeJS.Timeout;
   private tickerInterval?: NodeJS.Timeout;
   private exchange: any;
+  private wsExchange: any;
   private isInitialized = false;
   private isRefreshingBooks = false;
+  private isStreamingWS = false;
   private processedTradeIds = new Map<string, Set<string>>();
 
   constructor(flowEngine: FlowEngine, onBroadcast?: (type: string, data: any) => void) {
@@ -57,6 +59,19 @@ export class MarketDataManager {
       enableRateLimit: true,
       timeout: 10000
     });
+
+    if ((ccxt as any).pro && (ccxt as any).pro.bingx) {
+      try {
+        this.wsExchange = new (ccxt as any).pro.bingx({
+          options: {
+            defaultType: 'swap'
+          },
+          enableRateLimit: true
+        });
+      } catch {
+        this.wsExchange = null;
+      }
+    }
   }
 
   async initialize(): Promise<void> {
@@ -176,11 +191,120 @@ export class MarketDataManager {
   public startStreaming(): void {
     if (this.fetchInterval) return;
     
+    // Inicia loops reativos WebSocket de baixa latência (< 50ms)
+    this.startWebSocketStreams();
+
     this.tickerInterval = setInterval(() => this.updateTickers(), MARKET_DATA_INTERVALS.tickerMs);
     this.bookInterval = setInterval(() => this.updateBooks(), MARKET_DATA_INTERVALS.bookMs);
     this.fetchInterval = setInterval(() => this.updateCandlesAndBooks(), MARKET_DATA_INTERVALS.candlesMs);
     this.updateTickers();
     this.updateBooks();
+  }
+
+  private startWebSocketStreams(): void {
+    if (!this.wsExchange || this.isStreamingWS) return;
+    this.isStreamingWS = true;
+    console.log('[MarketData] 🚀 Iniciando túneis WebSocket nativos (ccxt.pro)...');
+
+    for (const symbol of DEFAULT_SYMBOLS) {
+      this.streamTrades(symbol);
+      this.streamOrderBook(symbol);
+    }
+  }
+
+  private async streamTrades(symbol: string): Promise<void> {
+    const ccxtSymbol = toExchangeLinear(symbol);
+    while (this.isStreamingWS) {
+      try {
+        const rawTrades = await this.wsExchange.watchTrades(ccxtSymbol, undefined, 25);
+        if (!Array.isArray(rawTrades) || rawTrades.length === 0) continue;
+        const state = this.symbols.get(symbol);
+        if (!state) continue;
+
+        for (const rt of rawTrades) {
+          this.processTradeEvent(symbol, state, rt);
+        }
+      } catch (err: any) {
+        // Pausa breve e auto-reconexão
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+  }
+
+  private async streamOrderBook(symbol: string): Promise<void> {
+    const ccxtSymbol = toExchangeLinear(symbol);
+    while (this.isStreamingWS) {
+      try {
+        const ob = await this.wsExchange.watchOrderBook(ccxtSymbol, 20);
+        const state = this.symbols.get(symbol);
+        if (!state || !ob.bids || !ob.asks) continue;
+
+        const bids = ob.bids.slice(0, 20).map((b: any) => ({ price: b[0], amount: b[1], total: 0 }));
+        const asks = ob.asks.slice(0, 20).map((a: any) => ({ price: a[0], amount: a[1], total: 0 }));
+        let bidTotal = 0, askTotal = 0;
+        bids.forEach((b: any) => { bidTotal += b.amount; b.total = bidTotal; });
+        asks.forEach((a: any) => { askTotal += a.amount; a.total = askTotal; });
+
+        const bookData: OrderBookData = {
+          symbol,
+          bids,
+          asks,
+          timestamp: Date.now(),
+          spread: Number(((asks[0]?.price || 0) - (bids[0]?.price || 0)).toFixed(2)),
+          bidDepthTotal: bidTotal,
+          askDepthTotal: askTotal,
+          imbalanceRatio: +(bidTotal / Math.max(askTotal, 1)).toFixed(2),
+          source: 'BINGX'
+        };
+
+        state.book = bookData;
+        if (this.onBroadcast) this.onBroadcast('book', bookData);
+        this.flowEngine.checkBookImbalance(bookData);
+      } catch (err: any) {
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+  }
+
+  private processTradeEvent(symbol: string, state: ActiveSymbolState, rt: any): void {
+    const id = String(rt.id ?? `${rt.timestamp}-${rt.price}-${rt.amount}`);
+    let seenIds = this.processedTradeIds.get(symbol);
+    if (!seenIds) {
+      seenIds = new Set<string>();
+      this.processedTradeIds.set(symbol, seenIds);
+    }
+    if (seenIds.has(id)) return;
+    seenIds.add(id);
+
+    if (seenIds.size > 500) {
+      let toDrop = 250;
+      for (const oldId of seenIds) {
+        if (toDrop-- <= 0) break;
+        seenIds.delete(oldId);
+      }
+    }
+
+    const prevPrice = state.lastPrice;
+    if (rt.price && rt.price > 0) {
+      state.lastPrice = rt.price;
+    }
+
+    const trade: Trade = {
+      id,
+      symbol,
+      price: rt.price,
+      amount: rt.amount,
+      side: rt.side === 'buy' || rt.side === 'sell' ? rt.side : (rt.price >= prevPrice ? 'buy' : 'sell'),
+      timestamp: rt.timestamp || Date.now(),
+      cost: Number(((rt.amount || 0) * (rt.price || 0)).toFixed(2)),
+      isWhale: Number(((rt.amount || 0) * (rt.price || 0))) >= 50000
+    };
+
+    state.trades.unshift(trade);
+    if (state.trades.length > 80) state.trades.pop();
+    if (this.onBroadcast) this.onBroadcast('trade', trade);
+    this.flowEngine.processTrade(trade, state.book);
+    this.updateLiveCandle(state, rt.price);
   }
 
   private async updateTickers(): Promise<void> {
@@ -200,36 +324,8 @@ export class MarketDataManager {
         state.volume24h = ticker.baseVolume || state.volume24h;
         state.change24h = ticker.percentage || state.change24h;
 
-        let seenIds = this.processedTradeIds.get(symbol);
-        if (!seenIds) {
-          seenIds = new Set<string>();
-          this.processedTradeIds.set(symbol, seenIds);
-        }
         for (const rt of rawTrades) {
-          const id = String(rt.id ?? `${rt.timestamp}-${rt.price}-${rt.amount}`);
-          if (seenIds.has(id)) continue;
-          seenIds.add(id);
-          if (seenIds.size > 500) {
-            let toDrop = 250;
-            for (const oldId of seenIds) {
-              if (toDrop-- <= 0) break;
-              seenIds.delete(oldId);
-            }
-          }
-          const trade: Trade = {
-            id,
-            symbol,
-            price: rt.price,
-            amount: rt.amount,
-            side: rt.side === 'buy' || rt.side === 'sell' ? rt.side : (rt.price >= prevPrice ? 'buy' : 'sell'),
-            timestamp: rt.timestamp,
-            cost: Number((rt.amount * rt.price).toFixed(2)),
-            isWhale: Number((rt.amount * rt.price)) >= 50000
-          };
-          state.trades.unshift(trade);
-          if (state.trades.length > 80) state.trades.pop();
-          if (this.onBroadcast) this.onBroadcast('trade', trade);
-          this.flowEngine.processTrade(trade, state.book);
+          this.processTradeEvent(symbol, state, rt);
         }
 
         if (state.trades.length === 0) {
@@ -258,6 +354,7 @@ export class MarketDataManager {
       }
     }
   }
+
 
   private updateLiveCandle(state: ActiveSymbolState, price: number): void {
     const nowSec = Math.floor(Date.now() / 1000);
