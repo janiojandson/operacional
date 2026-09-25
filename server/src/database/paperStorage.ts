@@ -44,6 +44,9 @@ export interface MasterOrderRow {
   trailing_stop_price: number | null;
   fee: number;
   net_pnl: number;
+  qty?: number;
+  notional_usd?: number;
+  margin_usd?: number;
 }
 
 // ─── Mirror Account Types ────────────────────────────────────────────────────
@@ -186,6 +189,9 @@ export async function initPaperTables(): Promise<void> {
   await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000`);
   await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS fee NUMERIC NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS net_pnl NUMERIC NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS qty NUMERIC NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS notional_usd NUMERIC NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS margin_usd NUMERIC NOT NULL DEFAULT 0`);
 
   // ─── Mirror Account Tables ────────────────────────────────────────────────
   await query(`
@@ -316,7 +322,10 @@ export async function hydrateMasterAccount(): Promise<PaperAccount> {
     trailingTriggerPrice: row.trailing_trigger_price !== null ? Number(row.trailing_trigger_price) : undefined,
     trailingStopPrice: row.trailing_stop_price !== null ? Number(row.trailing_stop_price) : undefined,
     fee: Number(row.fee || 0),
-    netPnl: Number(row.net_pnl || row.pnl_usd || 0)
+    netPnl: Number(row.net_pnl || row.pnl_usd || 0),
+    qty: Number(row.qty || (Number(row.entry_price) > 0 ? (Number(row.notional_usd || 2000) / Number(row.entry_price)) : 0)),
+    notionalUsd: Number(row.notional_usd || (Number(row.entry_price) * Number(row.qty || 0)) || 2000),
+    marginUsd: Number(row.margin_usd || ((Number(row.notional_usd || (Number(row.entry_price) * Number(row.qty || 0)) || 2000)) / 10))
   });
 
   return {
@@ -353,14 +362,18 @@ export async function persistMasterBalance(account: PaperAccount): Promise<void>
 }
 
 export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Promise<void> {
+  const notional = trade.notionalUsd || (trade.entryPrice * (trade.qty || 0)) || 2000;
+  const qty = trade.qty || (trade.entryPrice > 0 ? notional / trade.entryPrice : 0);
+  const marginUsd = trade.marginUsd || (notional / 10);
+
   await query(
     `INSERT INTO paper_master_orders (
        id, symbol, type, entry_price, current_price, take_profit, stop_loss,
        pnl_usd, pnl_pct, r_multiple, power_multiplier, temperature, session,
        day_of_week, market_regime, status, entry_time, close_time, signal_reason,
        trailing_active, trailing_trigger_price, trailing_stop_price,
-       fee, net_pnl, updated_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+       fee, net_pnl, qty, notional_usd, margin_usd, updated_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
      ON CONFLICT (id) DO UPDATE SET
        current_price = EXCLUDED.current_price,
        pnl_usd = EXCLUDED.pnl_usd,
@@ -372,6 +385,9 @@ export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Prom
        trailing_stop_price = EXCLUDED.trailing_stop_price,
        fee = EXCLUDED.fee,
        net_pnl = EXCLUDED.net_pnl,
+       qty = EXCLUDED.qty,
+       notional_usd = EXCLUDED.notional_usd,
+       margin_usd = EXCLUDED.margin_usd,
        updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
    `,
     [
@@ -399,6 +415,9 @@ export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Prom
       trade.trailingStopPrice || null,
       trade.fee || 0,
       trade.netPnl || trade.pnlUsd || 0,
+      qty,
+      notional,
+      marginUsd,
       Date.now()
     ]
   );
@@ -432,9 +451,11 @@ export async function hydrateMirrorAccount(): Promise<PaperAccount> {
     signalReason: row.signal_reason,
     trailingActive: Boolean(row.trailing_active),
     trailingTriggerPrice: row.trailing_trigger_price !== null ? Number(row.trailing_trigger_price) : undefined,
-    trailingStopPrice: row.trailing_stop_price !== null ? Number(row.trailing_stop_price) : undefined,
     fee: Number(row.fee || 0),
-    netPnl: Number(row.net_pnl || row.pnl_usd || 0)
+    netPnl: Number(row.net_pnl || row.pnl_usd || 0),
+    qty: Number(row.qty || 0),
+    notionalUsd: Number((Number(row.entry_price) * Number(row.qty || 0)).toFixed(2)),
+    marginUsd: Number(((Number(row.entry_price) * Number(row.qty || 0)) / 10).toFixed(2))
   });
 
   return {

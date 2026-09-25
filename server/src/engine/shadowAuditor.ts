@@ -77,6 +77,33 @@ export function clearShadowOpportunities(): void {
   shadowOpportunities.length = 0;
 }
 
+export function hydrateShadowOpportunities(items: ShadowOpportunity[]): void {
+  shadowOpportunities.length = 0;
+  for (const item of items) {
+    shadowOpportunities.push(item);
+  }
+}
+
+export function registerPendingAuditsFromPositions(
+  openPositions: Array<{ symbol: string; type: 'BUY' | 'SELL'; entryTime: number }>
+): void {
+  for (const pos of openPositions) {
+    if (!pendingAudits.has(pos.symbol)) {
+      pendingAudits.set(pos.symbol, {
+        auditResult: {
+          symbol: pos.symbol,
+          side: pos.type,
+          oldMode: 'EXECUTADO 🟢',
+          newMode: 'PERMITIDO 🟢',
+          reasons: ['Restaurado de reinicialização do servidor (Posição aberta ativa)'],
+          timestamp: new Date(pos.entryTime * 1000).toISOString()
+        },
+        entryTime: pos.entryTime * 1000
+      });
+    }
+  }
+}
+
 /**
  * Executa avaliação quantitativa em Shadow Mode (Modo Fantasma).
  * NÃO-BLOQUEANTE: Roda em segundo plano sem travar ou atrasar a execução principal.

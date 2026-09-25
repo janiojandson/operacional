@@ -21,7 +21,7 @@ import { ClientProtectionEngine } from './engine/clientProtectionEngine.js';
 import { FlowSignal, OrderBookData, CandleData } from '../../shared/types.js';
 import { ClientAccountConfig } from '../../shared/clientTypes.js';
 import { GoogleSheetsService } from './services/googleSheetsService.js';
-import { runShadowAudit, recordShadowOutcome, clearShadowAudits, getShadowOpportunities, recordShadowOpportunity } from './engine/shadowAuditor.js';
+import { runShadowAudit, recordShadowOutcome, clearShadowAudits, getShadowOpportunities, recordShadowOpportunity, hydrateShadowOpportunities, registerPendingAuditsFromPositions } from './engine/shadowAuditor.js';
 import { RISK_CONFIG } from './config/riskConfig.js';
 import { evaluateCryptoOpportunity } from './engine/cryptoStrategyDecision.js';
 import { calculateAdaptiveRisk } from './engine/adaptiveRisk.js';
@@ -1012,8 +1012,43 @@ initDatabase()
       history: mirrorAccount.history
     });
     console.log('[MirrorTrading] ✅ Conta espelho hidratada do PostgreSQL:', mirrorAccount.balance.toFixed(2));
+
+    // Hidratar histórico do Shadow Mode a partir do PostgreSQL e registrar pendências ativas
+    try {
+      const shadowRows = await query<{ id: string; symbol: string; side: 'BUY' | 'SELL'; mode: 'AUDIT' | 'FILTER'; approved: number; reasons: string[]; source: any; created_at: number }>(
+        'SELECT id, symbol, side, mode, approved, reasons, source, created_at FROM shadow_opportunities ORDER BY created_at DESC LIMIT 500'
+      );
+      if (shadowRows.length > 0) {
+        hydrateShadowOpportunities(shadowRows.map(r => ({
+          id: r.id,
+          symbol: r.symbol,
+          side: r.side,
+          mode: r.mode,
+          approved: Number(r.approved) === 1,
+          reasons: Array.isArray(r.reasons) ? r.reasons : (typeof r.reasons === 'string' ? JSON.parse(r.reasons) : []),
+          source: r.source,
+          timestamp: new Date(Number(r.created_at)).toISOString()
+        })));
+        console.log(`[ShadowAuditor] ✅ ${shadowRows.length} auditorias shadow hidratadas do PostgreSQL`);
+      }
+      registerPendingAuditsFromPositions(masterAccount.openPositions);
+    } catch (shadowHydrateErr: any) {
+      console.warn('[ShadowAuditor] Aviso ao hidratar shadow mode do PostgreSQL:', shadowHydrateErr.message);
+    }
     
     await marketManager.initialize();
+
+    // Sincronizar preços de mercado imediatamente para as posições abertas restauradas
+    for (const pos of masterAccount.openPositions) {
+      const liveState = marketManager.getSymbolState(pos.symbol);
+      const curPrice = liveState?.lastPrice || (liveState?.candles && liveState.candles.length > 0 ? liveState.candles[liveState.candles.length - 1].close : 0);
+      if (curPrice > 0) {
+        paperTrading.updatePrice(pos.symbol, curPrice);
+        mirrorTrading.updatePrice(pos.symbol, curPrice);
+      }
+    }
+    io.emit('paper_account_update', paperTrading.getAccountState());
+    io.emit('mirror_account_update', mirrorTrading.getAccountState());
     
     server.listen(Number(PORT), '0.0.0.0', () => {
       console.log(`🚀 MarketFlow Pro SaaS Backend running at http://0.0.0.0:${PORT}`);
