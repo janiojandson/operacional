@@ -97,7 +97,7 @@ adminRouter.post('/config/trailing-stop', async (req: Request, res: Response) =>
     return res.json({
       success: true,
       trailingStopEnabled: Boolean(enabled),
-      message: `Trailing Stop ${enabled ? 'ATIVADO (Gatilho 80% / Recuo 20%)' : 'DESATIVADO (Alvo Fixo 100%)'}`
+      message: `Trailing Stop ${enabled ? 'ATIVADO (Runner Mode 100% / Piso 2.3R)' : 'DESATIVADO (Alvo Fixo 100% / 2.5R)'}`
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });

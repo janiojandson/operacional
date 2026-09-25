@@ -49,11 +49,11 @@ assert.equal(open.rMultiple, 0, 'an open position preserves 0R rather than repla
 assert.equal(open.strategyVersion, 'flow-crypto-v1');
 assert.equal(open.closeReason, undefined);
 
-approvedEngine.updatePrice('BTC/USDT', 104_000);
-approvedEngine.updatePrice('BTC/USDT', 102_300);
+approvedEngine.updatePrice('BTC/USDT', 105_000);
+approvedEngine.updatePrice('BTC/USDT', 103_900);
 const trailingClosed = approvedEngine.getAccountState().history[0];
-assert.equal(trailingClosed.closeReason, 'TRAILING');
-assert.equal(trailingClosed.rMultiple, 1.15, 'trailing R must use the adaptive 2% stop, not the legacy 0.8% profile stop');
+assert.equal(trailingClosed.closeReason, 'RUNNER_TRAILING_EXIT');
+assert.ok(trailingClosed.rMultiple >= 1.9, 'runner trailing exit must lock at least high R above target entry');
 
 const rejectedRiskEngine = new PaperTradingEngine();
 rejectedRiskEngine.handleSignal(signal, 100_000, decision, {
@@ -82,5 +82,37 @@ belowLotEngine.handleSignal(signal, 100_000, decision, {
   netR: 2.31
 });
 assert.equal(belowLotEngine.getAccountState().openPositions.length, 0, 'paper master must not simulate a BTC order below the Bybit minimum lot');
+
+// Teste de Invalidação Ativa por Order Flow adverso
+const flowInvalidationEngine = new PaperTradingEngine();
+flowInvalidationEngine.handleSignal(signal, 100_000, decision, {
+  approved: true, reasons: [], stopLoss: 98_000, takeProfit: 105_000,
+  stopDistancePct: 0.02, notionalUsd: 1_000, riskUsd: 20, grossR: 2.5, netR: 2.31
+});
+assert.equal(flowInvalidationEngine.getAccountState().openPositions.length, 1);
+// Em leve prejuízo (-0.5R = 99_000) com book imbalance vendedor severo (< 0.35) e agressão de venda
+flowInvalidationEngine.updatePrice(
+  'BTC/USDT',
+  99_000,
+  { imbalanceRatio: 0.25, bidDepthTotal: 10, askDepthTotal: 40 },
+  { dominantSide: 'sell', whaleCount: 1 }
+);
+assert.equal(flowInvalidationEngine.getAccountState().openPositions.length, 0);
+const invalidatedTrade = flowInvalidationEngine.getAccountState().history[0];
+assert.equal(invalidatedTrade.closeReason, 'ACTIVE_FLOW_INVALIDATION');
+assert.ok(invalidatedTrade.rMultiple > -1.0, 'early flow invalidation must protect from full -1.0R loss');
+
+// Teste de Trailing Stop Desativado (Sai no TP Fixo 100%)
+const fixedTpEngine = new PaperTradingEngine();
+fixedTpEngine.setTrailingStopEnabled(false);
+fixedTpEngine.handleSignal(signal, 100_000, decision, {
+  approved: true, reasons: [], stopLoss: 98_000, takeProfit: 105_000,
+  stopDistancePct: 0.02, notionalUsd: 1_000, riskUsd: 20, grossR: 2.5, netR: 2.31
+});
+fixedTpEngine.updatePrice('BTC/USDT', 105_000);
+assert.equal(fixedTpEngine.getAccountState().openPositions.length, 0);
+const fixedClosed = fixedTpEngine.getAccountState().history[0];
+assert.equal(fixedClosed.closeReason, 'FIXED_TP');
+assert.equal(fixedClosed.rMultiple, 2.5);
 
 console.log('paperTradingEngine: PASS');

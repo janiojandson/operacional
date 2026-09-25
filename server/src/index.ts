@@ -205,22 +205,28 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
       let rMultiple = 0;
 
       if (tradeEvent.status === 'CLOSED_TP') {
-        const isTrailingExit = tradeEvent.closeReason === 'TRAILING';
-        statusStr = isTrailingExit ? 'MASTER_TRAILING' : 'MASTER_WIN (+2.5R)';
+        const isRunnerExit = tradeEvent.closeReason === 'RUNNER_TRAILING_EXIT';
+        const isTrailingExit = tradeEvent.closeReason === 'TRAILING' || isRunnerExit;
+        statusStr = isRunnerExit ? 'MASTER_RUNNER_TRAILING' : (isTrailingExit ? 'MASTER_TRAILING' : 'MASTER_WIN (+2.5R)');
         outcomeLabel = 'GREEN 🟢';
         pnlUsd = Number(tradeEvent.pnlUsd ?? 0);
         pnlPct = Number(tradeEvent.pnlPct ?? 0);
         rMultiple = Number(tradeEvent.rMultiple ?? 0);
-        details = isTrailingExit
-          ? `Trailing Stop executado. P&L: +$${pnlUsd.toFixed(2)} (+${pnlPct.toFixed(2)}%) | R realizado: ${rMultiple.toFixed(1)}R`
-          : `Take Profit fixo atingido. P&L: +$${pnlUsd.toFixed(2)} (+${pnlPct.toFixed(2)}%) | Retorno: +${rMultiple.toFixed(1)}R`;
+        details = isRunnerExit
+          ? `Runner Mode Trailing executado. P&L: +$${pnlUsd.toFixed(2)} (+${pnlPct.toFixed(2)}%) | R realizado: ${rMultiple.toFixed(1)}R (Alvo estendido)`
+          : (isTrailingExit
+            ? `Trailing Stop executado. P&L: +$${pnlUsd.toFixed(2)} (+${pnlPct.toFixed(2)}%) | R realizado: ${rMultiple.toFixed(1)}R`
+            : `Take Profit fixo atingido. P&L: +$${pnlUsd.toFixed(2)} (+${pnlPct.toFixed(2)}%) | Retorno: +${rMultiple.toFixed(1)}R`);
       } else if (tradeEvent.status === 'CLOSED_SL') {
-        statusStr = 'MASTER_LOSS (-1.0R)';
-        outcomeLabel = 'RED 🔴';
+        const isFlowInvalidation = tradeEvent.closeReason === 'ACTIVE_FLOW_INVALIDATION';
+        statusStr = isFlowInvalidation ? 'MASTER_FLOW_INVALIDATION' : 'MASTER_LOSS (-1.0R)';
+        outcomeLabel = isFlowInvalidation ? 'FLOW_EXIT 🟡' : 'RED 🔴';
         pnlUsd = Number(tradeEvent.pnlUsd ?? 0);
         pnlPct = Number(tradeEvent.pnlPct ?? 0);
         rMultiple = Number(tradeEvent.rMultiple ?? 0);
-        details = `Stop Loss institucional. P&L: -$${Math.abs(pnlUsd).toFixed(2)} (${pnlPct.toFixed(2)}%) | Retorno: ${rMultiple.toFixed(1)}R`;
+        details = isFlowInvalidation
+          ? `Invalidação ativa por Order Flow. P&L: -$${Math.abs(pnlUsd).toFixed(2)} (${pnlPct.toFixed(2)}%) | R protegido: ${rMultiple.toFixed(2)}R`
+          : `Stop Loss institucional. P&L: -$${Math.abs(pnlUsd).toFixed(2)} (${pnlPct.toFixed(2)}%) | Retorno: ${rMultiple.toFixed(1)}R`;
       }
 
       const qty = Number(tradeEvent.qty ?? 0);
@@ -479,7 +485,9 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
 const marketManager = new MarketDataManager(flowEngine, (event, data) => {
   broadcast(event, data);
   if (event === 'trade') {
-    paperTrading.updatePrice(data.symbol, data.price);
+    const symState = marketManager.getSymbolState(data.symbol);
+    const recentAggression = flowEngine.getRecentAggression(data.symbol);
+    paperTrading.updatePrice(data.symbol, data.price, symState?.book, recentAggression);
     mirrorTrading.updatePrice(data.symbol, data.price);
   }
 });

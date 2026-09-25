@@ -39,7 +39,7 @@ export interface SimulatedTrade {
   fee?: number;
   netPnl?: number;
   strategyVersion?: string;
-  closeReason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS';
+  closeReason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION';
   realizedR?: number;
   decisionFactors?: string[];
 }

@@ -96,13 +96,15 @@ export function calculateTrailingConfiguration(input: {
   entryPrice: number;
   takeProfit: number;
   side: 'BUY' | 'SELL';
+  stopLoss?: number;
 }): { activationPrice: number; callbackDistance: number } | null {
   const targetDistancePct = Math.abs(input.takeProfit - input.entryPrice) / input.entryPrice;
   if (!Number.isFinite(targetDistancePct) || targetDistancePct <= 0 || !Number.isFinite(input.entryPrice) || input.entryPrice <= 0) return null;
   const direction = input.side === 'BUY' ? 1 : -1;
+  const slDist = input.stopLoss ? Math.abs(input.entryPrice - input.stopLoss) : (input.entryPrice * targetDistancePct * 0.4);
   return {
-    activationPrice: Number((input.entryPrice * (1 + direction * targetDistancePct * 0.8)).toFixed(8)),
-    callbackDistance: Number((input.entryPrice * targetDistancePct * 0.2).toFixed(8))
+    activationPrice: Number((input.entryPrice * (1 + direction * targetDistancePct)).toFixed(8)),
+    callbackDistance: Number((slDist * 0.5).toFixed(8))
   };
 }
 
@@ -655,7 +657,8 @@ export class BybitExecutionEngine {
       const trailingConfiguration = calculateTrailingConfiguration({
         entryPrice: validEntryPrice,
         takeProfit: validTakeProfit,
-        side: payload.side
+        side: payload.side,
+        stopLoss: validStopLoss
       });
 
       // ─── BINGX NATIVE SL & TP (Formato dicionário exigido pela API BingX Swap) ───

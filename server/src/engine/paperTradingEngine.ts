@@ -6,11 +6,14 @@ import { validateOrderMarginAndLot, getMinLot } from '../database/paperStorage.j
 import { calculateMasterMirrorSize } from './masterMirrorSizing.js';
 import type { StrategyDecision } from './cryptoStrategyDecision.js';
 import type { AdaptiveRiskResult } from './adaptiveRisk.js';
+import { evaluateActivePositionRisk } from './flowEngine.js';
 
 export interface SimulatedTradeWithTrailing extends SimulatedTrade {
   trailingActive?: boolean;
   trailingTriggerPrice?: number;
   trailingStopPrice?: number;
+  isRunner?: boolean;
+  runnerFloorPrice?: number;
 }
 
 // ─── Validador de Margem e Lote Mínimo (Bybit USDT Perpétuos) ────────────────
@@ -130,11 +133,11 @@ export class PaperTradingEngine {
 
     if (!tradeType || decision.entrySide !== tradeType) return;
 
-    // 🛡️ Alvos e Stops Canônicos 2.5R Fixo por Ativo (Padrão Original do Deploy Funcional)
-    const stopLoss = decision.stopLoss ?? adaptiveRisk?.stopLoss;
-    const takeProfit = decision.takeProfit ?? adaptiveRisk?.takeProfit;
+    // 🛡️ Alvos e Stops: Adaptive Risk prevalece sobre o perfil estático
+    const stopLoss = adaptiveRisk?.stopLoss ?? decision.stopLoss;
+    const takeProfit = adaptiveRisk?.takeProfit ?? decision.takeProfit;
     const targetDistance = Math.abs((takeProfit || currentPrice) - currentPrice);
-    const trailingTriggerPrice = Number((currentPrice + (tradeType === 'BUY' ? 1 : -1) * targetDistance * 0.8).toFixed(8));
+    const trailingTriggerPrice = Number((currentPrice + (tradeType === 'BUY' ? 1 : -1) * targetDistance).toFixed(8));
 
     // Potência proporcional à banca (20% por trade padrão)
     const baseAllocation = Math.max(100, this.balance * 0.20);
@@ -200,8 +203,13 @@ export class PaperTradingEngine {
     this.broadcastUpdate(newTrade);
   }
 
-  // Atualiza preço a cada tick em tempo real e verifica Trailing Stop / TP / SL
-  public updatePrice(symbol: string, currentPrice: number) {
+  // Atualiza preço a cada tick em tempo real e verifica Trailing Stop (Runner Mode) / TP / SL / Invalidação Ativa
+  public updatePrice(
+    symbol: string,
+    currentPrice: number,
+    currentBook?: { imbalanceRatio: number; bidDepthTotal: number; askDepthTotal: number },
+    recentAggression?: { dominantSide: 'buy' | 'sell'; whaleCount: number }
+  ) {
     const trade = this.openPositions.get(symbol);
     if (!trade) return;
 
@@ -221,63 +229,75 @@ export class PaperTradingEngine {
     if (!Number.isFinite(tpDistancePct) || tpDistancePct <= 0 || !Number.isFinite(slDistancePct) || slDistancePct <= 0) return;
     const decimals = currentPrice < 5 ? 4 : (currentPrice < 100 ? 3 : 2);
 
-    // Progresso em relação ao objetivo (1.0 = 100% do alvo atingido)
+    const slDistance = Math.abs(trade.entryPrice - trade.stopLoss);
     const progressRatio = priceDeltaPct / tpDistancePct;
-    const trailingDistance = trade.entryPrice * (0.20 * tpDistancePct); // Distância móvel de 20% do alvo
 
-    let closed = false;
-
-    // ─── 1. VERIFICAÇÃO DO GATILHO E GESTÃO DO TRAILING STOP ─────────────────
-    // Só persegue o preço se o botão Trailing Stop estiver ATIVADO
-    if (this.trailingStopEnabled && (progressRatio >= 0.80 - 1e-9 || trade.trailingActive)) {
-      trade.trailingActive = true;
-
-      if (trade.type === 'BUY') {
-        const candidateStop = currentPrice - trailingDistance;
-        if (!trade.trailingStopPrice || candidateStop > trade.trailingStopPrice) {
-          trade.trailingStopPrice = Number(candidateStop.toFixed(decimals));
-        }
-
-        // Se o preço recuar e tocar no trailing stop: realiza lucro!
-        if (currentPrice <= trade.trailingStopPrice) {
-          trade.status = 'CLOSED_TP';
-          trade.rMultiple = Number((trade.pnlPct / (slDistancePct * 100)).toFixed(2));
-          trade.realizedR = trade.rMultiple;
-          trade.closeReason = 'TRAILING';
-          closed = true;
-        }
-      } else {
-        // Operação de VENDA (SHORT)
-        const candidateStop = currentPrice + trailingDistance;
-        if (!trade.trailingStopPrice || candidateStop < trade.trailingStopPrice) {
-          trade.trailingStopPrice = Number(candidateStop.toFixed(decimals));
-        }
-
-        // Se o preço subir e tocar no trailing stop: realiza lucro!
-        if (currentPrice >= trade.trailingStopPrice) {
-          trade.status = 'CLOSED_TP';
-          trade.rMultiple = Number((trade.pnlPct / (slDistancePct * 100)).toFixed(2));
-          trade.realizedR = trade.rMultiple;
-          trade.closeReason = 'TRAILING';
-          closed = true;
-        }
-      }
-    } else {
-      // Se estiver DESATIVADO (FIXO), respeita apenas o Stop Loss inicial
-      if (
-        (trade.type === 'BUY' && currentPrice <= trade.stopLoss) ||
-        (trade.type === 'SELL' && currentPrice >= trade.stopLoss)
-      ) {
-        trade.status = 'CLOSED_SL';
-        trade.rMultiple = -1.0;
-        trade.realizedR = trade.rMultiple;
-        trade.closeReason = 'STOP_LOSS';
-        closed = true;
+    // ─── 0. INVALIDAÇÃO ATIVA POR ORDER FLOW (Antes de testar Stop Loss passivo) ───
+    if (currentBook || recentAggression) {
+      const riskEval = evaluateActivePositionRisk(trade, currentPrice, currentBook, recentAggression);
+      if (riskEval.shouldClose) {
+        this.closePosition(trade.symbol, currentPrice, false, 'ACTIVE_FLOW_INVALIDATION');
+        return;
       }
     }
 
-    // ─── 3. TRAVA DE SEGUNDA CAMADA: CASO O PREÇO SALTE DIRETO NO TP 100% ────
-    if (!closed) {
+    let closed = false;
+
+    // ─── 1. GESTÃO DE TRAILING STOP / RUNNER MODE ────────────────────────────
+    if (this.trailingStopEnabled) {
+      // Ativa Runner Mode quando atingir 100% do TP original (progressRatio >= 1.0)
+      if (progressRatio >= 1.0 - 1e-9 || trade.isRunner || trade.trailingActive) {
+        trade.isRunner = true;
+        trade.trailingActive = true;
+
+        if (trade.type === 'BUY') {
+          // Piso garantido de 2.3R
+          const floorStop = Number((trade.entryPrice + slDistance * 2.3).toFixed(decimals));
+          if (!trade.runnerFloorPrice || floorStop > trade.runnerFloorPrice) {
+            trade.runnerFloorPrice = floorStop;
+          }
+
+          // Trailing de extensão: stop segue a 0.5 * slDistance do topo atual
+          const extensionTrailing = currentPrice - (slDistance * 0.5);
+          const candidateStop = Math.max(trade.runnerFloorPrice, extensionTrailing);
+
+          if (!trade.trailingStopPrice || candidateStop > trade.trailingStopPrice) {
+            trade.trailingStopPrice = Number(candidateStop.toFixed(decimals));
+          }
+
+          // Se o preço recuar e violar o trailing stop móvel: realiza lucro estendido
+          if (currentPrice <= trade.trailingStopPrice) {
+            trade.status = 'CLOSED_TP';
+            trade.rMultiple = Number((trade.pnlPct / (slDistancePct * 100)).toFixed(2));
+            trade.realizedR = trade.rMultiple;
+            trade.closeReason = 'RUNNER_TRAILING_EXIT';
+            closed = true;
+          }
+        } else {
+          // SHORT
+          const floorStop = Number((trade.entryPrice - slDistance * 2.3).toFixed(decimals));
+          if (!trade.runnerFloorPrice || floorStop < trade.runnerFloorPrice) {
+            trade.runnerFloorPrice = floorStop;
+          }
+
+          const extensionTrailing = currentPrice + (slDistance * 0.5);
+          const candidateStop = Math.min(trade.runnerFloorPrice, extensionTrailing);
+
+          if (!trade.trailingStopPrice || candidateStop < trade.trailingStopPrice) {
+            trade.trailingStopPrice = Number(candidateStop.toFixed(decimals));
+          }
+
+          if (currentPrice >= trade.trailingStopPrice) {
+            trade.status = 'CLOSED_TP';
+            trade.rMultiple = Number((trade.pnlPct / (slDistancePct * 100)).toFixed(2));
+            trade.realizedR = trade.rMultiple;
+            trade.closeReason = 'RUNNER_TRAILING_EXIT';
+            closed = true;
+          }
+        }
+      }
+    } else {
+      // ─── TRAILING DESABILITADO: Sai rigorosamente no Take Profit original fixo ───
       if (
         (trade.type === 'BUY' && currentPrice >= trade.takeProfit) ||
         (trade.type === 'SELL' && currentPrice <= trade.takeProfit)
@@ -286,6 +306,20 @@ export class PaperTradingEngine {
         trade.rMultiple = 2.5;
         trade.realizedR = trade.rMultiple;
         trade.closeReason = 'FIXED_TP';
+        closed = true;
+      }
+    }
+
+    // ─── 2. STOP LOSS PASSIVO (Caso não haja invalidação e nem runner ativo) ────
+    if (!closed && !trade.isRunner) {
+      if (
+        (trade.type === 'BUY' && currentPrice <= trade.stopLoss) ||
+        (trade.type === 'SELL' && currentPrice >= trade.stopLoss)
+      ) {
+        trade.status = 'CLOSED_SL';
+        trade.rMultiple = -1.0;
+        trade.realizedR = trade.rMultiple;
+        trade.closeReason = 'STOP_LOSS';
         closed = true;
       }
     }
@@ -329,6 +363,49 @@ export class PaperTradingEngine {
       openPositions: openTrades,
       history: this.history
     };
+  }
+
+  public closePosition(
+    symbol: string,
+    closePrice: number,
+    isMaker = false,
+    reason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION'
+  ): { success: boolean; pnl?: number } {
+    const trade = this.openPositions.get(symbol);
+    if (!trade) return { success: false };
+
+    const notional = trade.notionalUsd ?? (Math.max(100, this.balance * 0.20) * (trade.powerMultiplier / 1.5));
+    const openFee = trade.fee ?? 0;
+    const closeFee = Number((notional * (isMaker ? 0.0002 : 0.00055)).toFixed(4));
+    const grossPnl = trade.type === 'BUY'
+      ? (closePrice - trade.entryPrice) / trade.entryPrice * notional
+      : (trade.entryPrice - closePrice) / trade.entryPrice * notional;
+    const netPnl = Number((grossPnl - openFee - closeFee).toFixed(4));
+
+    trade.currentPrice = closePrice;
+    trade.pnlUsd = Number(netPnl.toFixed(2));
+    trade.netPnl = netPnl;
+    trade.status = netPnl >= 0 ? 'CLOSED_TP' : 'CLOSED_SL';
+    if (reason) trade.closeReason = reason;
+
+    const slDistance = Math.abs(trade.entryPrice - trade.stopLoss);
+    if (slDistance > 0) {
+      const priceDiff = trade.type === 'BUY' ? (closePrice - trade.entryPrice) : (trade.entryPrice - closePrice);
+      trade.rMultiple = Number((priceDiff / slDistance).toFixed(2));
+      trade.realizedR = trade.rMultiple;
+    }
+
+    trade.closeTime = Math.floor(Date.now() / 1000);
+    trade.fee = Number((openFee + closeFee).toFixed(4));
+
+    this.realizedPnl += netPnl;
+    this.balance += netPnl;
+    this.history.unshift(trade);
+    if (this.history.length > 100) this.history.pop();
+    this.openPositions.delete(symbol);
+    this.broadcastUpdate(trade);
+
+    return { success: true, pnl: netPnl };
   }
 
   private broadcastUpdate(eventTrade?: SimulatedTrade) {
@@ -585,7 +662,12 @@ export class MirrorTradingEngine {
   }
 
   // Fecha posição do espelho quando master fecha
-  public closePosition(symbol: string, closePrice: number, isMaker = false): { success: boolean; pnl?: number } {
+  public closePosition(
+    symbol: string,
+    closePrice: number,
+    isMaker = false,
+    reason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION'
+  ): { success: boolean; pnl?: number } {
     const trade = this.openPositions.get(symbol);
     if (!trade) return { success: false };
 
@@ -602,6 +684,15 @@ export class MirrorTradingEngine {
     trade.pnlUsd = Number(netPnl.toFixed(2));
     trade.netPnl = netPnl;
     trade.status = netPnl >= 0 ? 'CLOSED_TP' : 'CLOSED_SL';
+    if (reason) trade.closeReason = reason;
+
+    const slDistance = Math.abs(trade.entryPrice - trade.stopLoss);
+    if (slDistance > 0) {
+      const priceDiff = trade.type === 'BUY' ? (closePrice - trade.entryPrice) : (trade.entryPrice - closePrice);
+      trade.rMultiple = Number((priceDiff / slDistance).toFixed(2));
+      trade.realizedR = trade.rMultiple;
+    }
+
     trade.closeTime = Math.floor(Date.now() / 1000);
     
     this.realizedPnl += netPnl;

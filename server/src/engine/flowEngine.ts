@@ -146,4 +146,78 @@ export class FlowEngine {
   public getRecentSignals(): FlowSignal[] {
     return this.lastSignals;
   }
+
+  public getRecentAggression(symbol: string): { dominantSide: 'buy' | 'sell'; whaleCount: number } {
+    const trades = this.recentTrades.get(symbol) || [];
+    const buyVol = trades.filter(t => t.side === 'buy').reduce((acc, t) => acc + t.amount, 0);
+    const sellVol = trades.filter(t => t.side === 'sell').reduce((acc, t) => acc + t.amount, 0);
+    const whaleCount = trades.filter(t => t.isWhale).length;
+    return {
+      dominantSide: buyVol >= sellVol ? 'buy' : 'sell',
+      whaleCount
+    };
+  }
+}
+
+export interface ActivePositionRiskEvaluation {
+  shouldClose: boolean;
+  reason?: 'ACTIVE_FLOW_INVALIDATION_BEARISH_PRESSURE' | 'ACTIVE_FLOW_INVALIDATION_BULLISH_PRESSURE' | 'ABSORPTION_EXHAUSTION';
+}
+
+export function evaluateActivePositionRisk(
+  trade: any,
+  currentPrice: number,
+  orderBookData?: { imbalanceRatio: number; bidDepthTotal: number; askDepthTotal: number },
+  recentAggression?: { dominantSide: 'buy' | 'sell'; whaleCount: number }
+): ActivePositionRiskEvaluation {
+  if (!trade || !trade.entryPrice || !trade.stopLoss || !Number.isFinite(currentPrice) || currentPrice <= 0) {
+    return { shouldClose: false };
+  }
+
+  const slDistance = Math.abs(trade.entryPrice - trade.stopLoss);
+  if (slDistance <= 0) return { shouldClose: false };
+
+  const isBuy = trade.type === 'BUY';
+  const priceDiff = isBuy ? (currentPrice - trade.entryPrice) : (trade.entryPrice - currentPrice);
+  const currentR = priceDiff / slDistance;
+
+  const imbalance = orderBookData?.imbalanceRatio ?? 1.0;
+  const dominantSide = recentAggression?.dominantSide;
+  const whaleCount = recentAggression?.whaleCount ?? 0;
+
+  // 1. REGRAS PARA POSIÇÃO LONG (COMPRA)
+  if (isBuy) {
+    // Se o trade estiver em leve prejuízo (-0.8R a -0.05R) e houver BOOK_IMBALANCE severo de venda com agressão de venda
+    if (currentR < -0.05 && currentR > -0.95) {
+      if (imbalance < 0.35 && (dominantSide === 'sell' || whaleCount > 0)) {
+        return { shouldClose: true, reason: 'ACTIVE_FLOW_INVALIDATION_BEARISH_PRESSURE' };
+      }
+    }
+
+    // Se estiver em lucro acima de 1.0R e houver forte absorção passiva no topo com agressão vendedora
+    if (currentR >= 1.0) {
+      if (imbalance < 0.30 && dominantSide === 'sell') {
+        return { shouldClose: true, reason: 'ABSORPTION_EXHAUSTION' };
+      }
+    }
+  }
+
+  // 2. REGRAS PARA POSIÇÃO SHORT (VENDA)
+  if (!isBuy) {
+    // Se o trade estiver em leve prejuízo (-0.8R a -0.05R) e houver BOOK_IMBALANCE severo de compra com agressão de compra
+    if (currentR < -0.05 && currentR > -0.95) {
+      if (imbalance > 2.8 && (dominantSide === 'buy' || whaleCount > 0)) {
+        return { shouldClose: true, reason: 'ACTIVE_FLOW_INVALIDATION_BULLISH_PRESSURE' };
+      }
+    }
+
+    // Se estiver em lucro acima de 1.0R e houver absorção no fundo com pressão compradora
+    if (currentR >= 1.0) {
+      if (imbalance > 3.0 && dominantSide === 'buy') {
+        return { shouldClose: true, reason: 'ABSORPTION_EXHAUSTION' };
+      }
+    }
+  }
+
+  return { shouldClose: false };
 }
