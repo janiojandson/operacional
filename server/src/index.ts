@@ -406,9 +406,8 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
     GoogleSheetsService.logShadowOpportunity(shadowOpportunity);
     io.emit('shadow_opportunity', shadowOpportunity);
     io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
-    };
     if (!decision.approved) {
-      publishOpportunity();
+      io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
       return;
     }
 
@@ -441,23 +440,29 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
     if (!adaptiveRisk.approved) {
       decision.approved = false;
       decision.reasons.push(...adaptiveRisk.reasons);
-      publishOpportunity();
+      io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
       return;
     }
     if ((adaptiveRisk.notionalUsd || 0) / asset.lastPrice < getMinLot(signal.symbol)) {
       decision.approved = false;
       decision.reasons.push('LOTE_MINIMO_EXCEDE_RISCO');
-      publishOpportunity();
+      io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
       return;
     }
 
-    publishOpportunity();
-
     if (masterShadowFilterActive) {
       const audit = await runShadowAudit(null, signal.symbol, side, 1.0, paperTrading.getAccountState().openPositions, asset.book);
-      const decision = String(audit?.newMode || '').toUpperCase();
-      if (decision.indexOf('BLOQUEADO') !== -1) return;
+      const auditDecision = String(audit?.newMode || '').toUpperCase();
+      if (auditDecision.indexOf('BLOQUEADO') !== -1) {
+        decision.approved = false;
+        decision.reasons.push('BLOQUEADO_SHADOW_FILTER');
+        publishOpportunity();
+        return;
+      }
     }
+
+    // Registra auditoria apenas na entrada confirmada do Master
+    publishOpportunity();
     paperTrading.handleSignal(signal, asset.lastPrice, decision, adaptiveRisk);
   })();
 });
