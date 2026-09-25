@@ -809,8 +809,14 @@ export default function ClientDashboard() {
                   <span className="text-xs text-slate-400 font-mono uppercase">Sincronização Copy</span>
                   <Zap className="w-4 h-4 text-accent" />
                 </div>
-                <div className={`text-xl font-black ${account?.syncEnabled ? 'text-emerald-400' : 'text-slate-400'}`}>
-                  {account?.syncEnabled ? 'SINCRONIZADO' : 'DESLIGADO'}
+                <div className={`text-lg font-black ${account?.syncEnabled || account?.testSyncEnabled ? 'text-emerald-400' : 'text-slate-400'}`}>
+                  {account?.syncEnabled && account?.testSyncEnabled
+                    ? 'REAL + DEMO'
+                    : account?.syncEnabled
+                    ? 'CONTA REAL'
+                    : account?.testSyncEnabled
+                    ? 'DEMO (VST)'
+                    : 'DESLIGADO'}
                 </div>
                 <div className="text-xs text-slate-500 mt-1">{account?.riskPct ?? '1.0'}% / {account?.leverage ?? '10'}x Isolada</div>
               </div>
@@ -844,8 +850,14 @@ export default function ClientDashboard() {
                   </div>
                   <div className="flex justify-between items-center py-2">
                     <span className="text-slate-400">Status da Sincronização BingX</span>
-                    <span className={`font-bold ${account?.syncEnabled ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {account?.syncEnabled ? '● LIGADA & SINCRONIZADA' : '⛔ DESLIGADA'}
+                    <span className={`font-bold ${account?.syncEnabled || account?.testSyncEnabled ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {account?.syncEnabled && account?.testSyncEnabled
+                        ? '● LIGADA (REAL + DEMO)'
+                        : account?.syncEnabled
+                        ? '● LIGADA (CONTA REAL)'
+                        : account?.testSyncEnabled
+                        ? '● LIGADA (DEMO VST)'
+                        : '⛔ DESLIGADA'}
                     </span>
                   </div>
                 </div>
@@ -907,12 +919,18 @@ export default function ClientDashboard() {
                   <div className="flex flex-col items-end">
                     <span className="text-[11px] font-mono text-slate-400">Sincronização da Sua Conta:</span>
                     <span className={`px-3 py-1 rounded-lg font-mono text-xs font-bold border flex items-center gap-1.5 ${
-                      account?.syncEnabled 
+                      account?.syncEnabled || account?.testSyncEnabled
                         ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 shadow-sm shadow-emerald-500/10' 
                         : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
                     }`}>
-                      <span className={`w-2 h-2 rounded-full ${account?.syncEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`}></span>
-                      {account?.syncEnabled ? 'LIGADA & SINCRONIZADA' : 'SINCRONIZAÇÃO PAUSADA'}
+                      <span className={`w-2 h-2 rounded-full ${account?.syncEnabled || account?.testSyncEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`}></span>
+                      {account?.syncEnabled && account?.testSyncEnabled
+                        ? 'LIGADA (REAL + DEMO)'
+                        : account?.syncEnabled
+                        ? 'LIGADA (CONTA REAL)'
+                        : account?.testSyncEnabled
+                        ? 'LIGADA (DEMO VST)'
+                        : 'SINCRONIZAÇÃO PAUSADA'}
                     </span>
                   </div>
                 </div>

@@ -638,7 +638,9 @@ export class BybitExecutionEngine {
       const orderPrice = isMaker ? Number(exchange.priceToPrecision(ccxtSymbol, validEntryPrice)) : undefined;
 
       const side = payload.side === 'BUY' ? 'buy' : 'sell';
-      const orderParams: any = {};
+      const orderParams: any = {
+        positionSide: payload.side === 'BUY' ? 'LONG' : 'SHORT'
+      };
 
       if (isMaker) {
         orderParams['timeInForce'] = 'PostOnly';
@@ -850,9 +852,11 @@ export class BybitExecutionEngine {
           const contracts = Number(pos.contracts || pos.info?.size || 0);
           if (contracts > 0) {
             const side = pos.side?.toLowerCase() === 'long' || pos.info?.side?.toLowerCase() === 'buy' ? 'sell' : 'buy';
+            const posSide = pos.side?.toLowerCase() === 'long' || pos.info?.side?.toLowerCase() === 'buy' ? 'LONG' : 'SHORT';
             try {
               await exchange.createOrder(pos.symbol, 'market', side, contracts, undefined, {
-                reduceOnly: true
+                reduceOnly: true,
+                positionSide: posSide
               });
               closedCount++;
             } catch (err: any) {
