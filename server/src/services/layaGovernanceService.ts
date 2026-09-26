@@ -209,7 +209,7 @@ export class LayaGovernanceService {
         throw new Error(`HTTP_${response.status}`);
       }
 
-      const layaRaw = await response.json();
+      const layaRaw = (await response.json()) as any;
       const choice = layaRaw?.answers?.action?.choice || 'NO_ACTION';
       const now = Date.now();
 
