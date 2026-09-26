@@ -44,24 +44,24 @@ export async function initEventStoreTables(): Promise<void> {
   await query(`
     CREATE TABLE IF NOT EXISTS decision_events (
       decision_id TEXT PRIMARY KEY,
-      decision_type VARCHAR(30) NOT NULL,
+      decision_type VARCHAR(50) NOT NULL,
       symbol VARCHAR(20) NOT NULL,
       direction VARCHAR(5),
       issued_at TIMESTAMPTZ NOT NULL,
       expires_at TIMESTAMPTZ NOT NULL,
       latency_ms NUMERIC(8,2) NOT NULL,
-      action VARCHAR(30) NOT NULL,
+      action VARCHAR(50) NOT NULL,
       executed BOOLEAN NOT NULL DEFAULT FALSE,
       constitution_rejected BOOLEAN NOT NULL DEFAULT FALSE,
-      rejection_reason VARCHAR(50),
+      rejection_reason TEXT,
       power_multiplier NUMERIC(4,2),
       risk_pct NUMERIC(6,4),
       stop_loss_pct NUMERIC(6,4),
-      stop_direction VARCHAR(15),
+      stop_direction VARCHAR(30),
       cooldown_override BOOLEAN DEFAULT FALSE,
       runner_allowed BOOLEAN DEFAULT FALSE,
       scale_in_allowed BOOLEAN DEFAULT FALSE,
-      rationale_code VARCHAR(50) NOT NULL,
+      rationale_code VARCHAR(100) NOT NULL,
       confidence_score NUMERIC(5,2),
       l2_depth_top20 NUMERIC(16,2),
       imbalance_ratio NUMERIC(8,4),
@@ -74,6 +74,14 @@ export async function initEventStoreTables(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+
+  // Migrações seguras de expansão de tipos para evitar 'value too long'
+  await query(`ALTER TABLE decision_events ALTER COLUMN rejection_reason TYPE TEXT`).catch(() => {});
+  await query(`ALTER TABLE decision_events ALTER COLUMN rationale_code TYPE VARCHAR(100)`).catch(() => {});
+  await query(`ALTER TABLE decision_events ALTER COLUMN action TYPE VARCHAR(50)`).catch(() => {});
+  await query(`ALTER TABLE decision_events ALTER COLUMN decision_type TYPE VARCHAR(50)`).catch(() => {});
+  await query(`ALTER TABLE decision_events ALTER COLUMN stop_direction TYPE VARCHAR(30)`).catch(() => {});
+
 
   // Trigger de Imutabilidade para decision_events
   await query(`
