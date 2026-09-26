@@ -533,44 +533,36 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       }
     }
 
-    // 🔍 Pré-qualificação: só consulta Laya em setups com microestrutura favorável
+    // 🧠 Governança Laya Sistema 1: Supervisão Contextual e Micro-Stop Universal
     const _imbalance = book?.imbalanceRatio || 1.0;
     const _whaleActivity = flowEngine.getRecentAggression(signal.symbol)?.whaleCount || 0;
-    const LAYA_MIN_IMBALANCE = Number(process.env.LAYA_MIN_IMBALANCE) || 1.25;
 
-    const setupPreQualified = _imbalance >= LAYA_MIN_IMBALANCE || _whaleActivity >= 1;
     let layaDecision: any = undefined;
+    const layaResult = await layaGovernanceService.requestGovernance({
+      stateVersion: 1,
+      symbol: signal.symbol,
+      side,
+      currentPrice: asset.lastPrice,
+      requestedAction: 'AUTHORIZE',
+      regime: pairConfig?.regime ?? 'TREND',
+      trace: {
+        l2DepthTop20: book?.bids?.reduce((s, b) => s + b.amount, 0) || 0,
+        imbalanceRatio: _imbalance,
+        cvdDelta60s: _whaleActivity,
+        spoofScore: 0.0,
+        betaDivergence: false
+      }
+    });
 
-    if (!setupPreQualified) {
-      console.log(`[LAYA SKIP] Setup em ${signal.symbol} segue via Motor Mecânico | Imbalance: ${_imbalance.toFixed(2)} | Whales: ${_whaleActivity}`);
-    } else {
-      // 🧠 Governança Laya Sistema 1: Gatekeeper & Micro-Stop
-      const layaResult = await layaGovernanceService.requestGovernance({
-        stateVersion: 1,
-        symbol: signal.symbol,
-        side,
-        currentPrice: asset.lastPrice,
-        requestedAction: 'AUTHORIZE',
-        regime: pairConfig?.regime ?? 'TREND',
-        trace: {
-          l2DepthTop20: book?.bids?.reduce((s, b) => s + b.amount, 0) || 0,
-          imbalanceRatio: _imbalance,
-          cvdDelta60s: _whaleActivity,
-          spoofScore: 0.0,
-          betaDivergence: false
-        }
-      });
+    layaDecision = layaResult.decision;
 
-      layaDecision = layaResult.decision;
-
-      if (layaResult.decision.action === 'VETO') {
-        console.log(`[LAYA VETO] Entrada vetada em ${signal.symbol} | Razão: ${layaResult.decision.rationaleCode}`);
-        if (layaGovernanceService.getMode() === 'ACTIVE') {
-          decision.approved = false;
-          decision.reasons.push(`LAYA_VETO: ${layaResult.decision.rationaleCode}`);
-          publishOpportunity();
-          return;
-        }
+    if (layaResult.decision.action === 'VETO') {
+      console.log(`[LAYA VETO] Entrada vetada em ${signal.symbol} | Razão: ${layaResult.decision.rationaleCode}`);
+      if (layaGovernanceService.getMode() === 'ACTIVE') {
+        decision.approved = false;
+        decision.reasons.push(`LAYA_VETO: ${layaResult.decision.rationaleCode}`);
+        publishOpportunity();
+        return;
       }
     }
 
@@ -580,6 +572,8 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
   })();
 });
 
+const activePositionCheckMap = new Map<string, number>();
+
 const marketManager = new MarketDataManager(flowEngine, (event, data) => {
   broadcast(event, data);
   if (event === 'trade') {
@@ -587,6 +581,52 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
     const recentAggression = flowEngine.getRecentAggression(data.symbol);
     paperTrading.updatePrice(data.symbol, data.price, symState?.book, recentAggression);
     mirrorTrading.updatePrice(data.symbol, data.price);
+
+    // 🧠 Modificação 2 & 3 (Safe-Dev): Governança de Ciclo de Vida da Posição Aberta pela Laya
+    const openTrades = paperTrading.getAccountState().openPositions;
+    const currentPosition = openTrades.find(p => p.symbol === data.symbol);
+    if (currentPosition && layaGovernanceService.getMode() === 'ACTIVE') {
+      const now = Date.now();
+      const lastCheck = activePositionCheckMap.get(data.symbol) || 0;
+      // Throttle de 6 segundos entre avaliações de permanência por símbolo
+      if (now - lastCheck > 6000) {
+        activePositionCheckMap.set(data.symbol, now);
+        void (async () => {
+          const isContrarianWhale = recentAggression && recentAggression.whaleCount > 0 &&
+            ((currentPosition.type === 'BUY' && recentAggression.dominantSide === 'sell') ||
+             (currentPosition.type === 'SELL' && recentAggression.dominantSide === 'buy'));
+
+          const currentR = currentPosition.rMultiple ?? (currentPosition.pnlPct / 1.0);
+          const isRunnerTarget = currentR >= 1.2;
+
+          // Só aciona governança ativa se houver evento contextual crítico
+          if (isContrarianWhale || isRunnerTarget) {
+            const requestedAction = isContrarianWhale ? 'CLOSE_NOW' : 'EARLY_HARVEST_CLOSE';
+            const gov = await layaGovernanceService.requestGovernance({
+              stateVersion: 1,
+              symbol: data.symbol,
+              side: currentPosition.type,
+              currentPrice: data.price,
+              requestedAction,
+              trace: {
+                l2DepthTop20: symState?.book?.bids?.reduce((s, b) => s + b.amount, 0) || 0,
+                imbalanceRatio: symState?.book?.imbalanceRatio || 1.0,
+                cvdDelta60s: recentAggression?.whaleCount || 0,
+                spoofScore: 0.0,
+                betaDivergence: isContrarianWhale
+              }
+            }, { currentR });
+
+            if (gov.executed && (gov.decision.action === 'CLOSE_NOW' || gov.decision.action === 'EARLY_HARVEST_CLOSE')) {
+              const closeReason = gov.decision.action === 'CLOSE_NOW' ? 'LAYA_CLOSE_NOW' : 'LAYA_EARLY_HARVEST';
+              console.log(`[LAYA GOVERNANCE] Posição em ${data.symbol} encerrada antecipadamente pela Laya. Motivo: ${closeReason}`);
+              paperTrading.closePosition(data.symbol, data.price, false, closeReason);
+              mirrorTrading.closePosition(data.symbol, data.price, false, closeReason);
+            }
+          }
+        })();
+      }
+    }
   }
 });
 marketManager.startStreaming();

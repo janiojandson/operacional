@@ -397,7 +397,7 @@ export class PaperTradingEngine {
     symbol: string,
     closePrice: number,
     isMaker = false,
-    reason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION'
+    reason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST'
   ): { success: boolean; pnl?: number } {
     const trade = this.openPositions.get(symbol);
     if (!trade) return { success: false };
@@ -695,7 +695,7 @@ export class MirrorTradingEngine {
     symbol: string,
     closePrice: number,
     isMaker = false,
-    reason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION'
+    reason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST'
   ): { success: boolean; pnl?: number } {
     const trade = this.openPositions.get(symbol);
     if (!trade) return { success: false };
