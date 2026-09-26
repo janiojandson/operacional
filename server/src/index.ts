@@ -539,43 +539,44 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
     const LAYA_MIN_IMBALANCE = Number(process.env.LAYA_MIN_IMBALANCE) || 1.25;
 
     const setupPreQualified = _imbalance >= LAYA_MIN_IMBALANCE || _whaleActivity >= 1;
+    let layaDecision: any = undefined;
+
     if (!setupPreQualified) {
-      console.log(`[LAYA SKIP] Setup não pré-qualificado em ${signal.symbol} | Imbalance: ${_imbalance.toFixed(2)} | Whales: ${_whaleActivity}`);
-      publishOpportunity();
-      return;
+      console.log(`[LAYA SKIP] Setup em ${signal.symbol} segue via Motor Mecânico | Imbalance: ${_imbalance.toFixed(2)} | Whales: ${_whaleActivity}`);
+    } else {
+      // 🧠 Governança Laya Sistema 1: Gatekeeper & Micro-Stop
+      const layaResult = await layaGovernanceService.requestGovernance({
+        stateVersion: 1,
+        symbol: signal.symbol,
+        side,
+        currentPrice: asset.lastPrice,
+        requestedAction: 'AUTHORIZE',
+        regime: pairConfig?.regime ?? 'TREND',
+        trace: {
+          l2DepthTop20: book?.bids?.reduce((s, b) => s + b.amount, 0) || 0,
+          imbalanceRatio: _imbalance,
+          cvdDelta60s: _whaleActivity,
+          spoofScore: 0.0,
+          betaDivergence: false
+        }
+      });
+
+      layaDecision = layaResult.decision;
+
+      if (layaResult.decision.action === 'VETO') {
+        console.log(`[LAYA VETO] Entrada vetada em ${signal.symbol} | Razão: ${layaResult.decision.rationaleCode}`);
+        if (layaGovernanceService.getMode() === 'ACTIVE') {
+          decision.approved = false;
+          decision.reasons.push(`LAYA_VETO: ${layaResult.decision.rationaleCode}`);
+          publishOpportunity();
+          return;
+        }
+      }
     }
 
-    // 🧠 Governança Laya Sistema 1: Gatekeeper & Micro-Stop
-    const layaResult = await layaGovernanceService.requestGovernance({
-      stateVersion: 1,
-      symbol: signal.symbol,
-      side,
-      currentPrice: asset.lastPrice,
-      requestedAction: 'AUTHORIZE',
-      regime: pairConfig?.regime ?? 'TREND',
-      trace: {
-        l2DepthTop20: book?.bids?.reduce((s, b) => s + b.amount, 0) || 0,
-        imbalanceRatio: _imbalance,
-        cvdDelta60s: _whaleActivity,
-        spoofScore: 0.0,
-        betaDivergence: false
-      }
-    });
-
-
-    if (layaResult.decision.action === 'VETO') {
-      console.log(`[LAYA VETO] Entrada vetada em ${signal.symbol} | Razão: ${layaResult.decision.rationaleCode}`);
-      if (layaGovernanceService.getMode() === 'ACTIVE') {
-        decision.approved = false;
-        decision.reasons.push(`LAYA_VETO: ${layaResult.decision.rationaleCode}`);
-        publishOpportunity();
-        return;
-      }
-    }
-
-    // Registra auditoria apenas na entrada confirmada do Master
+    // Registra oportunidade e executa com os parâmetros (mecânicos ou modulados pela Laya)
     publishOpportunity();
-    paperTrading.handleSignal(signal, asset.lastPrice, decision, adaptiveRisk, layaResult.decision);
+    paperTrading.handleSignal(signal, asset.lastPrice, decision, adaptiveRisk, layaDecision);
   })();
 });
 

@@ -210,6 +210,11 @@ export class LayaGovernanceService {
       }, this.timeoutMs);
     });
 
+    let finalServiceUrl = this.serviceUrl;
+    const publicUrl = process.env.RAILWAY_SERVICE_NEXUS_DECISOR_LAYA_URL
+      ? `https://${process.env.RAILWAY_SERVICE_NEXUS_DECISOR_LAYA_URL}`
+      : 'https://nexus-decisor-laya-production.up.railway.app';
+
     try {
       // Mapeamento para o contrato oficial do Laya System 1 (POST /v1/systemone)
       const systemOnePayload = {
@@ -230,18 +235,34 @@ export class LayaGovernanceService {
         }
       };
 
-      const fetchPromise = this.fetchFn(`${this.serviceUrl}/v1/systemone`, {
+      const doFetch = (url: string) => this.fetchFn(`${url}/v1/systemone`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(systemOnePayload),
         signal: controller.signal
       });
 
-      const response = await Promise.race([fetchPromise, timeoutPromise]);
+      let response: Response;
+      try {
+        const fetchPromise = doFetch(finalServiceUrl);
+        response = await Promise.race([fetchPromise, timeoutPromise]);
+      } catch (firstErr: any) {
+        // Se a rota interna falhar por DNS/conexão imediata e não for timeout, tenta a URL pública
+        if (firstErr?.message?.includes('TIMEOUT') || controller.signal.aborted) {
+          throw firstErr;
+        }
+        console.warn(`[LayaGovernance] Rota interna ${finalServiceUrl} falhou (${firstErr.message}). Tentando fallback: ${publicUrl}`);
+        finalServiceUrl = publicUrl;
+        const fallbackPromise = doFetch(finalServiceUrl);
+        response = await Promise.race([fallbackPromise, timeoutPromise]);
+      }
+
       const latencyMs = performance.now() - startTime;
       this.recordLatency(latencyMs);
 
       if (!response.ok) {
+        const statusText = await response.text().catch(() => '');
+        console.error(`[LayaGovernance] Erro HTTP ${response.status} da Laya em ${finalServiceUrl}:`, statusText.slice(0, 200));
         throw new Error(`HTTP_${response.status}`);
       }
 
@@ -302,6 +323,11 @@ export class LayaGovernanceService {
       const latencyMs = performance.now() - startTime;
       this.recordLatency(latencyMs);
 
+      // Identifica o erro exato
+      const isTimeout = err?.message?.includes('TIMEOUT') || controller.signal.aborted;
+      const errorLabel = isTimeout ? `TIMEOUT_${this.timeoutMs}MS` : (err?.message || 'NETWORK_ERROR');
+      console.warn(`[LayaGovernance] Falha na governança Laya (${errorLabel}) após ${latencyMs.toFixed(1)}ms`);
+
       // Semântica de Falha Dupla
       if (isProtection) {
         // Fail-Open para proteção: nunca impede o corte
@@ -311,18 +337,18 @@ export class LayaGovernanceService {
           executed: true,
           decision: fallbackDecision,
           fallbackLocal: true,
-          error: 'TIMEOUT_FAIL_OPEN',
+          error: errorLabel,
           latencyMs
         };
       }
 
       // Fail-Closed para novo risco (entrada, scale-in, potência): sem resposta = recusa
       const noActionDecision = this.createDefaultFallbackResponse(payload, 'NO_ACTION');
-      this.logDecision(noActionDecision, false, 'TIMEOUT_FAIL_CLOSED');
+      this.logDecision(noActionDecision, false, errorLabel);
       return {
         executed: false,
         decision: noActionDecision,
-        error: 'TIMEOUT_FAIL_CLOSED',
+        error: errorLabel,
         latencyMs
       };
     }
