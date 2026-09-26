@@ -62,6 +62,10 @@ Entrada (Terminal CLI | OpenCode | Webhook Trading | Cron Bybit)
 
 ## 🔌 5. TABELA OFICIAL DE PORTAS
 
+## 🔌 5. TABELA OFICIAL DE PORTAS E MALHA PRIVADA RAILWAY (Topologia Homologada)
+
+Toda a comunicação com a malha interna do Railway opera com sub-20ms e custo zero de tráfego:
+
 | Serviço | Porta | Domínio Interno Railway | Domínio Público / Local |
 |---|---|---|---|
 | **nexus-cerebro** | **3000** | `nexus-cerebro.railway.internal:3000` | `nexus-cerebro-production-a7c0.up.railway.app` |
@@ -70,8 +74,17 @@ Entrada (Terminal CLI | OpenCode | Webhook Trading | Cron Bybit)
 | **nexus-membro-memoria** | **3003** | `nexus-membro-memoria.railway.internal:3003` | Interno |
 | **Mercado Financeiro** | **4000** | `operacional.railway.internal:4000` | `operacional-production-57d9.up.railway.app` |
 | **Postgres Principal** | **5432** | `postgres.railway.internal:5432` | Proxy TCP externo 25561 |
-| **nexus-decisor-laya** | **8000** | `nexus-decisor-laya.railway.internal:8000` | `nexus-decisor-laya-production.up.railway.app` |
+| **nexus-decisor-laya** | **8080** *(ou 8000)* | `nexus-decisor-laya.railway.internal:8080` | `nexus-decisor-laya-production.up.railway.app` |
 | **nexus-omniroute** | **8080** | `nexus-omniroute.railway.internal:8080` | `nexus-omniroute-production.up.railway.app` |
+
+---
+
+## 🛠️ 6. GOVERNANÇA DE INFRAESTRUTURA RAILWAY (MODO SENSOR & TELEMETRIA)
+1. **Segredos Protegidos em Variáveis de Ambiente (.env):**
+   - As variáveis `RAILWAY_PROJECT_ID` e `RAILWAY_TOKEN` ficam restritas ao `.env` do container/serviço para localização do projeto `nexus-multi` e consulta de logs/telemetria.
+2. **Auto-Cura Exclusiva do Cérebro (Proibição de Restart Autônomo):**
+   - O Mercado Financeiro é um ambiente financeiro crítico e **NÃO deve executar auto-cura ou reinicializações autônomas de infraestrutura**.
+   - Em caso de falha de conexão (ex: rota interna da Laya indisponível), o módulo deve registrar a anomalia, utilizar o fallback seguro (`https://nexus-decisor-laya-production.up.railway.app`) e reportar a ocorrência ao Cérebro ou via alertas.
 
 ---
 *Padrão unificado Nexus v2.3 — Fonte da verdade: `Documento_Mestre_Projeto_SaaS`.*
