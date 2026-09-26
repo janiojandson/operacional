@@ -53,7 +53,10 @@ export const LayaGovernanceControl: React.FC<LayaGovernanceControlProps> = ({ on
 
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 3000);
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      fetchStatus();
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
 

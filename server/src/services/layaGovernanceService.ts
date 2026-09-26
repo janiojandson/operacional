@@ -110,6 +110,22 @@ export class LayaGovernanceService {
     };
   }
 
+  public getStatus() {
+    const metrics = this.getMetrics();
+    return {
+      mode: this.mode,
+      metrics: {
+        latencyP50: metrics.p50LatencyMs,
+        latencyP95: metrics.p95LatencyMs,
+        sessionPardonsUsed: metrics.overridesUsedSession,
+        maxSessionPardons: metrics.maxOverridesPerSession,
+        totalDecisions: this.recentDecisions.length,
+        counterfactualPnL: metrics.pnlAttributedOverrides
+      },
+      recentDecisions: metrics.recentDecisions
+    };
+  }
+
   private isProtectionAction(action?: string): boolean {
     return action === 'CLOSE_NOW' || action === 'EARLY_HARVEST_CLOSE';
   }
@@ -270,6 +286,37 @@ export class LayaGovernanceService {
     if (this.recentDecisions.length > 50) {
       this.recentDecisions.pop();
     }
+
+    // Persistência assíncrona no Event Store v3.0 (PostgreSQL)
+    try {
+      import('./eventStoreService.js').then(({ EventStoreService }) => {
+        EventStoreService.recordDecisionEvent({
+          decisionId: proposal.decisionId,
+          decisionType: proposal.action,
+          symbol: proposal.symbol,
+          issuedAt: new Date(proposal.issuedAt || Date.now()),
+          expiresAt: new Date(proposal.expiresAt || (Date.now() + 3000)),
+          latencyMs: this.latencyBuffer[this.latencyBuffer.length - 1] ?? 0,
+          action: proposal.action,
+          executed,
+          constitutionRejected: Boolean(rejectionReason),
+          rejectionReason,
+          powerMultiplier: proposal.powerMultiplier,
+          riskPct: proposal.riskPct,
+          stopLossPct: proposal.governance?.stopLossProposalPct,
+          stopDirection: proposal.governance?.stopLossMoveDirection,
+          cooldownOverride: proposal.governance?.cooldownOverride,
+          runnerAllowed: proposal.governance?.runnerModeAllowed,
+          scaleInAllowed: proposal.governance?.allowScaleIn,
+          rationaleCode: proposal.rationaleCode,
+          l2DepthTop20: proposal.trace?.l2DepthTop20,
+          imbalanceRatio: proposal.trace?.imbalanceRatio,
+          cvdDelta60s: proposal.trace?.cvdDelta60s,
+          spoofScore: proposal.trace?.spoofScore,
+          betaDivergence: proposal.trace?.betaDivergence
+        });
+      }).catch(() => {});
+    } catch {}
   }
 }
 

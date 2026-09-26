@@ -279,6 +279,14 @@ export async function initDatabase(): Promise<void> {
 
   console.log('[DB] ✅ Tabelas PostgreSQL inicializadas com sucesso.');
 
+  // Inicialização do Event Store v3.0 (Tabelas analíticas e 10 Blocos)
+  try {
+    const { initEventStoreTables } = await import('./eventStoreDb.js');
+    await initEventStoreTables();
+  } catch (esErr: any) {
+    console.warn('[DB] Aviso: Falha ao inicializar Event Store v3.0:', esErr.message);
+  }
+
   // Seed: Admin padrão — sincroniza com variáveis de ambiente
   await bootstrapAdministrator(process.env, {
     find: (email) => queryOne<{ id: string }>('SELECT id FROM app_users WHERE LOWER(email) = LOWER($1) LIMIT 1', [email]),

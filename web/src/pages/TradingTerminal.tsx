@@ -8,6 +8,7 @@ import { SignalsFeed } from '../components/Signals/SignalsFeed';
 import { PaperTradingPanel } from '../components/PaperTrading/PaperTradingPanel';
 import { AIAdvisorModal } from '../components/Advisor/AIAdvisorModal';
 import { QuantStrategyHealthModal } from '../components/Advisor/QuantStrategyHealthModal';
+import { MasterHealthDashboard } from '../components/Advisor/MasterHealthDashboard';
 import { ShadowAuditModal } from '../components/ShadowAuditModal';
 import { LayaGovernanceControl } from '../components/Header/LayaGovernanceControl';
 import {
@@ -23,6 +24,7 @@ export default function TradingTerminal() {
   const [activeSymbol, setActiveSymbol] = useState<string>('BTC/USDT');
   const [isAdvisorOpen, setIsAdvisorOpen] = useState<boolean>(false);
   const [isQuantHealthOpen, setIsQuantHealthOpen] = useState<boolean>(false);
+  const [isMasterHealthOpen, setIsMasterHealthOpen] = useState<boolean>(false);
   const [isShadowAuditOpen, setIsShadowAuditOpen] = useState<boolean>(false);
 
   // Estados dos Botões Operacionais
@@ -249,6 +251,16 @@ export default function TradingTerminal() {
 
           {/* Botão Governança Laya (Logo após o Shadow Mode) */}
           <LayaGovernanceControl />
+
+          {/* Botão Dashboard dos 10 Blocos (Laya ↔ Motor v3.0) */}
+          <button
+            onClick={() => setIsMasterHealthOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg border font-mono text-xs font-semibold transition-all bg-cyan-950/40 border-cyan-500/50 text-cyan-300 hover:bg-cyan-900/60 shadow-sm shadow-cyan-950/20"
+            title="Abrir Dashboard dos 10 Blocos e Atribuição Laya v3.0"
+          >
+            <Activity className="w-3.5 h-3.5 text-cyan-400" />
+            <span>10 BLOCOS & SAÚDE 📊</span>
+          </button>
 
           {/* Botão Direto Zerar Sessão (Acesso Imediato) */}
           <button
@@ -548,6 +560,11 @@ export default function TradingTerminal() {
       <QuantStrategyHealthModal
         isOpen={isQuantHealthOpen}
         onClose={() => setIsQuantHealthOpen(false)}
+      />
+
+      <MasterHealthDashboard
+        isOpen={isMasterHealthOpen}
+        onClose={() => setIsMasterHealthOpen(false)}
       />
 
       <ShadowAuditModal

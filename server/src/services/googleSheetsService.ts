@@ -91,13 +91,16 @@ export class GoogleSheetsService {
 
     try {
       const payload = createSheetWebhookPayload(data);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3000);
       const response = await fetch(WEB_APP_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
-      });
+        signal: controller.signal
+      }).finally(() => clearTimeout(timer));
       const body = await response.text();
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       try {
