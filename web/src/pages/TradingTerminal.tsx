@@ -9,6 +9,7 @@ import { PaperTradingPanel } from '../components/PaperTrading/PaperTradingPanel'
 import { AIAdvisorModal } from '../components/Advisor/AIAdvisorModal';
 import { QuantStrategyHealthModal } from '../components/Advisor/QuantStrategyHealthModal';
 import { ShadowAuditModal } from '../components/ShadowAuditModal';
+import { LayaGovernanceControl } from '../components/Header/LayaGovernanceControl';
 import {
   BarChart2,
   Zap,
@@ -245,6 +246,9 @@ export default function TradingTerminal() {
               <span>Shadow Mode: <b className="text-white">{shadowFilterActive ? 'EXECUTOR REAL' : 'MODO FANTASMA'}</b></span>
             </span>
           </button>
+
+          {/* Botão Governança Laya (Logo após o Shadow Mode) */}
+          <LayaGovernanceControl />
 
           {/* Botão Direto Zerar Sessão (Acesso Imediato) */}
           <button
