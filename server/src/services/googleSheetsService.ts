@@ -86,33 +86,11 @@ export class GoogleSheetsService {
   /**
    * Envia os dados silenciosamente (non-blocking)
    */
-  private static async sendData(data: any): Promise<void> {
-    if (!WEB_APP_URL) return;
-
-    try {
-      const payload = createSheetWebhookPayload(data);
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3000);
-      const response = await fetch(WEB_APP_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      }).finally(() => clearTimeout(timer));
-      const body = await response.text();
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      try {
-        const payload = JSON.parse(body);
-        if (payload?.status === 'error') throw new Error(payload.message || 'Apps Script recusou o evento');
-      } catch (err) {
-        if (err instanceof SyntaxError) return;
-        throw err;
-      }
-    } catch (err: any) {
-      console.error(`\x1b[33m[GoogleSheets] Falha ao enviar log para a planilha: ${err.message}\x1b[0m`);
-    }
+  private static async sendData(_data: any): Promise<void> {
+    // [Data Studio / Looker Studio Transition]
+    // Webhook HTTP para Apps Script desativado para garantir latência sub-15ms na Ayla/Laya.
+    // A persistência oficial e auditoria residem no PostgreSQL Event Store v3.0.
+    return;
   }
 
   static async logTradeExecution(log: Omit<TradeLogPayload, 'type'>): Promise<void> {

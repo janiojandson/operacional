@@ -53,6 +53,11 @@ Entrada (Terminal CLI | OpenCode | Webhook Trading | Cron Bybit)
    - **Gatilhos de Fluxo:** Ligue o botão "Gatilhos de Fluxo" e confirme a plotagem das setas de agressão (`WHALE`, `ABSORPTION`, `BOOK_IMBALANCE`) nos topos e fundos em até 30 segundos.
    - **Tick do Candle Atual:** Observe a ponta do gráfico e comprove que o preço e o volume do candle de 1m oscilam a cada ~2 segundos, refletindo o fluxo ao vivo da Bybit sem travamento de tela.
 
+#### REGRAS DE ARQUITETURA VISUAL E DESACOPLAMENTO DE DASHBOARDS (POSTGRESQL + LOOKER STUDIO):
+1. Sempre que a demanda envolver a criação de dashboards, painéis de auditoria, relatórios gerenciais ou cálculos de métricas sobre dados operacionais já armazenados no Event Store (PostgreSQL do Railway), a IA NÃO deve criar lógicas de apresentação, requisições HTTP secundárias (webhooks) ou integrações via código para planilhas como o Google Sheets.
+2. A aplicação (backend) deve manter a responsabilidade única de registrar os dados brutos em alta velocidade (fire-and-forget), preservando a latência exigida (sub-25ms) e o rate limit das rotas críticas.
+3. Para visualização de métricas e comparativos, a IA deve sugerir apenas a criação de Views SQL estruturadas no PostgreSQL e orientar a conexão direta, gratuita e passiva do Google Looker Studio à URL Pública do banco.
+
 ---
 
 ## 🔌 5. TABELA OFICIAL DE PORTAS
