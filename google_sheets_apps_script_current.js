@@ -1214,3 +1214,47 @@ function setupAutoSyncTrigger() {
   }
 }
 
+/**
+ * ==============================================================================
+ * 🤖 ZERAR HISTÓRICO AYLA / LAYA (DECISÕES DO SISTEMA 1)
+ * Limpa com segurança a aba de auditoria e invoca o reset de ruído no backend
+ * ==============================================================================
+ */
+function zerarHistoricoAyla() {
+  var ui;
+  try {
+    ui = SpreadsheetApp.getUi();
+    var res = ui.alert('Confirmação', 'Deseja realmente zerar o histórico de decisões da Ayla/Laya da planilha e limpar o ruído do banco?', ui.ButtonSet.YES_NO);
+    if (res !== ui.Button.YES) return;
+  } catch(e) {}
+
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName('🧠 AUDITORIA AYLA (DECISÕES)');
+  
+  if (sheet) {
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+    }
+  } else {
+    initSheetAylaGovernance(ss, true);
+  }
+
+  // Opcional: dispara limpeza de ruído no backend via API se configurado
+  try {
+    var backendUrl = 'https://operacional-production-57d9.up.railway.app/api/admin/laya/reset-decisions';
+    UrlFetchApp.fetch(backendUrl, {
+      method: 'post',
+      contentType: 'application/json',
+      muteHttpExceptions: true
+    });
+  } catch(netErr) {
+    Logger.log('Aviso: Backend reset não alcançado ou sem rede: ' + netErr);
+  }
+
+  try {
+    SpreadsheetApp.getUi().alert('✅ Histórico da Ayla zerado com sucesso na planilha!');
+  } catch(e) {
+    Logger.log('Ayla reset concluído.');
+  }
+}
