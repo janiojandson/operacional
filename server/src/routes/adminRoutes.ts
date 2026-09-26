@@ -572,11 +572,16 @@ adminRouter.post('/laya/reset-decisions', async (_req: Request, res: Response) =
 
     console.log(`[Admin] Reset Laya: ${cleared} decisões de ruído removidas do banco.`);
 
-    res.json({
-      cleared,
-      timestamp: new Date().toISOString(),
-      message: `${cleared} decisões de ruído removidas. Buffers em memória zerados.`
-    });
+      res.json({
+        cleared,
+        timestamp: new Date().toISOString(),
+        message: `${cleared} decisões de ruído removidas. Buffers em memória zerados.`
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Falha ao resetar decisões Laya', details: err.message });
+    }
+  });
+
 // GET /api/admin/laya/test-ports
 // Testa conectividade e latência direta nas portas 8000, 8080 e pública
 adminRouter.get('/laya/test-ports', async (_req: Request, res: Response) => {
