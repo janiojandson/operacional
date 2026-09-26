@@ -130,4 +130,23 @@ export class EventStoreService {
       console.warn('[EventStore] Erro ao atualizar contrafactual em decision_events:', err.message);
     });
   }
+
+  /**
+   * Remove decisões de ruído (NO_ACTION não executadas com mais de 1h) do banco.
+   * Seguro: o trigger de imutabilidade cobre apenas UPDATE, não DELETE.
+   * Retorna o número de linhas removidas.
+   */
+  static async clearNoiseDecisions(): Promise<number> {
+    const result = await query<{ decision_id: string }>(
+      `DELETE FROM decision_events
+       WHERE action = 'NO_ACTION'
+         AND executed = false
+         AND issued_at < NOW() - INTERVAL '1 hour'
+       RETURNING decision_id`
+    ).catch((err) => {
+      console.warn('[EventStore] Erro ao limpar decisões de ruído:', err.message);
+      return [];
+    });
+    return result.length;
+  }
 }

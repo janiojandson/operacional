@@ -533,6 +533,18 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       }
     }
 
+    // 🔍 Pré-qualificação: só consulta Laya em setups com microestrutura favorável
+    const _imbalance = book?.imbalanceRatio || 1.0;
+    const _whaleActivity = flowEngine.getRecentAggression(signal.symbol)?.whaleCount || 0;
+    const LAYA_MIN_IMBALANCE = Number(process.env.LAYA_MIN_IMBALANCE) || 1.25;
+
+    const setupPreQualified = _imbalance >= LAYA_MIN_IMBALANCE || _whaleActivity >= 1;
+    if (!setupPreQualified) {
+      console.log(`[LAYA SKIP] Setup não pré-qualificado em ${signal.symbol} | Imbalance: ${_imbalance.toFixed(2)} | Whales: ${_whaleActivity}`);
+      publishOpportunity();
+      return;
+    }
+
     // 🧠 Governança Laya Sistema 1: Gatekeeper & Micro-Stop
     const layaResult = await layaGovernanceService.requestGovernance({
       stateVersion: 1,
@@ -543,12 +555,13 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       regime: pairConfig?.regime ?? 'TREND',
       trace: {
         l2DepthTop20: book?.bids?.reduce((s, b) => s + b.amount, 0) || 0,
-        imbalanceRatio: book?.imbalanceRatio || 1.0,
-        cvdDelta60s: flowEngine.getRecentAggression(signal.symbol)?.whaleCount || 0,
+        imbalanceRatio: _imbalance,
+        cvdDelta60s: _whaleActivity,
         spoofScore: 0.0,
         betaDivergence: false
       }
     });
+
 
     if (layaResult.decision.action === 'VETO') {
       console.log(`[LAYA VETO] Entrada vetada em ${signal.symbol} | Razão: ${layaResult.decision.rationaleCode}`);

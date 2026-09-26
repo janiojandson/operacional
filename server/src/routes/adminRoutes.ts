@@ -557,3 +557,28 @@ adminRouter.post('/laya/mode', (req: Request, res: Response) => {
   res.json({ success: true, mode: layaGovernanceService.getMode() });
 });
 
+// POST /api/admin/laya/reset-decisions
+// Zera decisões de ruído (NO_ACTION não executadas >1h) no banco e buffers em memória.
+// Seguro: não afeta trades, histórico financeiro ou decisões executadas.
+adminRouter.post('/laya/reset-decisions', async (_req: Request, res: Response) => {
+  try {
+    const { EventStoreService } = await import('../services/eventStoreService.js');
+
+    // 1. Limpa banco de dados (decisões de ruído > 1h)
+    const cleared = await EventStoreService.clearNoiseDecisions();
+
+    // 2. Zera buffers em memória (recentDecisions, latencyBuffer, debounce map)
+    layaGovernanceService.resetSession();
+
+    console.log(`[Admin] Reset Laya: ${cleared} decisões de ruído removidas do banco.`);
+
+    res.json({
+      cleared,
+      timestamp: new Date().toISOString(),
+      message: `${cleared} decisões de ruído removidas. Buffers em memória zerados.`
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Falha ao resetar decisões Laya', details: err.message });
+  }
+});
+

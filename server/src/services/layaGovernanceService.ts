@@ -50,6 +50,8 @@ export interface LayaServiceOptions {
   timeoutMs?: number;
   mode?: LayaMode;
   fetchImpl?: typeof fetch;
+  /** Janela de supressão de chamadas repetidas por símbolo em ms (0 = desativado). Configurável via LAYA_DEBOUNCE_MS */
+  debounceMs?: number;
 }
 
 export interface GovernanceExecutionResult {
@@ -70,12 +72,15 @@ export class LayaGovernanceService {
   private overridesUsedSession: number = 0;
   private pnlAttributedOverrides: number = 0;
   private recentDecisions: LayaMetrics['recentDecisions'] = [];
+  private debounceMs: number;
+  private lastCallTs: Map<string, number> = new Map();
 
   constructor(options: LayaServiceOptions = {}) {
     this.serviceUrl = options.serviceUrl || process.env.LAYA_SERVICE_URL || 'http://nexus-decisor-laya.railway.internal:8000';
     this.timeoutMs = options.timeoutMs ?? (Number(process.env.LAYA_TIMEOUT_MS) || 1500);
     this.mode = options.mode || (process.env.LAYA_MODE as LayaMode) || 'ACTIVE';
     this.fetchFn = options.fetchImpl || fetch;
+    this.debounceMs = options.debounceMs ?? (Number(process.env.LAYA_DEBOUNCE_MS) || 0);
   }
 
   public setMode(mode: LayaMode): void {
@@ -84,6 +89,20 @@ export class LayaGovernanceService {
 
   public getMode(): LayaMode {
     return this.mode;
+  }
+
+  /**
+   * Zera o estado de sessão: buffer de decisões em memória,
+   * contadores de override, buffer de latência e mapa de debounce.
+   * Chamado pelo endpoint POST /api/admin/laya/reset-decisions.
+   */
+  public resetSession(): void {
+    this.recentDecisions = [];
+    this.overridesUsedSession = 0;
+    this.pnlAttributedOverrides = 0;
+    this.latencyBuffer = [];
+    this.lastCallTs.clear();
+    console.log('[LayaGovernance] Sessão zerada: buffers limpos.');
   }
 
   public recordCounterfactual(decisionId: string, resultR: number): void {
@@ -165,12 +184,29 @@ export class LayaGovernanceService {
       };
     }
 
+    // Debounce por símbolo: suprime chamadas dentro da janela configurada.
+    // Ações de proteção (CLOSE_NOW, EARLY_HARVEST_CLOSE) nunca são suprimidas.
+    if (this.debounceMs > 0 && !isProtection) {
+      const lastTs = this.lastCallTs.get(payload.symbol) ?? 0;
+      const now = Date.now();
+      if (now - lastTs < this.debounceMs) {
+        const silentDecision = this.createDefaultFallbackResponse(payload, 'NO_ACTION');
+        return {
+          executed: false,
+          decision: silentDecision,
+          fallbackLocal: true,
+          latencyMs: 0
+        };
+      }
+      this.lastCallTs.set(payload.symbol, now);
+    }
+
     const startTime = performance.now();
     const controller = new AbortController();
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => {
         controller.abort();
-        reject(new Error('TIMEOUT_25MS_EXCEEDED'));
+        reject(new Error(`TIMEOUT_${this.timeoutMs}MS_EXCEEDED`));
       }, this.timeoutMs);
     });
 
