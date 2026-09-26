@@ -73,7 +73,7 @@ export class LayaGovernanceService {
 
   constructor(options: LayaServiceOptions = {}) {
     this.serviceUrl = options.serviceUrl || process.env.LAYA_SERVICE_URL || 'http://nexus-decisor-laya.railway.internal:8000';
-    this.timeoutMs = options.timeoutMs ?? 25;
+    this.timeoutMs = options.timeoutMs ?? (Number(process.env.LAYA_TIMEOUT_MS) || 1500);
     this.mode = options.mode || (process.env.LAYA_MODE as LayaMode) || 'SHADOW';
     this.fetchFn = options.fetchImpl || fetch;
   }
@@ -175,16 +175,33 @@ export class LayaGovernanceService {
     });
 
     try {
-      const fetchPromise = this.fetchFn(`${this.serviceUrl}/v1/systemone/market-governance`, {
+      // Mapeamento para o contrato oficial do Laya System 1 (POST /v1/systemone)
+      const systemOnePayload = {
+        state: {
+          origem: 'mercado_financeiro',
+          body: `Symbol: ${payload.symbol}, Side: ${payload.side || 'BUY'}, Price: ${payload.currentPrice}, RequestedAction: ${requestedAction}, Regime: ${payload.regime || 'NORMAL'}, Imbalance: ${payload.trace?.imbalanceRatio || 0}, CVD: ${payload.trace?.cvdDelta60s || 0}`
+        },
+        questions: {
+          action: {
+            type: 'choice',
+            instructions: 'Qual acao de governanca tomar para esta oportunidade de mercado?',
+            criteria: {
+              AUTHORIZE: 'Permitir entrada na operacao ou scale-in',
+              VETO: 'Bloquear operacao por confluencia toxica ou risco',
+              NO_ACTION: 'Sem acao no momento'
+            }
+          }
+        }
+      };
+
+      const fetchPromise = this.fetchFn(`${this.serviceUrl}/v1/systemone`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(systemOnePayload),
         signal: controller.signal
       });
 
       const response = await Promise.race([fetchPromise, timeoutPromise]);
-
-
       const latencyMs = performance.now() - startTime;
       this.recordLatency(latencyMs);
 
@@ -192,7 +209,26 @@ export class LayaGovernanceService {
         throw new Error(`HTTP_${response.status}`);
       }
 
-      const proposal = (await response.json()) as LayaGovernanceResponse;
+      const layaRaw = await response.json();
+      const choice = layaRaw?.answers?.action?.choice || 'NO_ACTION';
+      const now = Date.now();
+
+      const proposal: LayaGovernanceResponse = {
+        decisionId: `laya-${layaRaw?.model || 'rl'}-${now}`,
+        stateVersion: payload.stateVersion,
+        issuedAt: now,
+        expiresAt: now + 3000,
+        action: choice as any,
+        symbol: payload.symbol,
+        powerMultiplier: choice === 'AUTHORIZE' ? 1.5 : 1.0,
+        riskPct: choice === 'AUTHORIZE' ? 1.0 : 0.5,
+        governance: {
+          allowScaleIn: choice === 'AUTHORIZE',
+          cooldownOverride: false
+        },
+        rationaleCode: choice === 'AUTHORIZE' ? 'DYNAMIC_POWER_AGGRESSION' : (choice === 'VETO' ? 'SPREAD_TOXIC_VETO' : 'NO_OPPORTUNITY'),
+        trace: payload.trace
+      };
 
       // 1. Validação temporal de expiração
       if (isProposalExpired(proposal)) {
