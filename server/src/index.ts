@@ -451,6 +451,8 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       const pardonResult = await layaGovernanceService.requestGovernance({
         stateVersion: 1,
         symbol: signal.symbol,
+        intentGroup: 'COOLDOWN_AUDIT',
+        intentSubgroup: 'LIQUIDITY_SWEEP_REENTRY',
         side,
         currentPrice: asset.lastPrice,
         requestedAction: 'OVERRIDE_COOLDOWN',
@@ -561,7 +563,13 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       }
     }
 
-    // 🧠 Governança Laya Sistema 1: Supervisão Contextual e Micro-Stop Universal
+    // 🛡️ Trava Anti-Perturbação: Se já existe posição aberta neste par, não perturba a Laya pedindo nova entrada
+    const hasOpenPosition = paperTrading.getAccountState().openPositions.some(p => p.symbol === signal.symbol);
+    if (hasOpenPosition) {
+      return;
+    }
+
+    // 🧠 Governança Laya Sistema 1 (Grupo 1: PRE_ENTRY / NEW_OPPORTUNITY)
     const _imbalance = book?.imbalanceRatio || 1.0;
     const _whaleActivity = flowEngine.getRecentAggression(signal.symbol)?.whaleCount || 0;
 
@@ -569,6 +577,8 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
     const layaResult = await layaGovernanceService.requestGovernance({
       stateVersion: 1,
       symbol: signal.symbol,
+      intentGroup: 'PRE_ENTRY',
+      intentSubgroup: 'NEW_OPPORTUNITY',
       side,
       currentPrice: asset.lastPrice,
       requestedAction: 'AUTHORIZE',
@@ -630,11 +640,15 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
           // Só aciona governança ativa se houver evento contextual crítico
           if (isContrarianWhale || isRunnerTarget) {
             const requestedAction = isContrarianWhale ? 'CLOSE_NOW' : 'EARLY_HARVEST_CLOSE';
+            const intentSubgroup = isContrarianWhale ? 'DEFENSE_CONTRARIAN_FLOW' : 'RUNNER_EVALUATION';
             const gov = await layaGovernanceService.requestGovernance({
               stateVersion: 1,
               symbol: data.symbol,
+              intentGroup: 'POSITION_LIFECYCLE',
+              intentSubgroup,
               side: currentPosition.type,
               currentPrice: data.price,
+              currentR,
               requestedAction,
               trace: {
                 l2DepthTop20: symState?.book?.bids?.reduce((s, b) => s + b.amount, 0) || 0,

@@ -216,21 +216,65 @@ export class LayaGovernanceService {
       : 'https://nexus-decisor-laya-production.up.railway.app';
 
     try {
-      // Mapeamento para o contrato oficial do Laya System 1 (POST /v1/systemone)
+      // 🧠 Mapeamento Dinâmico por Grupo e Subgrupo de Intenção (3 Grupos da Laya)
+      const intentGroup = payload.intentGroup || 'PRE_ENTRY';
+      const intentSubgroup = payload.intentSubgroup || 'NEW_OPPORTUNITY';
+
+      let contextDescription = `Contexto: ${intentGroup} | Subgrupo: ${intentSubgroup}. Symbol: ${payload.symbol}, Side: ${payload.side || 'BUY'}, Price: ${payload.currentPrice}`;
+      let questionInstructions = 'Qual ação de governança tomar?';
+      let criteria: Record<string, string> = {
+        AUTHORIZE: 'Permitir entrada com potência adequada',
+        VETO: 'Bloquear por confluência tóxica ou risco'
+      };
+
+      if (intentGroup === 'PRE_ENTRY') {
+        contextDescription += `, Regime: ${payload.regime || 'NORMAL'}, Imbalance: ${payload.trace?.imbalanceRatio || 0}, CVD: ${payload.trace?.cvdDelta60s || 0}. Triagem de nova oportunidade do zero.`;
+        questionInstructions = 'Decisão de pré-entrada no ativo:';
+        criteria = {
+          AUTHORIZE: 'Aprovar entrada e dimensionar potência (1.5x a 6.0x)',
+          VETO: 'Vetar por risco de spread, spoofing ou consolidação'
+        };
+      } else if (intentGroup === 'COOLDOWN_AUDIT') {
+        contextDescription += `, UltimaSaidaMs: ${payload.lastExitMsAgo || 0}. Avaliar se houve Liquidity Sweep para quebra de cooldown.`;
+        questionInstructions = 'Decisão sobre perdão de cooldown pós-stop:';
+        criteria = {
+          OVERRIDE_COOLDOWN: 'Conceder perdão: Liquidity sweep e rejeição confirmados',
+          VETO: 'Manter cooldown: Mercado sem estrutura de reversão'
+        };
+      } else if (intentGroup === 'POSITION_LIFECYCLE') {
+        contextDescription += `, PnL_R: ${payload.currentR || 0}R, CVD: ${payload.trace?.cvdDelta60s || 0}. Posição aberta em curso.`;
+        if (intentSubgroup === 'DEFENSE_CONTRARIAN_FLOW') {
+          questionInstructions = 'Ação de defesa ativa por fluxo contrário:';
+          criteria = {
+            CLOSE_NOW: 'Encerrar posição imediatamente a mercado',
+            HOLD: 'Manter posição: oscilação normal'
+          };
+        } else if (intentSubgroup === 'RUNNER_EVALUATION') {
+          questionInstructions = 'Ação de colheita/expansão de lucro parcial:';
+          criteria = {
+            CONVERT_TO_SUPER_RUNNER: 'Esticar trade: vácuo institucional sem resistência',
+            EARLY_HARVEST_CLOSE: 'Colher lucro no topo: absorção passiva e exaustão',
+            HOLD: 'Manter trailing normal'
+          };
+        } else if (intentSubgroup === 'SCALE_IN_REQUEST') {
+          questionInstructions = 'Decisão sobre piramidagem de lote a favor:';
+          criteria = {
+            AUTHORIZE: 'Autorizar scale-in adicional',
+            VETO: 'Bloquear scale-in: risco assimétrico desfavorável'
+          };
+        }
+      }
+
       const systemOnePayload = {
         state: {
           origem: 'mercado_financeiro',
-          body: `Symbol: ${payload.symbol}, Side: ${payload.side || 'BUY'}, Price: ${payload.currentPrice}, RequestedAction: ${requestedAction}, Regime: ${payload.regime || 'NORMAL'}, Imbalance: ${payload.trace?.imbalanceRatio || 0}, CVD: ${payload.trace?.cvdDelta60s || 0}`
+          body: contextDescription
         },
         questions: {
           action: {
             type: 'choice',
-            instructions: 'Qual acao de governanca tomar para esta oportunidade de mercado?',
-            criteria: {
-              AUTHORIZE: 'Permitir entrada na operacao ou scale-in',
-              VETO: 'Bloquear operacao por confluencia toxica ou risco',
-              NO_ACTION: 'Sem acao no momento'
-            }
+            instructions: questionInstructions,
+            criteria
           }
         }
       };
@@ -270,6 +314,10 @@ export class LayaGovernanceService {
       const choice = layaRaw?.answers?.action?.choice || 'NO_ACTION';
       const now = Date.now();
 
+      // Desacoplamento constitucional: allowScaleIn só é TRUE se for explicitamente SCALE_IN_REQUEST
+      const isScaleInIntent = intentGroup === 'POSITION_LIFECYCLE' && intentSubgroup === 'SCALE_IN_REQUEST';
+      const allowScaleIn = isScaleInIntent && (choice === 'AUTHORIZE' || choice === 'AUTHORIZE_SCALE_IN');
+
       const proposal: LayaGovernanceResponse = {
         decisionId: `laya-${layaRaw?.model || 'rl'}-${now}`,
         stateVersion: payload.stateVersion,
@@ -280,10 +328,12 @@ export class LayaGovernanceService {
         powerMultiplier: choice === 'AUTHORIZE' ? 1.5 : 1.0,
         riskPct: choice === 'AUTHORIZE' ? 1.0 : 0.5,
         governance: {
-          allowScaleIn: choice === 'AUTHORIZE',
-          cooldownOverride: false
+          allowScaleIn,
+          cooldownOverride: choice === 'OVERRIDE_COOLDOWN'
         },
-        rationaleCode: choice === 'AUTHORIZE' ? 'DYNAMIC_POWER_AGGRESSION' : (choice === 'VETO' ? 'SPREAD_TOXIC_VETO' : 'NO_OPPORTUNITY'),
+        rationaleCode: choice === 'AUTHORIZE'
+          ? 'DYNAMIC_POWER_AGGRESSION'
+          : (choice === 'VETO' ? 'SPREAD_TOXIC_VETO' : 'NO_OPPORTUNITY'),
         trace: payload.trace
       };
 

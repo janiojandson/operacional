@@ -51,9 +51,20 @@ export interface LayaTraceData {
   [key: string]: any;
 }
 
+export type LayaIntentGroup = 'PRE_ENTRY' | 'COOLDOWN_AUDIT' | 'POSITION_LIFECYCLE';
+
+export type LayaIntentSubgroup =
+  | 'NEW_OPPORTUNITY'
+  | 'LIQUIDITY_SWEEP_REENTRY'
+  | 'DEFENSE_CONTRARIAN_FLOW'
+  | 'RUNNER_EVALUATION'
+  | 'SCALE_IN_REQUEST';
+
 export interface LayaGovernanceRequest {
   stateVersion: number;
   symbol: string;
+  intentGroup?: LayaIntentGroup;
+  intentSubgroup?: LayaIntentSubgroup;
   side?: 'BUY' | 'SELL';
   currentPrice: number;
   requestedAction?: string;
