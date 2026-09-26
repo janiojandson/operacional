@@ -11,100 +11,104 @@
 O ecossistema é composto por múltiplos serviços integrados de alta performance para trading automatizado institucional, tape reading SMC (Smart Money Concepts) e governança algorítmica:
 
 1. **Mercado Financeiro (MarketFlow Pro / Operacional):**
-   - **Stack:** Node.js, TypeScript, Express, Socket.IO, PostgreSQL, CCXT (Bybit Linear Perpetuals / BingX).
+   - **Stack:** Node.js, TypeScript, Express, Socket.IO, PostgreSQL (Railway), CCXT (BingX / Bybit Linear Perpetuals).
    - **Porta / Host:** `:4000` / Deploy no Railway (`operacional-production-57d9.up.railway.app`).
    - **Responsabilidades:** Motor de cotação streaming, Book L2 de 20 níveis, detecção de baleias (trades > $50k), desbalanceamento de fluxo (Imbalance), Cumulative Volume Delta (CVD), execução de ordens, gerenciamento de posições e espelhamento de dados.
 
 2. **Laya / Ayla (Sistema 1 - Decisor Reflexivo de Ultrabaixa Latência):**
-   - **Stack:** Python/FastAPI ou microsserviço de heurística matemática ultrarrápida.
-   - **Porta / Host:** `:8000` / Rede interna Railway (`nexus-decisor-laya.railway.internal:8000`).
-   - **Missão:** Arbitragem contextual de mercado em tempo real (< 15ms), sem custos de LLM por tick. Realiza pré-qualificação de setups, perdão condicional de cooldown pós-stop, modulação de potência da estratégia (1.5x a 6.0x) e proteção contra ruído de mercado.
+   - **Stack:** Python/Uvicorn/FastAPI rodando modelo de aprendizado por reforço (`laya-rl-agent` / `convaiinnovations/laya`).
+   - **Porta / Host:** `:8080` / Rede interna Railway (`http://nexus-decisor-laya.railway.internal:8080`) com fallback para URL pública (`https://nexus-decisor-laya-production.up.railway.app`).
+   - **Latência Real Medida:** 800ms a 1400ms (tempo de inferência em CPU no Railway).
+   - **Missão:** Arbitragem contextual de mercado em tempo real. Realiza triagem de setups, modulação dinâmica de potência (1.5x a 6.0x), perdão condicional de cooldown pós-stop, proteção contra ruído de mercado e gestão do ciclo de vida das posições abertas.
 
-3. **Google Sheets (Dashboard Institucional de Auditoria & Painel de Controle):**
+3. **Google Sheets & Looker Studio (Auditoria Institucional & BI):**
    - **Versão do Apps Script:** v4.3 consolidado em `google_sheets_apps_script_current.js`.
    - **Abas principais:**
      - `Configurações`: Parâmetros de risco, chaves e controles operacionais.
      - `Auditoria Ayla (Decisões)`: Log detalhado de cada análise e decisão institucional emitida pela Laya/Ayla.
      - `Histórico de Trades`: Registros de posições executadas com PnL, alavancagem e drawdown.
-   - **Mecanismo de Reset / Zeramento:** Botão e função dedicada `zerarHistoricoAyla()` / `zerarDecisoesAyla()` vinculados à interface para expurgo do log de decisões sem interferir nas configurações ou fórmulas da planilha.
+   - **Mecanismo de Limpeza:** Função dedicada `zerarHistoricoAyla()` vinculada ao menu `📊 BingX & MarketFlow Pro` para expurgo cirúrgico das linhas de decisões sem danificar cabeçalho, fórmulas ou conexões do Looker Studio.
 
 ---
 
-## 2. Diagnóstico Recente: Gargalos de Latência e Sobrecarga da Laya
+## 2. As Decisões do Sistema (Catálogo Completo)
 
-Durante a auditoria operacional de setembro de 2026, identificaram-se anomalias críticas no comportamento da Laya:
+O sistema opera com um modelo de **3 Grupos Semânticos de Decisão**, estruturados para que a Laya nunca tome decisões fora de contexto:
 
-### Problemas Detectados:
-1. **Bombardeio Contínuo de Diretrizes (Cascata Ininterrupta):**
-   - A Laya recebia chamadas sequenciais desnecessárias a cada variação mínima de preço/tick do WebSocket.
-   - Isso gerava centenas de decisões repetitivas com o mesmo racional institucional, inundando a aba `Auditoria Ayla (Decisões)` no Google Sheets.
-2. **Aumento de Latência e Timeouts:**
-   - Com o congestionamento de requisições concorrentes, as chamadas ultrapassavam o limiar de resposta, resultando em status recorrente de `TIMEOUT_FAIL_CLOSED` (resposta defensiva padrão do sistema).
-3. **Sobrecarga na Planilha e no Banco de Dados:**
-   - O volume massivo de linhas criadas a cada minuto reduzia a performance do Google Sheets e gerava atrasos de renderização no terminal.
+```mermaid
+flowchart TD
+    Gatilho[Gatilho de Mercado / Microestrutura] --> Estado{Qual o Estado do Ativo?}
+    
+    Estado -->|Par Livre no Book| G1[GRUPO 1: PRÉ-TRADE / ENTRADA]
+    Estado -->|Par em Cooldown Pós-Stop| G2[GRUPO 2: PERDÃO DE COOLDOWN]
+    Estado -->|Posição Aberta a Correr| G3[GRUPO 3: CICLO DE VIDA DO TRADE]
+    
+    G1 --> G1_Dec{Decisão Laya}
+    G1_Dec -->|AUTHORIZE| A1[Abre Trade + Modula Potência 1.5x a 6.0x]
+    G1_Dec -->|HOLD / VETO| A2[NO_OPPORTUNITY - Permanece de Fora]
+    
+    G2 --> G2_Dec{Decisão Laya}
+    G2_Dec -->|OVERRIDE_COOLDOWN| A3[Perdoa os 15m e Autoriza Reentrada Imediata]
+    G2_Dec -->|VETO| A4[Mantém Respiro Mecânico do Ativo]
+    
+    G3 --> G3_Dec{Decisão Laya}
+    G3_Dec -->|CLOSE_NOW| A5[Corta Posição Imediatamente - Fluxo Contrário]
+    G3_Dec -->|CONVERT_TO_SUPER_RUNNER| A6[Afrouxa Alvo e Cola Trailing Stop]
+    G3_Dec -->|AUTHORIZE_SCALE_IN| A7[Permite Aumento de Lote se R >= +1.2R]
+```
+
+### Detalhamento das Ações e Racionais
+
+| Ação Emitida | Grupo de Intenção | O que Significa na Prática? | Ação Tomada pelo Robô |
+|---|---|---|---|
+| **`AUTHORIZE`** | `PRE_ENTRY` | Setup institucional validado com confluência de fluxo e livro. | **Abre a ordem** na exchange com potência modulada (1.5x a 6.0x) e stop loss ajustado. |
+| **`HOLD`** | `PRE_ENTRY` | Sem oportunidade de assimetria favorável (`NO_OPPORTUNITY`). | **Não opera.** Preserva capital e aguarda novo alinhamento. |
+| **`VETO`** | Qualquer Grupo | Setup perigoso, risco tóxico, absorção contrária ou spread desfavorável. | **Bloqueia sumariamente** a operação. |
+| **`OVERRIDE_COOLDOWN`** | `COOLDOWN_AUDIT` | *Liquidity Sweep* detectado após um stop loss recente (armadilha de mercado). | **Zera o tempo de espera (15m)** e permite reentrada a favor do fluxo institucional. |
+| **`CLOSE_NOW`** | `POSITION_LIFECYCLE` | Detecção de grande player/baleia contrária empurrando o book contra nossa posição aberta. | **Encerra o trade a mercado** imediatamente para estancar prejuízo ou garantir lucro residual. |
+| **`CONVERT_TO_SUPER_RUNNER`** | `POSITION_LIFECYCLE` | Trade atingiu $R \ge +1.2R$ e há vácuo de liquidez no sentido da nossa posição. | **Afrouxa o Take Profit** e move o Trailing Stop rente ao book para capturar 4R a 8R. |
+| **`AUTHORIZE_SCALE_IN`** | `POSITION_LIFECYCLE` | Posição vencedora e consolidação de continuidade favorável. | **Aumenta a mão** (Scale-In constitucional apenas quando $R \ge +1.2R$). |
 
 ---
 
-## 3. Correções Estruturais e Otimizações Aplicadas (Setembro/2026)
+## 3. Análise da Planilha em Tempo Real (Estado Atual Auditado)
 
-Para garantir operação autônoma, saudável e ininterrupta 24 horas por dia (24/7), foram implementadas as seguintes soluções no código-fonte e no ambiente de produção:
+A captura de tela da aba `Auditoria Ayla (Decisões)` reflete o comportamento perfeito do sistema após as otimizações:
 
-### 3.1. Debounce e Intervalo Mínimo de Decisão
-- **Regra:** Implementado throttle/debounce temporal de **8 segundos** (`LAYA_DEBOUNCE_MS=8000`) por par de moedas.
-- **Resultado:** A Laya não processa chamadas redundantes para o mesmo par em intervalos microscópicos, reduzindo o tráfego em mais de 80% sem perder nenhum ponto de inflexão de mercado.
-
-### 3.2. Pré-Qualificação de Setups (Filtro Anti-Ruído)
-- **Regra:** O motor do Mercado Financeiro só despacha requisições para a Laya se houver um desbalanceamento mínimo comprovado no Livro de Ordens (`LAYA_MIN_IMBALANCE=1.25`).
-- **Resultado:** Mercado lateral sem fluxo ou oscilações normais de spread não consomem processamento da Laya. Apenas setups com intenção institucional acionam o Sistema 1.
-
-### 3.3. Timeout Ajustado e Fallback Seguro
-- **Timeout Rígido:** Estabelecido em 800ms (`LAYA_TIMEOUT_MS=800`) para chamadas via rede interna Railway.
-- **Fail-Safe:** Caso a rede oscile, o motor assume postura de proteção defensiva (Fail-Closed) sem travar o loop de cotações dos ativos.
-
-### 3.4. Botão e Rotina de Zeramento na Planilha Google
-- Implementado no arquivo `google_sheets_apps_script_current.js`:
-  - Limpeza limpa da aba `Auditoria Ayla (Decisões)` preservando linha de cabeçalho e formatação visual.
-  - Sincronização via webhook com o comando de zeramento disparado pelo terminal operacional.
+1. **Eficiência e Execução Rápida:**
+   - Todas as decisões exibem **`Executado? = SIM ✅`**, comprovando que não há timeouts nem perdas de pacote.
+   - Latência real registrada entre **875ms e 1458ms** para `HOLD` e até **2016ms** para `AUTHORIZE`, compatível com o novo timeout seguro de 4000ms.
+2. **Entradas Aprovadas (`AUTHORIZE`):**
+   - Pares: **ETH/USDT**, **SOL/USDT**, **XRP/USDT**.
+   - Multiplicador de Potência: **1.5x** (Risco 1.00%).
+   - Código Racional: **`DYNAMIC_POWER_AGGRESSION`**.
+   - `Scale-In Permitido? = NÃO` (Regra constitucional respeitada: trades em fase inicial não podem sofrer scale-in antes de atingirem +1.2R de lucro).
+3. **Filtro de Ruído Operacional (`HOLD`):**
+   - Pares: **BTC/USDT** e **ETH/USDT**.
+   - Código Racional: **`NO_OPPORTUNITY`**.
+   - O robô barrou operações onde a confluência de Delta CVD e desequilíbrio do book não justificavam o risco.
+4. **Desacoplamento Constitucional:**
+   - O erro anterior `REJECTED_BY_CONSTITUTION: SCALE_IN_REQUIRES_1_2R_PROFIT` foi **100% extinto**, pois a flag de scale-in só é requisitada durante o ciclo de vida do trade (Grupo 3).
 
 ---
 
-## 4. Variáveis de Ambiente e Configurações no Railway
+## 4. Variáveis de Ambiente em Produção (Railway)
 
-As variáveis de controle da governança Laya foram injetadas e ativadas no serviço `Mercado Financeiro` via Railway CLI:
+Configurações ativas no serviço `Mercado Financeiro`:
 
-| Variável | Valor Configurado | Descrição / Efeito Prático |
+| Variável | Valor Ativo | Finalidade |
 |---|---|---|
-| `LAYA_MODE` | `ACTIVE` | Ativa a governança contextual da Laya sobre as ordens. |
-| `LAYA_SERVICE_URL` | `http://nexus-decisor-laya.railway.internal:8000` | Rota privada de baixíssima latência na malha interna do Railway. |
-| `LAYA_DEBOUNCE_MS` | `8000` | Intervalo mínimo de 8 segundos entre avaliações consecutivas do mesmo ativo. |
-| `LAYA_TIMEOUT_MS` | `800` | Limite de espera síncrona antes do fallback defensivo. |
-| `LAYA_MIN_IMBALANCE` | `1.25` | Filtro prévio: razão mínima entre ordens passivas de compra/venda para disparar consulta. |
+| `LAYA_MODE` | `ACTIVE` | Governança autônoma do Sistema 1 em tempo real. |
+| `LAYA_SERVICE_URL` | `http://nexus-decisor-laya.railway.internal:8080` | Comunicação interna privada no Railway (porta correta 8080). |
+| `LAYA_TIMEOUT_MS` | `4000` | Margem segura de 4 segundos (inferência real ocorre em ~1.2s). |
+| `LAYA_DEBOUNCE_MS` | `12000` | Janela de 12 segundos anti-perturbação por par de moeda. |
+| `LAYA_MIN_IMBALANCE` | `1.25` | Filtro prévio de desbalanceamento de book L2. |
 
 ---
 
-## 5. Os 4 Pilares de Inteligência da Laya (Sistema 1)
+## 5. Rotina de Manutenção e Auditoria da Planilha
 
-1. **Perdão Condicional de Cooldown:**
-   - Em vez de uma trava mecânica cega de 15 minutos pós-stop loss, a Laya identifica *Liquidity Sweeps* com reversão agressiva em V e autoriza reentradas imediatas em condições de alta assimetria.
-2. **Modulação Dinâmica de Potência (1.5x a 6.0x):**
-   - 1.5x: Sinal moderado com divergência técnica leve.
-   - 2.5x a 3.0x: Fluxo institucional padrão confirmado no Order Book L2.
-   - 4.0x a 5.0x: Presença de grandes players (> $100k) e rompimento estrutural.
-   - 6.0x+: Vácuo de liquidez no book oposto acompanhado de agressão institucional maciça.
-3. **Micro-Posicionamento do Stop Loss:**
-   - Análise dos 20 níveis de profundidade para posicionar o Stop Loss imediatamente atrás de barreiras passivas (icebergs/clusters de liquidez), dobrando o Payoff $R$ do trade.
-4. **Gestão de Posições Vencedoras (Runner Mode):**
-   - Acompanhamento tick a tick para identificar absorção de topo (exaustão de fluxo) para saída cirúrgica ou expansão do alvo para capturar 4R a 8R.
-
----
-
-## 6. Roteiro de Verificação e Saúde Operacional 24/7
-
-1. **Logs do Railway:** Monitorar logs de execução procurando por:
-   - Respostas de veredito da Laya com latência inferior a 15ms.
-   - Ausência de loops e supressão de mensagens repetitivas de `TIMEOUT_FAIL_CLOSED`.
-2. **Terminal Web & Dashboard:**
-   - Indicador de status da Laya ativo e responsivo.
-   - Tabela de decisões atualizada com espaçamento ordenado e racional analítico condizente com a volatilidade do momento.
-3. **Planilha Google:**
-   - Uso regular da função de zeramento de histórico para manutenção da fluidez das planilhas em longos períodos de operação.
+Para garantir que a planilha permaneça leve e rápida sem acumular excesso de linhas históricas:
+1. Abra a planilha do Google vinculada.
+2. Acesse o menu superior: **`📊 BingX & MarketFlow Pro`** -> **`🤖 Zerar Histórico Ayla/Laya`**.
+3. A função executa a limpeza segura a partir da Linha 2, preservando o cabeçalho, fórmulas e fontes de dados conectadas ao **Google Looker Studio**.
