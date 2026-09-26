@@ -70,6 +70,7 @@ dashboardRouter.get('/overview', async (_req: Request, res: Response) => {
         rationaleCode: lastDec.rationaleCode,
         counterfactual: null
       } : null,
+      recentDecisions: status.recentDecisions || [],
       breaker: false,
       drawdownR: 0
     };

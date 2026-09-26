@@ -27,6 +27,16 @@ interface BlockMetric {
   sparkline: number[];
 }
 
+interface LayaDecisionItem {
+  decisionId: string;
+  timestamp: number;
+  action: string;
+  symbol: string;
+  executed: boolean;
+  rejectionReason?: string;
+  rationaleCode: string;
+}
+
 interface OverviewData {
   layaMode: 'OFF' | 'SHADOW' | 'ACTIVE';
   latency: {
@@ -48,6 +58,7 @@ interface OverviewData {
     symbol: string;
     rationaleCode: string;
   } | null;
+  recentDecisions?: LayaDecisionItem[];
   breaker: boolean;
 }
 
@@ -228,6 +239,84 @@ export const MasterHealthDashboard: React.FC<MasterHealthDashboardProps> = ({ is
                 </div>
               </div>
             ))}
+          </div>
+
+          {/* Histórico em Tempo Real de Atuações da Laya */}
+          <div className="mt-5 bg-slate-900/80 border border-slate-800 rounded-xl p-3.5">
+            <div className="flex items-center justify-between mb-2.5">
+              <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
+                <Brain className="w-4 h-4 text-purple-400" />
+                <span>Histórico de Atuações da Laya (Decisões do Sistema 1)</span>
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono">
+                {overview?.recentDecisions?.length || 0} eventos registrados
+              </span>
+            </div>
+
+            <div className="overflow-x-auto max-h-48 overflow-y-auto custom-scrollbar">
+              <table className="w-full text-left border-collapse text-[11px]">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400 font-mono text-[10px] uppercase">
+                    <th className="py-1.5 px-2">Horário</th>
+                    <th className="py-1.5 px-2">Par</th>
+                    <th className="py-1.5 px-2">Ação Decidida</th>
+                    <th className="py-1.5 px-2">Status</th>
+                    <th className="py-1.5 px-2">Racional Institucional</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-mono">
+                  {overview?.recentDecisions && overview.recentDecisions.length > 0 ? (
+                    overview.recentDecisions.slice(0, 10).map((dec, idx) => {
+                      const isAuth = dec.action === 'AUTHORIZE';
+                      const isVeto = dec.action === 'VETO';
+                      return (
+                        <tr key={dec.decisionId || idx} className="hover:bg-slate-800/40 transition-colors">
+                          <td className="py-1.5 px-2 text-slate-400 whitespace-nowrap">
+                            {new Date(dec.timestamp).toLocaleTimeString('pt-BR')}
+                          </td>
+                          <td className="py-1.5 px-2 font-bold text-white whitespace-nowrap">
+                            {dec.symbol}
+                          </td>
+                          <td className="py-1.5 px-2">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                isAuth
+                                  ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-500/30'
+                                  : isVeto
+                                  ? 'bg-rose-950/60 text-rose-400 border border-rose-500/30'
+                                  : 'bg-amber-950/60 text-amber-400 border border-amber-500/30'
+                              }`}
+                            >
+                              {dec.action}
+                            </span>
+                          </td>
+                          <td className="py-1.5 px-2 whitespace-nowrap">
+                            {dec.executed ? (
+                              <span className="text-emerald-400 font-bold">EXECUTADO ✅</span>
+                            ) : (
+                              <span className="text-slate-400">CALIBRAÇÃO 🛡️</span>
+                            )}
+                          </td>
+                          <td className="py-1.5 px-2 text-slate-300 truncate max-w-xs" title={dec.rejectionReason || dec.rationaleCode}>
+                            {dec.rejectionReason ? (
+                              <span className="text-rose-400">{dec.rejectionReason}</span>
+                            ) : (
+                              <span>{dec.rationaleCode}</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="py-4 text-center text-slate-500 italic">
+                        Nenhuma proposta registrada ainda nesta sessão. Aguardando gatilho de microestrutura...
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* Bottom Attribution & Cascata de Poderes */}
