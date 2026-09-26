@@ -577,8 +577,56 @@ adminRouter.post('/laya/reset-decisions', async (_req: Request, res: Response) =
       timestamp: new Date().toISOString(),
       message: `${cleared} decisões de ruído removidas. Buffers em memória zerados.`
     });
-  } catch (err: any) {
-    res.status(500).json({ error: 'Falha ao resetar decisões Laya', details: err.message });
+// GET /api/admin/laya/test-ports
+// Testa conectividade e latência direta nas portas 8000, 8080 e pública
+adminRouter.get('/laya/test-ports', async (_req: Request, res: Response) => {
+  const tests = [
+    { name: 'Interna 8000', url: 'http://nexus-decisor-laya.railway.internal:8000' },
+    { name: 'Interna 8080', url: 'http://nexus-decisor-laya.railway.internal:8080' },
+    { name: 'Publica', url: 'https://nexus-decisor-laya-production.up.railway.app' }
+  ];
+
+  const results: any[] = [];
+
+  for (const t of tests) {
+    const start = performance.now();
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2000);
+      const resp = await fetch(`${t.url}/v1/systemone`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          state: { origem: 'teste_diagnostico', body: 'ping teste de portas' },
+          questions: { action: { type: 'choice', instructions: 'teste', criteria: { OK: 'ok' } } }
+        }),
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      const elapsed = performance.now() - start;
+      results.push({
+        alvo: t.name,
+        url: t.url,
+        sucesso: resp.ok,
+        statusHttp: resp.status,
+        latenciaMs: Number(elapsed.toFixed(2))
+      });
+    } catch (err: any) {
+      const elapsed = performance.now() - start;
+      results.push({
+        alvo: t.name,
+        url: t.url,
+        sucesso: false,
+        erro: err.message,
+        latenciaMs: Number(elapsed.toFixed(2))
+      });
+    }
   }
+
+  res.json({
+    timestamp: new Date().toISOString(),
+    ambiente: process.env.NODE_ENV || 'production',
+    diagnostico: results
+  });
 });
 
