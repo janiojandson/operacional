@@ -225,8 +225,12 @@ dashboardRouter.get('/blocks', async (_req: Request, res: Response) => {
       {
         id: 9,
         name: 'Integridade Operacional',
-        value: `${layaGovernanceService.getStatus().metrics.latencyP50.toFixed(1)}ms`,
-        subtext: 'Latência sub-25ms OK',
+        value: (layaGovernanceService.getStatus().recentDecisions?.length || 0) === 0
+          ? 'STANDBY'
+          : `${layaGovernanceService.getStatus().metrics.latencyP50.toFixed(1)}ms`,
+        subtext: (layaGovernanceService.getStatus().recentDecisions?.length || 0) === 0
+          ? 'Aguardando 1º fluxo'
+          : 'Latência sub-25ms OK',
         status: 'green',
         sparkline: [layaGovernanceService.getStatus().metrics.latencyP50]
       },

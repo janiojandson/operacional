@@ -457,15 +457,22 @@ export class PaperTradingEngine {
     const total = this.history.length;
     const winRate = total > 0 ? Number(((winning / total) * 100).toFixed(1)) : 0;
 
+    // PnL Realizado estritamente derivado da soma dos trades fechados da sessão atual (com taxas líquidas)
+    const sessionRealizedPnl = this.history.reduce((sum, t) => {
+      const pnl = t.totalNetPnl !== undefined ? t.totalNetPnl : (t.netPnl !== undefined ? t.netPnl : t.pnlUsd);
+      return sum + (Number.isFinite(pnl) ? Number(pnl) : 0);
+    }, 0);
+    const computedBalance = Number((this.initialBalance + sessionRealizedPnl).toFixed(2));
+
     return {
       initialBalance: Number(this.initialBalance.toFixed(2)),
-      balance: Number(this.balance.toFixed(2)),
-      equity: Number((this.balance + unrealizedPnl).toFixed(2)),
+      balance: computedBalance,
+      equity: Number((computedBalance + unrealizedPnl).toFixed(2)),
       winRate,
       totalTrades: total,
       winningTrades: winning,
       losingTrades: total - winning,
-      realizedPnl: Number(this.realizedPnl.toFixed(2)),
+      realizedPnl: Number(sessionRealizedPnl.toFixed(2)),
       openPositions: openTrades,
       history: this.history
     };
@@ -838,6 +845,12 @@ export class MirrorTradingEngine {
     const total = this.history.length;
     const winRate = total > 0 ? Number(((winning / total) * 100).toFixed(1)) : 0;
 
+    // PnL Realizado derivado estritamente do histórico da sessão
+    const sessionRealizedPnl = this.history.reduce((sum, t) => {
+      const pnl = t.totalNetPnl !== undefined ? t.totalNetPnl : (t.netPnl !== undefined ? t.netPnl : t.pnlUsd);
+      return sum + (Number.isFinite(pnl) ? Number(pnl) : 0);
+    }, 0);
+
     return {
       balance: Number(this.balance.toFixed(2)),
       equity: Number((this.balance + unrealizedPnl).toFixed(2)),
@@ -845,7 +858,7 @@ export class MirrorTradingEngine {
       totalTrades: total,
       winningTrades: winning,
       losingTrades: total - winning,
-      realizedPnl: Number(this.realizedPnl.toFixed(2)),
+      realizedPnl: Number(sessionRealizedPnl.toFixed(2)),
       openPositions: openTrades,
       history: this.history
     };

@@ -154,15 +154,17 @@ export const MasterHealthDashboard: React.FC<MasterHealthDashboardProps> = ({ is
           <div className="bg-slate-900/80 border border-slate-800 p-3 rounded-xl">
             <div className="flex items-center justify-between text-slate-400 text-[10px] uppercase font-bold">
               <span>⏱ Latência Sistema 1</span>
-              <span className={overview && overview.latency.p50 > 1000 ? 'text-amber-400' : 'text-emerald-400'}>
-                {overview && overview.latency.p50 > 1000 ? `${(overview.latency.p50 / 1000).toFixed(1)}s (Rede)` : 'sub-25ms'}
+              <span className={!overview || (overview.recentDecisions?.length || 0) === 0 ? 'text-slate-400' : (overview.latency.p50 > 1000 ? 'text-amber-400' : 'text-emerald-400')}>
+                {!overview || (overview.recentDecisions?.length || 0) === 0 ? 'STANDBY' : (overview.latency.p50 > 1000 ? `${(overview.latency.p50 / 1000).toFixed(1)}s (Rede)` : 'sub-25ms')}
               </span>
             </div>
-            <div className={`text-lg font-black mt-1 ${overview && overview.latency.p50 > 1000 ? 'text-amber-300' : 'text-white'}`}>
-              {overview ? `${overview.latency.p50.toFixed(1)}ms` : '—'}
+            <div className={`text-lg font-black mt-1 ${!overview || (overview.recentDecisions?.length || 0) === 0 ? 'text-cyan-400' : (overview.latency.p50 > 1000 ? 'text-amber-300' : 'text-white')}`}>
+              {!overview || (overview.recentDecisions?.length || 0) === 0 ? 'STANDBY' : `${overview.latency.p50.toFixed(1)}ms`}
             </div>
             <div className="text-[10px] text-slate-400 mt-0.5">
-              P95: {overview ? `${overview.latency.p95.toFixed(1)}ms` : '—'} ({overview && overview.latency.p50 > 1000 ? 'Aguardando malha' : 'Ping local'})
+              {!overview || (overview.recentDecisions?.length || 0) === 0 
+                ? 'Aguardando 1º fluxo' 
+                : `P95: ${overview.latency.p95.toFixed(1)}ms (${overview.latency.p50 > 1000 ? 'Aguardando malha' : 'Ping local'})`}
             </div>
           </div>
 
