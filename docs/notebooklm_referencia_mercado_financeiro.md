@@ -120,16 +120,19 @@ Conexão entre o **Autonomous Self-Funding Agent**, a memória do **Nexus Céreb
 ### 5.1. A Filosofia do Agente Soberano (Além do MarketFlow Pro):
 O agente não é apenas um plugin de um robô de futuros. Ele opera como uma **entidade autônoma soberana** cujo objetivo primário é a **sobrevivência e expansão econômica contínua**:
 1. **Identidade e Presença Digital Própria:**
-   - Capacidade de manter conta própria no **Twitter/X**, Telegram e Discord (via `Agent Reach` e APIs de rede social).
-   - Rastreamento de narrativas virais, engajamento com comunidades cripto, publicação de análises e captação de atenção.
+   - Carteira On-Chain Oficial (Phantom): `FBx2SKLDLsdeLM8owxU8MNVPKAfJpLpmpHHRgiZDqBoi`
+   - Capacidade de manter presença ativa no **Twitter/X**, **Instagram** e **YouTube Shorts** (via `Agent Reach` e pipeline `AgentTube`).
+   - Rastreamento de narrativas virais, publicação autônoma de análises diárias, atração de comunidade e captação de gorjetas/tips em SOL diretamente na sua Phantom.
 2. **Caçador Livre de Liquidez (Ecossistema Solana & DeFi):**
-   - Custódia autônoma de sua carteira Solana (via `@solana/web3.js`, Raydium, Jupiter e Pump.fun).
-   - Sniping de memecoins em estágios iniciais, identificação de pools recém-criados com Jito Bundles (proteção MEV) e arbitragem descentralizada.
-   - Geração de caixa rápido fora do ambiente tradicional de derivativos.
-3. **Capacidade de Reprodução e Spawn de Subagentes:**
-   - O agente principal pode instanciar **novos agentes especializados** (usando a malha de workers do Cérebro ou containers efêmeros) para tarefas específicas (ex: 1 subagente monitorando X, 1 subagente monitorando pools de Raydium, 1 executando micro-scalps).
+   - Custódia autônoma de sua carteira Solana (via `@solana/web3.js`, Raydium, Jupiter v6 e Pump.fun).
+   - Teto de risco operacional inegociável de **máximo 10% do saldo total por trade** e barreira de slippage máximo de 500 bps (5%) contra sandwich MEV.
+   - Sniping de memecoins em estágios iniciais com validação da Ayla/Laya (timeout de 4000ms para acomodar latência da CPU) e pré-filtro local (0ms) anti-honeypot.
+3. **Capacidade de Reprodução e Spawn de Subagentes (Regra 50/50):**
+   - O agente principal pode instanciar **novos agentes especializados** (ex: caçador de memes, criador de vídeos, gerador de leads).
+   - **Gatilho de Prosperidade ($\ge 0.50$ SOL):** 50% do excedente de lucro é sacado diretamente para o sócio Janio e os outros 50% financiam o nascimento da carteira do agente filho.
 4. **Ciclo Fechado de Sobrevivência e Financiamento:**
    - **Geração de Recursos Próprios:** Lucros em SOL, USDT e memecoins são convertidos para garantir sua própria existência.
-   - **Pagamento de Infraestrutura:** O próprio agente liquida e paga suas contas de hospedagem (Railway), chaves de API, nós RPC e conexões de rede.
-   - **Degradação e Ascensão Cognitiva:** Se o capital acumulado diminui, o agente opera com modelos econômicos ou locais (OmniRoute); se acumula grandes reservas, contrata modelos de raciocínio de ponta (o1, DeepSeek R1, Claude 3.5 Sonnet) para acelerar seu crescimento.
-   - **Independência Total:** O MarketFlow Pro é apenas **um** dos seus braços mecânicos, não sua prisão. O agente tem liberdade para explorar novas fontes de receita na internet.
+   - **Pagamento de Infraestrutura:** O próprio agente liquida suas contas de hospedagem (Railway), nós RPC e chaves.
+   - **Degradação e Ascensão Cognitiva:** Se o saldo cair para $< 0.05$ SOL, entra em modo espartano (apenas assimetrias $\ge 3\times$); se $\le 0.001$ SOL, pausa a execução por inanição até novo aporte.
+   - **Status de Infraestrutura Atual:** Repositório dedicado [`janiojandson/nexus-quant-solana`](https://github.com/janiojandson/nexus-quant-solana), testado com 23 testes unitários (100% pass) e em deploy ativo online no Railway (`Nexus-Multi`).
+
