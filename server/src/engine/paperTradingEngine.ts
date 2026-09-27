@@ -16,6 +16,10 @@ export interface SimulatedTradeWithTrailing extends SimulatedTrade {
   trailingStopPrice?: number;
   isRunner?: boolean;
   runnerFloorPrice?: number;
+  partialTaken?: boolean;
+  partialPnlUsd?: number;
+  originalQty?: number;
+  initialSlDistance?: number;
 }
 
 // ─── Validador de Margem e Lote Mínimo (Bybit USDT Perpétuos) ────────────────
@@ -251,13 +255,39 @@ export class PaperTradingEngine {
     trade.pnlPct = Number((priceDeltaPct * 100).toFixed(2));
     trade.pnlUsd = Number((notionalSize * priceDeltaPct).toFixed(2));
 
+    if (!trade.initialSlDistance) {
+      trade.initialSlDistance = Math.abs(trade.entryPrice - trade.stopLoss);
+    }
+
     const tpDistancePct = Math.abs(trade.takeProfit - trade.entryPrice) / trade.entryPrice;
-    const slDistancePct = Math.abs(trade.entryPrice - trade.stopLoss) / trade.entryPrice;
+    const initialSlDistance = trade.initialSlDistance || Math.abs(trade.entryPrice - trade.stopLoss);
+    const slDistancePct = initialSlDistance / trade.entryPrice;
     if (!Number.isFinite(tpDistancePct) || tpDistancePct <= 0 || !Number.isFinite(slDistancePct) || slDistancePct <= 0) return;
     const decimals = currentPrice < 5 ? 4 : (currentPrice < 100 ? 3 : 2);
 
-    const slDistance = Math.abs(trade.entryPrice - trade.stopLoss);
+    const slDistance = initialSlDistance;
     const progressRatio = priceDeltaPct / tpDistancePct;
+    const currentR = slDistancePct > 0 ? priceDeltaPct / slDistancePct : 0;
+
+    // 🌊 0.1 REALIZAÇÃO PARCIAL POR ONDAS (+0.6R) COM BREAKEVEN AUTOMÁTICO (Risco ZERO)
+    if (!trade.partialTaken && currentR >= 0.6) {
+      trade.partialTaken = true;
+      if (!trade.originalQty) trade.originalQty = trade.qty;
+      
+      const halfQty = Number((trade.qty * 0.5).toFixed(decimals));
+      const partialGainUsd = Number(((notionalSize * 0.5) * priceDeltaPct).toFixed(2));
+      
+      // Credita lucro parcial no saldo da conta
+      this.balance += partialGainUsd;
+      this.realizedPnl += partialGainUsd;
+      trade.partialPnlUsd = (trade.partialPnlUsd || 0) + partialGainUsd;
+      trade.qty = halfQty;
+      if (trade.notionalUsd) trade.notionalUsd = Number((trade.notionalUsd * 0.5).toFixed(2));
+
+      // Trava Stop Loss instantaneamente no ponto de entrada (Breakeven)
+      trade.stopLoss = trade.entryPrice;
+      console.log(`[WAVE HARVEST] Parcial executada em ${symbol} a +${currentR.toFixed(2)}R | Lucro Parcial: +$${partialGainUsd} | Stop movido para Breakeven (${trade.entryPrice})`);
+    }
 
     // ─── 0. INVALIDAÇÃO ATIVA POR ORDER FLOW (Antes de testar Stop Loss passivo) ───
     if (currentBook || recentAggression) {

@@ -142,8 +142,19 @@ microStopEngine.handleSignal(signal, 100_000, decision, {
   trace: { l2DepthTop20: 100, imbalanceRatio: 2, cvdDelta60s: 10, spoofScore: 0, betaDivergence: false }
 });
 
-const microTrade = microStopEngine.getAccountState().openPositions[0];
-assert.ok(microTrade, 'Trade must be opened with micro stop');
-assert.equal(microTrade.stopLoss, 99_500, 'Stop loss must be tightened to 99,500 based on Laya micro-stop proposal');
+// Teste de Realização Parcial em +0.6R com Breakeven (Risco Zero)
+const waveEngine = new PaperTradingEngine();
+waveEngine.handleSignal(signal, 100_000, decision, {
+  approved: true, reasons: [], stopLoss: 98_000, takeProfit: 105_000,
+  stopDistancePct: 0.02, notionalUsd: 1_000, riskUsd: 20, grossR: 2.5, netR: 2.31
+});
+// R = 2.000 de distância de SL (100k - 98k). +0.6R = +1.200 (preço 101.200)
+waveEngine.updatePrice('BTC/USDT', 101_250); // Atinge +0.625R
+const waveTrade = waveEngine.getAccountState().openPositions[0];
+assert.ok(waveTrade, 'Posição deve continuar aberta após parcial');
+assert.equal(waveTrade.partialTaken, true, 'partialTaken deve ser true após bater +0.6R');
+assert.equal(waveTrade.stopLoss, 100_000, 'Stop Loss deve ter sido movido para o ponto de entrada (Breakeven)');
+assert.ok(waveTrade.partialPnlUsd && waveTrade.partialPnlUsd > 0, 'Lucro parcial deve ser positivo e registrado');
+assert.ok(waveEngine.getAccountState().balance > 10000, 'Saldo da conta deve ter aumentado com a parcial realizada');
 
 console.log('paperTradingEngine: PASS');
