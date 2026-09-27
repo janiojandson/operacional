@@ -281,7 +281,9 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
               </div>
             ) : (
               account.history.map((hist: any) => {
-                const totalNet = hist.totalNetPnl !== undefined ? hist.totalNetPnl : ((hist.partialPnlUsd || 0) + (hist.netPnl ?? hist.pnlUsd));
+                const totalNet = (hist.totalNetPnl !== undefined && hist.totalNetPnl !== 0)
+                  ? hist.totalNetPnl
+                  : Number(((hist.partialPnlUsd || 0) + (hist.netPnl ?? hist.pnlUsd)).toFixed(2));
                 const isTp = hist.status === 'CLOSED_TP' || hist.status === 'CLOSED_PARTIAL_TP' || totalNet > 0;
                 const isPartial = hist.partialTaken || (hist.partialPnlUsd && hist.partialPnlUsd > 0) || hist.status === 'CLOSED_PARTIAL_TP';
                 const feeVal = hist.fee ?? 0;

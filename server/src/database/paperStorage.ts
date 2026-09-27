@@ -333,8 +333,12 @@ export async function hydrateMasterAccount(): Promise<PaperAccount> {
     netPnl: Number(row.net_pnl || row.pnl_usd || 0),
     partialTaken: Boolean(row.partial_taken),
     partialPnlUsd: row.partial_pnl_usd !== null && row.partial_pnl_usd !== undefined ? Number(row.partial_pnl_usd) : undefined,
-    totalNetPnl: row.total_net_pnl !== null && row.total_net_pnl !== undefined ? Number(row.total_net_pnl) : undefined,
-    isNetPositive: row.is_net_positive !== null && row.is_net_positive !== undefined ? Boolean(row.is_net_positive) : undefined,
+    totalNetPnl: (row.total_net_pnl !== null && row.total_net_pnl !== undefined && Number(row.total_net_pnl) !== 0)
+      ? Number(row.total_net_pnl) 
+      : Number(((Number(row.partial_pnl_usd || 0)) + Number(row.net_pnl || row.pnl_usd || 0)).toFixed(4)),
+    isNetPositive: row.is_net_positive !== null && row.is_net_positive !== undefined && Number(row.is_net_positive) !== 0
+      ? Boolean(row.is_net_positive)
+      : (((Number(row.partial_pnl_usd || 0)) + Number(row.net_pnl || row.pnl_usd || 0)) > 0),
     qty: Number(row.qty || (Number(row.entry_price) > 0 ? (Number(row.notional_usd || 2000) / Number(row.entry_price)) : 0)),
     notionalUsd: Number(row.notional_usd || (Number(row.entry_price) * Number(row.qty || 0)) || 2000),
     marginUsd: Number(row.margin_usd || ((Number(row.notional_usd || (Number(row.entry_price) * Number(row.qty || 0)) || 2000)) / 10))
