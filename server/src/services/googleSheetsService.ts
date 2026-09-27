@@ -87,24 +87,12 @@ export interface ShadowOpportunityPayload {
 
 export class GoogleSheetsService {
   /**
-   * Envia os dados silenciosamente (non-blocking em background)
+   * [100% Passivo via PostgreSQL JDBC]
+   * Webhook HTTP de saída desativado para garantir custo computacional ZERO no backend.
+   * A Planilha Google consulta diretamente o banco PostgreSQL via JDBC sem onerar o servidor.
    */
-  private static async sendData(data: any): Promise<void> {
-    if (!WEB_APP_URL) return;
-    try {
-      const payload = JSON.stringify(data);
-      fetch(WEB_APP_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: payload,
-        signal: AbortSignal.timeout(6000)
-      }).catch(err => {
-        // Log silencioso sem interromper o fluxo do motor
-        console.warn('[GoogleSheetsService] Aviso ao enviar webhook (silencioso):', err.message);
-      });
-    } catch {
-      // Ignora para preservar performance de ultra baixa latência
-    }
+  private static async sendData(_data: any): Promise<void> {
+    return;
   }
 
   static async logTradeExecution(log: Omit<TradeLogPayload, 'type'>): Promise<void> {
