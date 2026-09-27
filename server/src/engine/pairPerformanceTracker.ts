@@ -29,13 +29,22 @@ export class PairPerformanceTracker {
     return assets.map(asset => {
       const trades = symbolMap.get(asset.symbol) || [];
       const totalTrades = trades.length;
-      const winningTrades = trades.filter(t => t.status === 'CLOSED_TP').length;
-      const losingTrades = trades.filter(t => t.status === 'CLOSED_SL').length;
+      const getTradePnl = (t: SimulatedTrade) => {
+        if (t.totalNetPnl !== undefined) return t.totalNetPnl;
+        return (t.partialPnlUsd || 0) + (t.netPnl ?? t.pnlUsd);
+      };
+
+      const winningTrades = trades.filter(t => 
+        t.status === 'CLOSED_TP' || 
+        t.status === 'CLOSED_PARTIAL_TP' || 
+        getTradePnl(t) > 0
+      ).length;
+      const losingTrades = totalTrades - winningTrades;
       const winRate = totalTrades > 0 ? Number(((winningTrades / totalTrades) * 100).toFixed(1)) : 0;
       
-      const realizedPnl = Number(trades.reduce((sum, t) => sum + t.pnlUsd, 0).toFixed(2));
-      const grossProfit = trades.filter(t => t.pnlUsd > 0).reduce((sum, t) => sum + t.pnlUsd, 0);
-      const grossLoss = Math.abs(trades.filter(t => t.pnlUsd < 0).reduce((sum, t) => sum + t.pnlUsd, 0));
+      const realizedPnl = Number(trades.reduce((sum, t) => sum + getTradePnl(t), 0).toFixed(2));
+      const grossProfit = trades.filter(t => getTradePnl(t) > 0).reduce((sum, t) => sum + getTradePnl(t), 0);
+      const grossLoss = Math.abs(trades.filter(t => getTradePnl(t) < 0).reduce((sum, t) => sum + getTradePnl(t), 0));
       
       const profitFactor = grossLoss > 0 
         ? Number((grossProfit / grossLoss).toFixed(2)) 

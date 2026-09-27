@@ -38,6 +38,9 @@ export interface TradeLogPayload {
   pnlTeoricoSemTrailing?: string;
   tradeId?: string;
   eventKind?: 'OPEN' | 'CLOSE';
+  partialTaken?: boolean;
+  partialPnlUsd?: number;
+  totalNetPnl?: number;
   masterBalanceAtEntry?: number;
   masterNotionalUsd?: number;
   masterExposureRatio?: number;

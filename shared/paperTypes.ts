@@ -24,7 +24,7 @@ export interface SimulatedTrade {
   session: SessionType;
   dayOfWeek: string; // 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'
   marketRegime: MarketRegime;
-  status: 'OPEN' | 'CLOSED_TP' | 'CLOSED_SL';
+  status: 'OPEN' | 'CLOSED_TP' | 'CLOSED_SL' | 'CLOSED_PARTIAL_TP';
   entryTime: number;
   closeTime?: number;
   signalReason: string;
@@ -38,6 +38,10 @@ export interface SimulatedTrade {
   masterBalanceAtEntry?: number;
   fee?: number;
   netPnl?: number;
+  partialTaken?: boolean;
+  partialPnlUsd?: number;
+  totalNetPnl?: number;
+  isNetPositive?: boolean;
   strategyVersion?: string;
   closeReason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST';
   realizedR?: number;

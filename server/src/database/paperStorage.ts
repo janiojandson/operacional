@@ -44,6 +44,10 @@ export interface MasterOrderRow {
   trailing_stop_price: number | null;
   fee: number;
   net_pnl: number;
+  partial_taken?: number;
+  partial_pnl_usd?: number;
+  total_net_pnl?: number;
+  is_net_positive?: number;
   qty?: number;
   notional_usd?: number;
   margin_usd?: number;
@@ -192,6 +196,10 @@ export async function initPaperTables(): Promise<void> {
   await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS qty NUMERIC NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS notional_usd NUMERIC NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS margin_usd NUMERIC NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS partial_taken INTEGER NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS partial_pnl_usd NUMERIC NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS total_net_pnl NUMERIC NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS is_net_positive INTEGER NOT NULL DEFAULT 0`);
 
   // ─── Mirror Account Tables ────────────────────────────────────────────────
   await query(`
@@ -323,6 +331,10 @@ export async function hydrateMasterAccount(): Promise<PaperAccount> {
     trailingStopPrice: row.trailing_stop_price !== null ? Number(row.trailing_stop_price) : undefined,
     fee: Number(row.fee || 0),
     netPnl: Number(row.net_pnl || row.pnl_usd || 0),
+    partialTaken: Boolean(row.partial_taken),
+    partialPnlUsd: row.partial_pnl_usd !== null && row.partial_pnl_usd !== undefined ? Number(row.partial_pnl_usd) : undefined,
+    totalNetPnl: row.total_net_pnl !== null && row.total_net_pnl !== undefined ? Number(row.total_net_pnl) : undefined,
+    isNetPositive: row.is_net_positive !== null && row.is_net_positive !== undefined ? Boolean(row.is_net_positive) : undefined,
     qty: Number(row.qty || (Number(row.entry_price) > 0 ? (Number(row.notional_usd || 2000) / Number(row.entry_price)) : 0)),
     notionalUsd: Number(row.notional_usd || (Number(row.entry_price) * Number(row.qty || 0)) || 2000),
     marginUsd: Number(row.margin_usd || ((Number(row.notional_usd || (Number(row.entry_price) * Number(row.qty || 0)) || 2000)) / 10))
@@ -372,8 +384,9 @@ export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Prom
        pnl_usd, pnl_pct, r_multiple, power_multiplier, temperature, session,
        day_of_week, market_regime, status, entry_time, close_time, signal_reason,
        trailing_active, trailing_trigger_price, trailing_stop_price,
-       fee, net_pnl, qty, notional_usd, margin_usd, updated_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
+       fee, net_pnl, qty, notional_usd, margin_usd, updated_at,
+       partial_taken, partial_pnl_usd, total_net_pnl, is_net_positive
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
      ON CONFLICT (id) DO UPDATE SET
        current_price = EXCLUDED.current_price,
        pnl_usd = EXCLUDED.pnl_usd,
@@ -388,6 +401,10 @@ export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Prom
        qty = EXCLUDED.qty,
        notional_usd = EXCLUDED.notional_usd,
        margin_usd = EXCLUDED.margin_usd,
+       partial_taken = EXCLUDED.partial_taken,
+       partial_pnl_usd = EXCLUDED.partial_pnl_usd,
+       total_net_pnl = EXCLUDED.total_net_pnl,
+       is_net_positive = EXCLUDED.is_net_positive,
        updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
    `,
     [
@@ -418,7 +435,11 @@ export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Prom
       qty,
       notional,
       marginUsd,
-      Date.now()
+      Date.now(),
+      trade.partialTaken ? 1 : 0,
+      trade.partialPnlUsd || 0,
+      trade.totalNetPnl !== undefined ? trade.totalNetPnl : (trade.netPnl || trade.pnlUsd || 0),
+      trade.isNetPositive ? 1 : ((trade.totalNetPnl ?? trade.netPnl ?? trade.pnlUsd) > 0 ? 1 : 0)
     ]
   );
 }

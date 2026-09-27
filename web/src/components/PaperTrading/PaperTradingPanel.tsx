@@ -280,9 +280,10 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
                 Nenhuma operação finalizada na sessão.
               </div>
             ) : (
-              account.history.map((hist: { id: string; status: string; symbol: string; type: string; entryPrice: number; currentPrice: number; pnlUsd: number; netPnl?: number; fee?: number; pnlPct: number; powerMultiplier: number; temperature: string; signalReason: string }) => {
-                const isTp = hist.status === 'CLOSED_TP';
-                const netVal = hist.netPnl ?? hist.pnlUsd;
+              account.history.map((hist: any) => {
+                const totalNet = hist.totalNetPnl !== undefined ? hist.totalNetPnl : ((hist.partialPnlUsd || 0) + (hist.netPnl ?? hist.pnlUsd));
+                const isTp = hist.status === 'CLOSED_TP' || hist.status === 'CLOSED_PARTIAL_TP' || totalNet > 0;
+                const isPartial = hist.partialTaken || (hist.partialPnlUsd && hist.partialPnlUsd > 0) || hist.status === 'CLOSED_PARTIAL_TP';
                 const feeVal = hist.fee ?? 0;
                 return (
                   <div key={hist.id} className="flex items-center justify-between py-1.5 px-2 hover:bg-surface-hover/40 text-[11px] rounded transition-colors">
@@ -292,6 +293,11 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
                       <span className={`text-[9px] px-1.5 py-0.2 rounded font-semibold ${hist.type === 'BUY' ? 'text-trade-green bg-trade-green/10' : 'text-trade-red bg-trade-red/10'}`}>
                         {hist.type === 'BUY' ? 'BUY' : 'SELL'}
                       </span>
+                      {isPartial && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30" title="Parcial de +0.6R colhida no topo/suporte">
+                          🌊 +${(hist.partialPnlUsd || 0).toFixed(2)} (0.6R)
+                        </span>
+                      )}
                     </div>
 
                     <div className="text-text-muted text-[10px] hidden sm:block">
@@ -300,11 +306,17 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
 
                     <div className="flex items-center space-x-2">
                       <span className="text-text-muted text-[9px] hidden sm:inline">fee ${feeVal.toFixed(2)}</span>
-                      <span className={`font-bold ${netVal >= 0 ? 'text-trade-green' : 'text-trade-red'}`}>
-                        {netVal >= 0 ? `+$${netVal.toFixed(2)}` : `-$${Math.abs(netVal).toFixed(2)}`}
+                      <span className={`font-bold ${totalNet >= 0 ? 'text-trade-green' : 'text-trade-red'}`}>
+                        {totalNet >= 0 ? `+$${totalNet.toFixed(2)}` : `-$${Math.abs(totalNet).toFixed(2)}`}
                       </span>
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${isTp ? 'bg-trade-green/20 text-trade-green' : 'bg-trade-red/20 text-trade-red'}`}>
-                        {isTp ? 'TP' : 'SL'}
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${
+                        hist.status === 'CLOSED_PARTIAL_TP' || (isPartial && totalNet > 0)
+                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                          : isTp 
+                          ? 'bg-trade-green/20 text-trade-green' 
+                          : 'bg-trade-red/20 text-trade-red'
+                      }`}>
+                        {hist.status === 'CLOSED_PARTIAL_TP' || (isPartial && totalNet > 0) ? 'PARCIAL TP' : (isTp ? 'TP' : 'SL')}
                       </span>
                     </div>
                   </div>

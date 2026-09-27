@@ -423,6 +423,15 @@ export class PaperTradingEngine {
       trade.netPnl = Number((trade.pnlUsd - openFee - closeFee).toFixed(4));
       const settlePnl = trade.netPnl;
       trade.closeTime = Math.floor(Date.now() / 1000);
+
+      // 🌊 PnL Total Consolidado (1ª Metade Parcial + 2ª Metade Final)
+      const totalNetPnl = Number(((trade.partialPnlUsd || 0) + settlePnl).toFixed(4));
+      trade.totalNetPnl = totalNetPnl;
+      trade.isNetPositive = totalNetPnl > 0;
+      if (trade.partialTaken && totalNetPnl > 0 && trade.status !== 'CLOSED_TP') {
+        trade.status = 'CLOSED_PARTIAL_TP';
+      }
+
       this.realizedPnl += settlePnl;
       this.balance += settlePnl;
       this.history.unshift(trade);
@@ -438,7 +447,12 @@ export class PaperTradingEngine {
   public getAccountState(): PaperAccount {
     const openTrades = Array.from(this.openPositions.values());
     const unrealizedPnl = openTrades.reduce((sum, t) => sum + t.pnlUsd, 0);
-    const winning = this.history.filter(t => t.status === 'CLOSED_TP').length;
+    // Considera vitória: fechamento no TP, fechamento com parcial positiva ou PnL consolidado positivo
+    const winning = this.history.filter(t => 
+      t.status === 'CLOSED_TP' || 
+      t.status === 'CLOSED_PARTIAL_TP' || 
+      (t.totalNetPnl !== undefined ? t.totalNetPnl > 0 : (t.netPnl || t.pnlUsd) > 0)
+    ).length;
     const total = this.history.length;
     const winRate = total > 0 ? Number(((winning / total) * 100).toFixed(1)) : 0;
 
@@ -476,7 +490,16 @@ export class PaperTradingEngine {
     trade.currentPrice = closePrice;
     trade.pnlUsd = Number(netPnl.toFixed(2));
     trade.netPnl = netPnl;
-    trade.status = netPnl >= 0 ? 'CLOSED_TP' : 'CLOSED_SL';
+    
+    // 🌊 PnL Total Consolidado
+    const totalNetPnl = Number(((trade.partialPnlUsd || 0) + netPnl).toFixed(4));
+    trade.totalNetPnl = totalNetPnl;
+    trade.isNetPositive = totalNetPnl > 0;
+    if (trade.partialTaken && totalNetPnl > 0) {
+      trade.status = 'CLOSED_PARTIAL_TP';
+    } else {
+      trade.status = netPnl >= 0 ? 'CLOSED_TP' : 'CLOSED_SL';
+    }
     if (reason) trade.closeReason = reason;
 
     const slDistance = Math.abs(trade.entryPrice - trade.stopLoss);
@@ -806,7 +829,11 @@ export class MirrorTradingEngine {
   public getAccountState(): PaperAccount {
     const openTrades = Array.from(this.openPositions.values());
     const unrealizedPnl = openTrades.reduce((sum, t) => sum + t.pnlUsd, 0);
-    const winning = this.history.filter(t => t.status === 'CLOSED_TP').length;
+    const winning = this.history.filter(t => 
+      t.status === 'CLOSED_TP' || 
+      t.status === 'CLOSED_PARTIAL_TP' || 
+      (t.totalNetPnl !== undefined ? t.totalNetPnl > 0 : (t.netPnl || t.pnlUsd) > 0)
+    ).length;
     const total = this.history.length;
     const winRate = total > 0 ? Number(((winning / total) * 100).toFixed(1)) : 0;
 

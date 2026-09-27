@@ -33,12 +33,18 @@ export class QuantStrategyEngine {
 
   public static generateHealthReport(account: PaperAccount): QuantStrategyHealthReport {
     const trades = [...account.history]
-      .filter(trade => trade.status === 'CLOSED_TP' || trade.status === 'CLOSED_SL')
+      .filter(trade => trade.status === 'CLOSED_TP' || trade.status === 'CLOSED_SL' || trade.status === 'CLOSED_PARTIAL_TP')
       .reverse()
-      .map(trade => ({
-      ...trade,
-      pnlUsd: trade.netPnl ?? trade.pnlUsd
-    })); // Todas as métricas usam PnL líquido quando ele estiver disponível.
+      .map(trade => {
+        const consolidatedPnl = trade.totalNetPnl !== undefined 
+          ? trade.totalNetPnl 
+          : ((trade.partialPnlUsd || 0) + (trade.netPnl ?? trade.pnlUsd));
+        return {
+          ...trade,
+          pnlUsd: Number(consolidatedPnl.toFixed(2)),
+          netPnl: Number(consolidatedPnl.toFixed(2))
+        };
+      });
     const initialBal = Number.isFinite(account.initialBalance) && (account.initialBalance ?? 0) > 0
       ? Number(account.initialBalance)
       : this.INITIAL_BALANCE;

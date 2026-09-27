@@ -114,10 +114,34 @@ dashboardRouter.get('/blocks', async (_req: Request, res: Response) => {
       WHERE entry_ts >= NOW() - INTERVAL '30 days'
     `).catch(() => []);
 
-    const n = Number(tradeStats[0]?.n ?? 0);
-    const expectationR = Number(tradeStats[0]?.avg_r ?? 0);
-    const avgWin = Number(tradeStats[0]?.avg_win ?? 1.5);
-    const avgLoss = Math.abs(Number(tradeStats[0]?.avg_loss ?? -1.0));
+    let n = Number(tradeStats[0]?.n ?? 0);
+    let expectationR = Number(tradeStats[0]?.avg_r ?? 0);
+    let avgWin = Number(tradeStats[0]?.avg_win ?? 1.5);
+    let avgLoss = Math.abs(Number(tradeStats[0]?.avg_loss ?? -1.0));
+
+    // Se trade_events estiver vazio, busca métricas consolidadas de paper_master_orders
+    if (n === 0) {
+      const masterOrders = await query<{
+        n: string;
+        avg_r: string;
+        avg_win: string;
+        avg_loss: string;
+      }>(`
+        SELECT
+          COUNT(*) AS n,
+          COALESCE(AVG(r_multiple), 0) AS avg_r,
+          COALESCE(AVG(CASE WHEN COALESCE(total_net_pnl, net_pnl, pnl_usd) > 0 THEN r_multiple END), 0) AS avg_win,
+          COALESCE(AVG(CASE WHEN COALESCE(total_net_pnl, net_pnl, pnl_usd) <= 0 THEN r_multiple END), 0) AS avg_loss
+        FROM paper_master_orders
+        WHERE status != 'OPEN'
+      `).catch(() => []);
+
+      n = Number(masterOrders[0]?.n ?? 0);
+      expectationR = Number(masterOrders[0]?.avg_r ?? 0);
+      avgWin = Math.max(1.0, Number(masterOrders[0]?.avg_win ?? 1.5));
+      avgLoss = Math.max(0.5, Math.abs(Number(masterOrders[0]?.avg_loss ?? -1.0)));
+    }
+
     const asymmetry = avgLoss > 0 ? (avgWin / avgLoss) : 1.0;
 
     // Bloco 8: Atribuição Laya
