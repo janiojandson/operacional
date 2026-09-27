@@ -27,6 +27,7 @@ import { evaluateCryptoOpportunity } from './engine/cryptoStrategyDecision.js';
 import { calculateAdaptiveRisk } from './engine/adaptiveRisk.js';
 import { getCryptoStrategyProfile } from './engine/cryptoStrategyProfile.js';
 import { layaGovernanceService } from './services/layaGovernanceService.js';
+import { macroSentinelClient } from './services/macroSentinelService.js';
 // SaaS: Autenticação e Rotas
 import { authRouter } from './auth/authRoutes.js';
 import { adminRouter, bindMasterControlHandler } from './routes/adminRoutes.js';
@@ -823,11 +824,27 @@ app.get('/api/audit-logs', requireAuth, async (req, res) => {
   }
 });
 
+// Endpoint de Regime Macro Institucional (Alimentado pelo nexus-macro-sentinel :4005)
+app.get('/api/macro-regime', async (req, res) => {
+  const prediction = await macroSentinelClient.getMacroPrediction();
+  res.json({
+    status: 'ONLINE',
+    macroSentinel: prediction || {
+      regime: 'NEUTRAL_RANGING',
+      predictiveScore: 0,
+      isCircuitBreakerActive: false,
+      confluences: ['Fallback padrão']
+    },
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Endpoint do feed em tempo real do Master Quant para a visão do Cliente
-app.get('/api/client/master-feed', requireAuth, (req, res) => {
+app.get('/api/client/master-feed', requireAuth, async (req, res) => {
   const account = paperTrading.getAccountState();
   const summaries = marketManager.getSummaries();
   const logs = clientCopyTrader.getLogs();
+  const macroPrediction = await macroSentinelClient.getMacroPrediction();
 
   const cryptoPairs = summaries.filter(s => s.symbol.includes('USDT')).map(s => ({
     symbol: s.symbol,
@@ -838,6 +855,8 @@ app.get('/api/client/master-feed', requireAuth, (req, res) => {
   res.json({
     masterOnline: true,
     autonomiaStatus: '100% ATIVA (24/7 Binance Perpétuos - 10x Isolada)',
+    macroRegime: macroPrediction?.regime || 'NEUTRAL_RANGING',
+    macroScore: macroPrediction?.predictiveScore || 0,
     metrics: {
       winRate: account.winRate,
       totalTrades: account.totalTrades,
