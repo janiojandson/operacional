@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Construir o motor autônomo do `nexus-quant-solana`, um Agente Econômico Soberano dotado de carteira Solana nativa (`2ymfaHAfgBBKiqBNjFb9trV3Bc7WKb6DEG7Va48iCoGj`), acesso livre à internet (X/Twitter via `Agent Reach`), capacidade de caçar liquidez em memecoins (Pump.fun/Raydium com Jito Bundles), instanciar subagentes filhos e operar sob a regra estrita de Darwinismo Digital (Burn Rate vs. PnL: gerar lucro ou morrer por falta de saldo).
+**Goal:** Construir o motor autônomo do `nexus-quant-solana`, um Agente Econômico Soberano dotado de carteira Solana nativa Phantom (`FBx2SKLDLsdeLM8owxU8MNVPKAfJpLpmpHHRgiZDqBoi`), acesso livre à internet (X/Twitter via `Agent Reach`, Instagram e YouTube via `AgentTube`), capacidade de caçar liquidez em memecoins (Pump.fun/Raydium com Jito Bundles), instanciar subagentes filhos e operar sob a regra estrita de Darwinismo Digital (Burn Rate vs. PnL: gerar lucro ou morrer por falta de saldo).
 
 **Architecture:**
 - **Núcleo de Sobrevivência (Burn Rate & Vitality Engine):** Monitor em tempo real que calcula o custo de cada computação (RPC, gas, tokens) e o Runway restante. Se o saldo cair abaixo de 0.05 SOL, entra em modo de hibernação espartana; se ultrapassar 0.50 SOL, destrava 50% de lucro para o Janio e provisiona o primeiro agente filho.
@@ -12,7 +12,7 @@
 
 **Tech Stack:** Node.js 22+, TypeScript 5.3+, `@solana/web3.js`, `@jup-ag/core`, `axios`, PostgreSQL (Railway), Laya API (`http://nexus-decisor-laya.railway.internal:8080`), Docker / Railway CLI.
 
-**Spec:** Baseado na diretiva suprema de sobrevivência econômica, nas 28 ferramentas mapeadas no GitHub (`Tauric/TradingAgents`, `agent-reach`, `omkarcloud/gosom`, `autonomous-agent`) e na carteira `2ymfaHAfgBBKiqBNjFb9trV3Bc7WKb6DEG7Va48iCoGj`.
+**Spec:** Baseado na diretiva suprema de sobrevivência econômica, nas 28 ferramentas mapeadas no GitHub (`Tauric/TradingAgents`, `agent-reach`, `omkarcloud/gosom`, `autonomous-agent`) e na carteira `FBx2SKLDLsdeLM8owxU8MNVPKAfJpLpmpHHRgiZDqBoi`.
 
 ## Global Constraints
 - Seguir estritamente o protocolo `safe-dev` (módulos desacoplados, contratos imutáveis, TDD e zero vazamento de chaves privadas).
@@ -68,7 +68,7 @@ git commit -m "feat(vitality): implementa motor de sobrevivencia e calculo de ru
 
 **Interfaces:**
 - Consumes: `AGENT_SOLANA_PRIVATE_KEY` (Base58 ou Array de bytes)
-- Produces: `getWalletPublicKey(): string` (deve retornar `2ymfaHAfgBBKiqBNjFb9trV3Bc7WKb6DEG7Va48iCoGj`)
+- Produces: `getWalletPublicKey(): string` (deve retornar `FBx2SKLDLsdeLM8owxU8MNVPKAfJpLpmpHHRgiZDqBoi`)
 - Produces: `getSolBalance(): Promise<number>`
 - Produces: `executeSwapJupiter(inputMint: string, outputMint: string, amountLamports: number, maxSlippageBps: number): Promise<string>`
 
@@ -127,35 +127,40 @@ git commit -m "feat(risk): gatekeeper de seguranca de memecoins integrado com La
 
 ---
 
-### Task 4: Módulo de Interação Social no X / Twitter (Agent Reach)
+### Task 4: Presença Multicanal de Monetização (X/Twitter via Agent Reach + Instagram & YouTube via AgentTube)
 
 **Files:**
 - Create: `src/social/agentReachClient.ts`
+- Create: `src/social/agentTubeEngine.ts`
 - Test: `src/social/agentReachClient.test.ts`
+- Test: `src/social/agentTubeEngine.test.ts`
 
 **Interfaces:**
 - Produces: `scanViralNarratives(keywords: string[]): Promise<Array<{ trend: string; volumeScore: number }>>`
-- Produces: `postMarketUpdate(content: string): Promise<{ success: boolean; tweetId?: string }>`
+- Produces: `publishSocialPost(platform: 'X' | 'INSTAGRAM', content: string, mediaUrl?: string): Promise<{ success: boolean; postId?: string }>`
+- Produces: `generateAndUploadShortVideo(topic: string, script: string): Promise<{ success: boolean; videoUrl?: string }>`
 - Produces: `checkWalletTips(): Promise<{ receivedTipsSol: number }>`
 
-- [ ] **Step 1: Escrever teste unitário para o cliente de scraping e postagem no X**
-Testar a sanitização de conteúdo, formatação do tweet com endereço da carteira pública para gorjetas e verificação de cooldown anti-bloqueio.
+- [ ] **Step 1: Escrever teste unitário para os conectores sociais (X, Instagram e YouTube)**
+Testar a formatação de copy viral, sanitização, injeção da chave pública Solana (`FBx2SKLDLsdeLM8owxU8MNVPKAfJpLpmpHHRgiZDqBoi`) para recebimento de gorjetas/parcerias e pipeline de vídeo via AgentTube.
 
 - [ ] **Step 2: Rodar teste para verificar falha**
 Run: `npx tsx --test src/social/agentReachClient.test.ts`
 Expected: FAIL.
 
-- [ ] **Step 3: Implementar `agentReachClient.ts`**
-Implementar o conector com base na biblioteca `agent-reach`, permitindo ao agente ler tendências no Twitter/X, sintetizar teses com o Cérebro e postar organicamente.
+- [ ] **Step 3: Implementar `agentReachClient.ts` e `agentTubeEngine.ts`**
+Implementar os conectores open-source:
+  - `agent-reach`: Leitura e postagem autônoma no X e Instagram sem pagar APIs corporativas abusivas.
+  - `AgentTube`: Pipeline autônomo que gera roteiro com a Laya, cria voz sintética, monta o vídeo vertical (Reels/Shorts) sobre a memecoin do momento e publica para monetizar visualizações e atrair comunidade.
 
 - [ ] **Step 4: Rodar teste para verificar aprovação**
-Run: `npx tsx --test src/social/agentReachClient.test.ts`
+Run: `npx tsx --test src/social/agentReachClient.test.ts && npx tsx --test src/social/agentTubeEngine.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit cirúrgico**
 ```bash
-git add src/social/agentReachClient.ts src/social/agentReachClient.test.ts
-git commit -m "feat(social): cliente agent reach para rastreamento de narrativas e posts no X"
+git add src/social/agentReachClient.ts src/social/agentTubeEngine.ts src/social/agentReachClient.test.ts src/social/agentTubeEngine.test.ts
+git commit -m "feat(social): integra presenca multicanal no X, Instagram e gerador de video AgentTube"
 ```
 
 ---
