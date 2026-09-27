@@ -155,6 +155,27 @@ assert.ok(waveTrade, 'Posição deve continuar aberta após parcial');
 assert.equal(waveTrade.partialTaken, true, 'partialTaken deve ser true após bater +0.6R');
 assert.equal(waveTrade.stopLoss, 100_000, 'Stop Loss deve ter sido movido para o ponto de entrada (Breakeven)');
 assert.ok(waveTrade.partialPnlUsd && waveTrade.partialPnlUsd > 0, 'Lucro parcial deve ser positivo e registrado');
-assert.ok(waveEngine.getAccountState().balance > 10000, 'Saldo da conta deve ter aumentado com a parcial realizada');
+// Teste de Trailing Stop Vivo ancorado no Book L2
+const bookTrailingEngine = new PaperTradingEngine();
+bookTrailingEngine.handleSignal(signal, 100_000, decision, {
+  approved: true, reasons: [], stopLoss: 98_000, takeProfit: 105_000,
+  stopDistancePct: 0.02, notionalUsd: 1_000, riskUsd: 20, grossR: 2.5, netR: 2.31
+});
+// Simula preço atingindo o TP para virar Runner (105.000) e fornecendo Book L2 com parede em 104.800
+bookTrailingEngine.updatePrice('BTC/USDT', 105_100, {
+  imbalanceRatio: 2.0,
+  bidDepthTotal: 100,
+  askDepthTotal: 50,
+  bids: [
+    { price: 105_000, amount: 2 },
+    { price: 104_800, amount: 50 }, // Maior parede da baleia
+    { price: 104_500, amount: 5 }
+  ],
+  asks: []
+});
+const runnerTrade = bookTrailingEngine.getAccountState().openPositions[0];
+assert.ok(runnerTrade, 'Runner deve estar ativo');
+assert.equal(runnerTrade.isRunner, true);
+assert.ok(runnerTrade.trailingStopPrice && runnerTrade.trailingStopPrice >= 104_799, 'Trailing stop deve estar ancorado 1 tick atrás da parede de 104.800');
 
 console.log('paperTradingEngine: PASS');

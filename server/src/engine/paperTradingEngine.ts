@@ -238,7 +238,13 @@ export class PaperTradingEngine {
   public updatePrice(
     symbol: string,
     currentPrice: number,
-    currentBook?: { imbalanceRatio: number; bidDepthTotal: number; askDepthTotal: number },
+    currentBook?: {
+      imbalanceRatio: number;
+      bidDepthTotal: number;
+      askDepthTotal: number;
+      bids?: Array<{ price: number; amount: number }>;
+      asks?: Array<{ price: number; amount: number }>;
+    },
     recentAggression?: { dominantSide: 'buy' | 'sell'; whaleCount: number }
   ) {
     const trade = this.openPositions.get(symbol);
@@ -316,7 +322,21 @@ export class PaperTradingEngine {
 
           // Trailing de extensão: stop segue a 0.5 * slDistance do topo atual
           const extensionTrailing = currentPrice - (slDistance * 0.5);
-          const candidateStop = Math.max(trade.runnerFloorPrice, extensionTrailing);
+          let candidateStop = Math.max(trade.runnerFloorPrice, extensionTrailing);
+
+          // 🛡️ Ancoragem Viva no Book L2: Localiza a maior parede de compra abaixo do preço atual
+          if (currentBook?.bids?.length) {
+            const validBids = currentBook.bids.filter(b => b.price < currentPrice && b.price > trade.entryPrice);
+            if (validBids.length > 0) {
+              const maxBid = validBids.reduce((prev, curr) => curr.amount > prev.amount ? curr : prev, validBids[0]);
+              // 1 tick abaixo da parede da baleia
+              const tickSize = Math.max(0.0001, Number(Math.pow(10, -decimals).toFixed(decimals)));
+              const bookAnchorStop = Number((maxBid.price - tickSize).toFixed(decimals));
+              if (bookAnchorStop > candidateStop) {
+                candidateStop = bookAnchorStop;
+              }
+            }
+          }
 
           if (!trade.trailingStopPrice || candidateStop > trade.trailingStopPrice) {
             trade.trailingStopPrice = Number(candidateStop.toFixed(decimals));
@@ -338,7 +358,20 @@ export class PaperTradingEngine {
           }
 
           const extensionTrailing = currentPrice + (slDistance * 0.5);
-          const candidateStop = Math.min(trade.runnerFloorPrice, extensionTrailing);
+          let candidateStop = Math.min(trade.runnerFloorPrice, extensionTrailing);
+
+          // 🛡️ Ancoragem Viva no Book L2: Localiza a maior parede de venda acima do preço atual
+          if (currentBook?.asks?.length) {
+            const validAsks = currentBook.asks.filter(a => a.price > currentPrice && a.price < trade.entryPrice);
+            if (validAsks.length > 0) {
+              const maxAsk = validAsks.reduce((prev, curr) => curr.amount > prev.amount ? curr : prev, validAsks[0]);
+              const tickSize = Math.max(0.0001, Number(Math.pow(10, -decimals).toFixed(decimals)));
+              const bookAnchorStop = Number((maxAsk.price + tickSize).toFixed(decimals));
+              if (bookAnchorStop < candidateStop) {
+                candidateStop = bookAnchorStop;
+              }
+            }
+          }
 
           if (!trade.trailingStopPrice || candidateStop < trade.trailingStopPrice) {
             trade.trailingStopPrice = Number(candidateStop.toFixed(decimals));
