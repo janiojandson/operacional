@@ -163,10 +163,14 @@ function resetAllSheets(ss) {
   var s3 = ss.getSheetByName('⚖️ COMPARATIVO BANCAS');
   if (s3) s3.clear();
   initSheetComparativo(ss, true);
+
+  var s4 = ss.getSheetByName('COMPARATIVO ESPELHO MASTER');
+  if (s4) s4.clear();
+  initMasterMirrorSheet(ss);
 }
 
 /**
- * ABA 1: TRADES EXECUTADOS (21 Colunas — com Taxas e Lucro Líquido Real)
+ * ABA 1: TRADES EXECUTADOS (Com Suporte Integral a Wave Harvest / Saídas Parciais)
  */
 function initSheetTrades(ss, forceRefresh) {
   var name = '⚡ TRADES EXECUTADOS';
@@ -194,20 +198,23 @@ function initSheetTrades(ss, forceRefresh) {
     'Retorno Bruto (%)',
     'Retorno Líquido (%)',
     'R-Múltiplo',
+    'Parcial Colhida?',
+    'Lucro Parcial ($)',
+    'PnL Líquido Consolidado ($)',
     'Detalhes / Auditoria',
     'Trade ID',
     'Evento',
     'Notional Master ($)',
-    'ExposiÃ§Ã£o Master (%)',
+    'Exposição Master (%)',
     'Margem Master ($)',
-    'PotÃªncia',
+    'Potência',
     'Alavancagem',
-    'Lote MÃ­nimo',
+    'Lote Mínimo',
     'Shadow Filter',
     'R Bruto Estrutural',
-    'R LÃ­quido Estimado',
+    'R Líquido Estimado',
     'Risco por Trade ($)',
-    'Motivos / ValidaÃ§Ã£o de Risco'
+    'Motivos / Validação de Risco'
   ];
   if (sheet.getLastRow() === 0 || forceRefresh) {
     if (sheet.getLastRow() === 0) {
@@ -247,8 +254,16 @@ function logTrade(ss, data) {
     ? Number(data.shadowTheoreticalPnl)
     : (String(data.shadowDecision || '').toUpperCase().indexOf('BLOQUEADO') !== -1 ? 0.00 : netPnl);
 
-  var isTrailing = String(data.trailingStopAtivo || 'SIM').toUpperCase() === 'SIM';
-  var statusUpper = String(data.status || 'EXECUTADO').toUpperCase();
+  var isPartial = Boolean(data.partialTaken || (data.partialPnlUsd && Number(data.partialPnlUsd) > 0) || String(data.status).indexOf('PARTIAL') !== -1);
+  var partialProfit = Number(data.partialPnlUsd || 0);
+  var totalNet = (data.totalNetPnl !== undefined && Number(data.totalNetPnl) !== 0) 
+    ? Number(data.totalNetPnl) 
+    : (netPnl + partialProfit);
+
+  var outcomeText = data.outcome || (
+    isPartial && totalNet > 0 ? '🌊 PARCIAL TP' :
+    (totalNet > 0 ? 'GREEN 🟢' : (totalNet < 0 ? 'RED 🔴' : '0x0 ⚪'))
+  );
 
   var row = [
     formattedDate,
@@ -262,7 +277,7 @@ function logTrade(ss, data) {
     Number(data.takeProfit || 0),
     isTrailing ? 'ATIVO 🚀' : 'INATIVO ⚪',
     statusUpper,
-    data.outcome || (netPnl > 0 ? 'GREEN 🟢' : (netPnl < 0 ? 'RED 🔴' : '0x0 ⚪')),
+    outcomeText,
     pnlGross,
     totalFees,
     netPnl,
@@ -271,6 +286,9 @@ function logTrade(ss, data) {
     pnlPctVal,
     netPctVal,
     rMultipleVal,
+    isPartial ? 'SIM 🌊' : 'NÃO',
+    partialProfit,
+    totalNet,
     data.errorMsg || 'Executado via CCXT Bybit',
     data.tradeId || '',
     data.eventKind || '',
@@ -298,12 +316,19 @@ function logTrade(ss, data) {
     sideCell.setBackground('#fee2e2').setFontColor('#b91c1c').setFontWeight('bold');
   }
 
-  // Cor do Lucro Líquido
+  // Cor do Lucro Líquido Real e Consolidado
   var netCell = sheet.getRange(lastRow, 15);
   if (netPnl > 0) {
     netCell.setBackground('#dcfce7').setFontColor('#15803d').setFontWeight('bold');
   } else if (netPnl < 0) {
     netCell.setBackground('#fee2e2').setFontColor('#b91c1c').setFontWeight('bold');
+  }
+
+  var totalNetCell = sheet.getRange(lastRow, 23);
+  if (totalNet > 0) {
+    totalNetCell.setBackground('#cffafe').setFontColor('#0e7490').setFontWeight('bold');
+  } else if (totalNet < 0) {
+    totalNetCell.setBackground('#fee2e2').setFontColor('#b91c1c').setFontWeight('bold');
   }
 
   // Formatações
@@ -314,7 +339,8 @@ function logTrade(ss, data) {
   sheet.getRange(lastRow, 17).setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"');
   sheet.getRange(lastRow, 18, 1, 2).setNumberFormat('+0.00%;-0.00%;0.00%');
   sheet.getRange(lastRow, 20).setNumberFormat('+0.0"R";-0.0"R";0.0"R"');
-  sheet.autoResizeColumns(1, 34);
+  sheet.getRange(lastRow, 22, 1, 2).setNumberFormat('$#,##0.00;[Red]($#,##0.00);"$0.00"');
+  sheet.autoResizeColumns(1, 37);
 }
 
 /**
@@ -680,19 +706,23 @@ function updateDashboard(ss) {
   var totalNetPnl = 0;
 
   if (tradesSheet && tradesCount > 0) {
-    var maxCols = Math.max(21, tradesSheet.getLastColumn());
+    var maxCols = Math.max(25, tradesSheet.getLastColumn());
     var tRows = tradesSheet.getRange(2, 1, tradesCount, maxCols).getValues();
     for (var i = 0; i < tRows.length; i++) {
       var gross = Number(tRows[i][12] || 0); // Lucro Bruto $
       var fee = Number(tRows[i][13] || 0);   // Taxas $
       var net = Number(tRows[i][14] || (gross - fee)); // Líquido Real $
+      // Coluna 23 (index 22) é o PnL Líquido Consolidado (com Parciais)
+      var totalNet = (tRows[i].length >= 23 && tRows[i][22] !== '' && !isNaN(Number(tRows[i][22])))
+        ? Number(tRows[i][22])
+        : net;
 
-      if (net > 0) greenCount++;
-      else if (net < 0) redCount++;
+      if (totalNet > 0) greenCount++;
+      else if (totalNet < 0) redCount++;
 
       totalGrossPnl += gross;
       totalFees += fee;
-      totalNetPnl += net;
+      totalNetPnl += totalNet;
     }
   }
 

@@ -87,13 +87,24 @@ export interface ShadowOpportunityPayload {
 
 export class GoogleSheetsService {
   /**
-   * Envia os dados silenciosamente (non-blocking)
+   * Envia os dados silenciosamente (non-blocking em background)
    */
-  private static async sendData(_data: any): Promise<void> {
-    // [Data Studio / Looker Studio Transition]
-    // Webhook HTTP para Apps Script desativado para garantir latência sub-15ms na Ayla/Laya.
-    // A persistência oficial e auditoria residem no PostgreSQL Event Store v3.0.
-    return;
+  private static async sendData(data: any): Promise<void> {
+    if (!WEB_APP_URL) return;
+    try {
+      const payload = JSON.stringify(data);
+      fetch(WEB_APP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        signal: AbortSignal.timeout(6000)
+      }).catch(err => {
+        // Log silencioso sem interromper o fluxo do motor
+        console.warn('[GoogleSheetsService] Aviso ao enviar webhook (silencioso):', err.message);
+      });
+    } catch {
+      // Ignora para preservar performance de ultra baixa latência
+    }
   }
 
   static async logTradeExecution(log: Omit<TradeLogPayload, 'type'>): Promise<void> {
