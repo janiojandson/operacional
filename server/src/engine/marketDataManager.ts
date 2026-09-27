@@ -17,14 +17,19 @@ interface ActiveSymbolState {
   trades: Trade[];
 }
 
-export const DEFAULT_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'SUI/USDT', 'DOGE/USDT', 'XRP/USDT'];
+export const DEFAULT_SYMBOLS = [
+  'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT',
+  'AVAX/USDT', 'LINK/USDT', 'ADA/USDT', 'NEAR/USDT',
+  'SUI/USDT', 'DOGE/USDT', 'XRP/USDT'
+];
 export const MARKET_DATA_INTERVALS = {
   tickerMs: 2_000,
   bookMs: 10_000,
   candlesMs: 60_000
 } as const;
 const BYBIT_CATEGORIES: Record<string, 'crypto' | 'forex'> = {
-  'BTC/USDT': 'crypto', 'ETH/USDT': 'crypto', 'SOL/USDT': 'crypto',
+  'BTC/USDT': 'crypto', 'ETH/USDT': 'crypto', 'SOL/USDT': 'crypto', 'BNB/USDT': 'crypto',
+  'AVAX/USDT': 'crypto', 'LINK/USDT': 'crypto', 'ADA/USDT': 'crypto', 'NEAR/USDT': 'crypto',
   'SUI/USDT': 'crypto', 'DOGE/USDT': 'crypto', 'XRP/USDT': 'crypto'
 };
 
