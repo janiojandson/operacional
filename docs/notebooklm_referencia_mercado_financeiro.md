@@ -1,6 +1,6 @@
-# Documento de Contexto Geral e Técnico — Mercado Financeiro (MarketFlow Pro) & Laya Decisor
+# Documento de Contexto Geral e Técnico — Mercado Financeiro (MarketFlow Pro), Laya Decisor & Ecossistema Nexus
 > **Destinado para Alimentação de Base de Conhecimento no Google NotebookLM**  
-> **Data de Atualização:** 26 de Setembro de 2026  
+> **Data de Atualização:** 27 de Setembro de 2026  
 > **Repositório GitHub:** `github.com/janiojandson/operacional` (Branch: `main`)  
 > **Deploy:** Railway (`Mercado Financeiro` / `operacional-production-57d9.up.railway.app`)
 
@@ -31,9 +31,7 @@ O ecossistema é composto por múltiplos serviços integrados de alta performanc
 
 ---
 
-## 2. As Decisões do Sistema (Catálogo Completo)
-
-O sistema opera com um modelo de **3 Grupos Semânticos de Decisão**, estruturados para que a Laya nunca tome decisões fora de contexto:
+## 2. As Decisões do Sistema (Catálogo Completo dos 3 Grupos Semânticos)
 
 ```mermaid
 flowchart TD
@@ -71,44 +69,63 @@ flowchart TD
 
 ---
 
-## 3. Análise da Planilha em Tempo Real (Estado Atual Auditado)
+## 3. Otimizações de Setembro/2026: Corte de 80% de Requisições & Monetização por Ondas
 
-A captura de tela da aba `Auditoria Ayla (Decisões)` reflete o comportamento perfeito do sistema após as otimizações:
-
-1. **Eficiência e Execução Rápida:**
-   - Todas as decisões exibem **`Executado? = SIM ✅`**, comprovando que não há timeouts nem perdas de pacote.
-   - Latência real registrada entre **875ms e 1458ms** para `HOLD` e até **2016ms** para `AUTHORIZE`, compatível com o novo timeout seguro de 4000ms.
-2. **Entradas Aprovadas (`AUTHORIZE`):**
-   - Pares: **ETH/USDT**, **SOL/USDT**, **XRP/USDT**.
-   - Multiplicador de Potência: **1.5x** (Risco 1.00%).
-   - Código Racional: **`DYNAMIC_POWER_AGGRESSION`**.
-   - `Scale-In Permitido? = NÃO` (Regra constitucional respeitada: trades em fase inicial não podem sofrer scale-in antes de atingirem +1.2R de lucro).
-3. **Filtro de Ruído Operacional (`HOLD`):**
-   - Pares: **BTC/USDT** e **ETH/USDT**.
-   - Código Racional: **`NO_OPPORTUNITY`**.
-   - O robô barrou operações onde a confluência de Delta CVD e desequilíbrio do book não justificavam o risco.
-4. **Desacoplamento Constitucional:**
-   - O erro anterior `REJECTED_BY_CONSTITUTION: SCALE_IN_REQUIRES_1_2R_PROFIT` foi **100% extinto**, pois a flag de scale-in só é requisitada durante o ciclo de vida do trade (Grupo 3).
+1. **Pré-Filtro de Spread no Node.js (`isSpreadToxicLocal`):**
+   - O Node.js avalia os 20 níveis do Book L2 em 0ms. Se o spread for > 5 bps (0.05%), ele veta localmente sem chamar a Laya via HTTP.
+2. **Quarentena de VETO (60s):**
+   - Pares que receberam VETO entram em respiro de 60 segundos, eliminando o bombardeio crônico de requisições redundantes (como ocorria no BNB/USDT).
+3. **Cesta de Ativos Otimizada:**
+   - Adicionados `SUI/USDT` e `DOGE/USDT` (alta volatilidade e livro limpo) e pausado o `BNB/USDT`.
+4. **Monetização por Ondas (Wave Harvesting) + Breakeven:**
+   - Ao atingir $+0.6R$, o robô realiza 50% da posição a mercado (lucro no bolso) e puxa o Stop Loss para o preço de entrada (Breakeven - risco zero absoluto).
+5. **Trailing Stop Vivo Ancorado no Book L2:**
+   - O trailing stop segue 1 tick atrás da maior parede de compra/venda passiva da baleia, subindo degrau por degrau e saindo no topo se a parede for consumida.
 
 ---
 
-## 4. Variáveis de Ambiente em Produção (Railway)
+## 4. Oportunidades Tecnológicas & Ecossistema de Ferramentas Open Source (GitHub)
 
-Configurações ativas no serviço `Mercado Financeiro`:
+Mapeamento de 28 ferramentas analisadas para expansão e acoplamento ao ecossistema Nexus no Railway:
 
-| Variável | Valor Ativo | Finalidade |
-|---|---|---|
-| `LAYA_MODE` | `ACTIVE` | Governança autônoma do Sistema 1 em tempo real. |
-| `LAYA_SERVICE_URL` | `http://nexus-decisor-laya.railway.internal:8080` | Comunicação interna privada no Railway (porta correta 8080). |
-| `LAYA_TIMEOUT_MS` | `4000` | Margem segura de 4 segundos (inferência real ocorre em ~1.2s). |
-| `LAYA_DEBOUNCE_MS` | `12000` | Janela de 12 segundos anti-perturbação por par de moeda. |
-| `LAYA_MIN_IMBALANCE` | `1.25` | Filtro prévio de desbalanceamento de book L2. |
+### 4.1. Trading Autônomo, Agentes & Simulação
+- **TradingAgents (`Tauric/TradingAgents`):** Framework LangGraph multi-agente que simula uma mesa proprietária completa (analistas, pesquisadores macro, sentinela de risco e trader de execução) debatendo ordens.
+- **Mirror Fish:** Simulação em escala com 4.096 agentes em paralelo para prever reações coletivas de mercado e probabilidades em mercados preditivos (ex: Polymarket).
+- **Autonomous Self-Funding Agent:** Framework de agente com carteira própria de cripto/USDT e degradação dinâmica de modelo (ajusta custo de inferência baseado no PnL da própria banca).
+- **DeepSeek Harness (`deepseek-harness`):** Framework modular ultraleve para criação de agentes com alternância dinâmica de modelos sem dependências pesadas.
+
+### 4.2. AI Coding & Engenharia de Software
+- **Goose (`block/goose`):** Agente CLI de código open-source da Block/Square para automação de tarefas de desenvolvimento no SO.
+- **OpenCode (`opencode`):** Agente de terminal focado em refatoração e edição cirúrgica de código.
+- **Plandex (`plandex-ai/plandex`):** Agente desenhado para bases de código complexas e com múltiplos arquivos, criando branches e diffs isolados.
+- **Fullstack App Clones (`awesome-clones`):** Mais de 100 clones open-source funcionais de produtos consagrados (Airbnb, Spotify, Uber, Netflix, Trello).
+
+### 4.3. Prospecção, Scraping & APIs Públicas
+- **Agent Reach (`agent-reach`):** Biblioteca para agentes de IA acessarem conteúdo autêntico na Web, Twitter/X, YouTube, Instagram e Reddit usando cookies e sessões locais sem bloqueio Cloudflare.
+- **Google Maps Scraper (`omkarcloud/gosom`):** Scraper de alta performance em Go para extração de leads B2B (nome, telefone, WhatsApp, site).
+- **Public APIs (`public-apis/public-apis`):** O maior diretório open-source do mundo com milhares de APIs públicas gratuitas sem autenticação paga.
+
+### 4.4. Segurança, Voice & Automação de Conteúdo
+- **Strix (`strix-ai/strix`):** Pentesting autônomo com agentes de IA que escaneiam vulnerabilidades em tempo real e propõem patches de código automáticos.
+- **Tel-Agent (`Dpro-at/Tel-Agent`):** Agente telefônico autônomo em Python para receber e realizar chamadas com voz natural.
+- **AgentTube:** Pipeline com 7 agentes de IA para pesquisa, roteirização, narração, edição e publicação autônoma no YouTube.
+- **Twenty CRM (`twentyhq/twenty`):** CRM moderno open-source para pipelines de clientes e integração com WhatsApp.
 
 ---
 
-## 5. Rotina de Manutenção e Auditoria da Planilha
+## 5. Projeto Nexus Auto-Sustentável (Cérebro + Carteira Solana + Laya)
 
-Para garantir que a planilha permaneça leve e rápida sem acumular excesso de linhas históricas:
-1. Abra a planilha do Google vinculada.
-2. Acesse o menu superior: **`📊 BingX & MarketFlow Pro`** -> **`🤖 Zerar Histórico Ayla/Laya`**.
-3. A função executa a limpeza segura a partir da Linha 2, preservando o cabeçalho, fórmulas e fontes de dados conectadas ao **Google Looker Studio**.
+Conexão entre o **Autonomous Self-Funding Agent** e a infraestrutura já mapeada na memória do **Nexus Cérebro** (Obsidian Vault):
+
+### Arquitetura do Agente Auto-Sustentável:
+1. **Carteira Autônoma Solana / USDT:**
+   - O Cérebro gerencia uma carteira nativa na rede Solana (via `@solana/web3.js` / Jupiter / Raydium) e subcontas em exchanges (BingX/Bybit).
+   - O robô possui custódia programática do saldo de risco, eliminando necessidade de recarga manual constante.
+2. **Ciclo Fechado de Auto-Sustentação (Self-Funding):**
+   - **Geração de Receita:** Ganhos das operações do `MarketFlow Pro` (via Take Profit e Wave Harvesting) são liquidados em USDT/USDC.
+   - **Pagamento da Infraestrutura:** Parte do lucro financia automaticamente os custos de servidor no Railway, proxies e RPCs de blockchain.
+   - **Degradação e Elevação Dinâmica de Modelo:**
+     - Quando o PnL da sessão atinge metas elevadas, a Laya e o Cérebro escalam chamadas para modelos mais profundos (Claude 3.5 Sonnet / GPT-4o / DeepSeek R1).
+     - Em períodos de baixa volatilidade ou consolidação, o sistema degrada automaticamente para heurísticas matemáticas ultrarrápidas em CPU ou modelos locais (OmniRoute), preservando o capital da banca.
+3. **Módulo de Sniper e Arbitragem (Descobertas do Obsidian):**
+   - Acoplamento dos estudos de `CloddsBot` (arbitragem cross-platform) e `solana-trading-bot` (Raydium / Jito bundles) para captura de liquidez rápida com governança constitucional estrita (Martingale Zero e Teto de Risco).
