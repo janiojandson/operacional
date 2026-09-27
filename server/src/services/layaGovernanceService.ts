@@ -10,6 +10,13 @@ import type {
 export const MAX_FINANCIAL_RISK_PCT = 1.5;
 export const MAX_VALIDITY_SPAN_MS = 3000;
 export const MAX_SESSION_PARDONS = 3;
+export const MAX_SAFE_SPREAD_BPS = 5.0; // 5 basis points = 0.05% de spread máximo tolerável
+export const VETO_QUARANTINE_MS = 60000; // 60s de quarentena para pares que tomaram VETO
+
+export function isSpreadToxicLocal(spreadBps?: number): boolean {
+  if (spreadBps === undefined || spreadBps === null) return false;
+  return spreadBps > MAX_SAFE_SPREAD_BPS;
+}
 
 export function isProposalExpired(
   proposal: LayaGovernanceResponse,
@@ -74,6 +81,7 @@ export class LayaGovernanceService {
   private recentDecisions: LayaMetrics['recentDecisions'] = [];
   private debounceMs: number;
   private lastCallTs: Map<string, number> = new Map();
+  private vetoQuarantineMap: Map<string, { ts: number; reason: string }> = new Map();
 
   constructor(options: LayaServiceOptions = {}) {
     this.serviceUrl = options.serviceUrl || process.env.LAYA_SERVICE_URL || 'http://nexus-decisor-laya.railway.internal:8080';
@@ -102,6 +110,7 @@ export class LayaGovernanceService {
     this.pnlAttributedOverrides = 0;
     this.latencyBuffer = [];
     this.lastCallTs.clear();
+    this.vetoQuarantineMap.clear();
     console.log('[LayaGovernance] Sessão zerada: buffers limpos.');
   }
 
@@ -180,6 +189,62 @@ export class LayaGovernanceService {
         executed: isProtection,
         decision,
         fallbackLocal: true,
+        latencyMs: 0
+      };
+    }
+
+    // 🛡️ 1. Quarentena de VETO Local: Se o par tomou VETO recente (ex: spread ou risco), suprime chamadas por 60s
+    if (!isProtection) {
+      const quarantine = this.vetoQuarantineMap.get(payload.symbol);
+      const now = Date.now();
+      if (quarantine && now - quarantine.ts < VETO_QUARANTINE_MS) {
+        const vetoDecision: LayaGovernanceResponse = {
+          decisionId: `local-veto-quarantine-${now}`,
+          stateVersion: payload.stateVersion,
+          issuedAt: now,
+          expiresAt: now + 2000,
+          action: 'VETO',
+          symbol: payload.symbol,
+          powerMultiplier: 1.0,
+          riskPct: 0.5,
+          governance: {},
+          rationaleCode: quarantine.reason as any || 'SPREAD_TOXIC_VETO',
+          trace: payload.trace
+        };
+        return {
+          executed: false,
+          decision: vetoDecision,
+          fallbackLocal: true,
+          rejectionReason: `QUARANTINE_ACTIVE: ${quarantine.reason}`,
+          latencyMs: 0
+        };
+      }
+    }
+
+    // 🛡️ 2. Pré-Filtro Local de Spread Tóxico: Se o spread do book L2 for > 5 bps, veta localmente sem HTTP
+    const spreadBps = payload.trace?.spreadBps;
+    if (isSpreadToxicLocal(spreadBps) && !isProtection) {
+      const now = Date.now();
+      this.vetoQuarantineMap.set(payload.symbol, { ts: now, reason: 'SPREAD_TOXIC_VETO' });
+      const vetoDecision: LayaGovernanceResponse = {
+        decisionId: `local-spread-veto-${now}`,
+        stateVersion: payload.stateVersion,
+        issuedAt: now,
+        expiresAt: now + 2000,
+        action: 'VETO',
+        symbol: payload.symbol,
+        powerMultiplier: 1.0,
+        riskPct: 0.5,
+        governance: {},
+        rationaleCode: 'SPREAD_TOXIC_VETO',
+        trace: payload.trace
+      };
+      this.logDecision(vetoDecision, false, 'SPREAD_TOXIC_VETO_LOCAL');
+      return {
+        executed: false,
+        decision: vetoDecision,
+        fallbackLocal: true,
+        rejectionReason: 'LOCAL_SPREAD_EXCEEDS_MAX_CAP',
         latencyMs: 0
       };
     }
@@ -360,6 +425,11 @@ export class LayaGovernanceService {
       const executed = this.mode === 'ACTIVE' && isApprovedAction;
       if (executed && (proposal.action === 'OVERRIDE_COOLDOWN' || proposal.governance?.cooldownOverride)) {
         this.overridesUsedSession++;
+      }
+
+      // Se a IA respondeu VETO, colocar o par em quarentena de 60s para evitar chamadas redundantes a cada 12s
+      if (proposal.action === 'VETO') {
+        this.vetoQuarantineMap.set(payload.symbol, { ts: Date.now(), reason: proposal.rationaleCode });
       }
 
       this.logDecision(proposal, executed);

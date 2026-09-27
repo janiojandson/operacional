@@ -572,6 +572,14 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
     // 🧠 Governança Laya Sistema 1 (Grupo 1: PRE_ENTRY / NEW_OPPORTUNITY)
     const _imbalance = book?.imbalanceRatio || 1.0;
     const _whaleActivity = flowEngine.getRecentAggression(signal.symbol)?.whaleCount || 0;
+    
+    // Cálculo seguro do spread real em basis points (bps) do Book L2
+    let _spreadBps = 0;
+    if (book?.bids?.length && book?.asks?.length && book.bids[0].price > 0) {
+      const bestBid = book.bids[0].price;
+      const bestAsk = book.asks[0].price;
+      _spreadBps = Number((((bestAsk - bestBid) / bestBid) * 10000).toFixed(2));
+    }
 
     let layaDecision: any = undefined;
     const layaResult = await layaGovernanceService.requestGovernance({
@@ -587,6 +595,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
         l2DepthTop20: book?.bids?.reduce((s, b) => s + b.amount, 0) || 0,
         imbalanceRatio: _imbalance,
         cvdDelta60s: _whaleActivity,
+        spreadBps: _spreadBps,
         spoofScore: 0.0,
         betaDivergence: false
       }

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   isProposalExpired,
-  validateConstitutionRules
+  validateConstitutionRules,
+  isSpreadToxicLocal
 } from './layaGovernanceService.js';
 import type {
   LayaGovernanceResponse,
@@ -137,4 +138,12 @@ test('validateConstitutionRules enforces risk cap <= 1.5%', () => {
   const result = validateConstitutionRules(proposal, { currentR: 0, clusterExposureUsdt: 0 });
   assert.equal(result.approved, false);
   assert.equal(result.rejectionReason, 'REJECTED_BY_CONSTITUTION: RISK_EXCEEDS_MAX_CAP');
+});
+
+test('isSpreadToxicLocal detects spreads exceeding 5.0 bps threshold', () => {
+  assert.equal(isSpreadToxicLocal(1.2), false); // 1.2 bps é saudável
+  assert.equal(isSpreadToxicLocal(4.9), false); // 4.9 bps é aceitável
+  assert.equal(isSpreadToxicLocal(5.1), true);  // 5.1 bps é tóxico (> 5.0 bps)
+  assert.equal(isSpreadToxicLocal(12.5), true); // 12.5 bps é spread largo tóxico
+  assert.equal(isSpreadToxicLocal(undefined), false); // Não quebra se for indefinido
 });
