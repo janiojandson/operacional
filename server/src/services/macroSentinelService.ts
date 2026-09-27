@@ -1,5 +1,3 @@
-import axios from 'axios';
-
 export interface MacroSentinelPrediction {
   regime: 'BULLISH' | 'BEARISH_DUMP' | 'NEUTRAL_RANGING';
   predictiveScore: number;
@@ -36,11 +34,19 @@ export class MacroSentinelClient {
     }
 
     try {
-      const res = await axios.get(`${this.sentinelUrl}/v1/sentinel/prediction`, {
-        timeout: this.timeoutMs
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
-      const data = res.data;
+      const res = await fetch(`${this.sentinelUrl}/v1/sentinel/prediction`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        return this.cachedPrediction;
+      }
+
+      const data: any = await res.json();
       this.cachedPrediction = {
         regime: data.regime,
         predictiveScore: data.predictive_score,
@@ -67,3 +73,4 @@ export class MacroSentinelClient {
 }
 
 export const macroSentinelClient = new MacroSentinelClient();
+
