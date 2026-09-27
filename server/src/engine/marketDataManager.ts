@@ -17,7 +17,7 @@ interface ActiveSymbolState {
   trades: Trade[];
 }
 
-const DEFAULT_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT'];
+export const DEFAULT_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'SUI/USDT', 'DOGE/USDT', 'XRP/USDT'];
 export const MARKET_DATA_INTERVALS = {
   tickerMs: 2_000,
   bookMs: 10_000,
@@ -25,7 +25,7 @@ export const MARKET_DATA_INTERVALS = {
 } as const;
 const BYBIT_CATEGORIES: Record<string, 'crypto' | 'forex'> = {
   'BTC/USDT': 'crypto', 'ETH/USDT': 'crypto', 'SOL/USDT': 'crypto',
-  'BNB/USDT': 'crypto', 'XRP/USDT': 'crypto'
+  'SUI/USDT': 'crypto', 'DOGE/USDT': 'crypto', 'XRP/USDT': 'crypto'
 };
 
 function toExchangeLinear(symbol: string): string {
