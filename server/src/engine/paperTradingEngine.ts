@@ -278,9 +278,10 @@ export class PaperTradingEngine {
     // 🌊 0.1 REALIZAÇÃO PARCIAL POR ONDAS (+0.6R) COM BREAKEVEN AUTOMÁTICO (Risco ZERO)
     if (!trade.partialTaken && currentR >= 0.6) {
       trade.partialTaken = true;
-      if (!trade.originalQty) trade.originalQty = trade.qty;
+      if (!trade.originalQty) trade.originalQty = trade.qty || 0;
       
-      const halfQty = Number((trade.qty * 0.5).toFixed(decimals));
+      const currentQty = trade.qty || 0;
+      const halfQty = Number((currentQty * 0.5).toFixed(decimals));
       const partialGainUsd = Number(((notionalSize * 0.5) * priceDeltaPct).toFixed(2));
       
       // Credita lucro parcial no saldo da conta

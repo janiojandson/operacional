@@ -6,6 +6,7 @@ import type {
   LayaMode,
   LayaMetrics
 } from '../../../shared/layaGovernanceTypes.js';
+import { macroSentinelClient } from './macroSentinelService.js';
 
 export const MAX_FINANCIAL_RISK_PCT = 1.5;
 export const MAX_VALIDITY_SPAN_MS = 3000;
@@ -191,6 +192,39 @@ export class LayaGovernanceService {
         fallbackLocal: true,
         latencyMs: 0
       };
+    }
+
+    // 🛡️ 0. Macro Sentinel Circuit Breaker: Veto imediato em dumps sistêmicos / crash de mercado
+    if (!isProtection) {
+      try {
+        const macroPred = await macroSentinelClient.getMacroPrediction();
+        if (macroPred?.isCircuitBreakerActive) {
+          const now = Date.now();
+          const vetoDecision: LayaGovernanceResponse = {
+            decisionId: `sentinel-circuit-breaker-${now}`,
+            stateVersion: payload.stateVersion,
+            issuedAt: now,
+            expiresAt: now + 3000,
+            action: 'VETO',
+            symbol: payload.symbol,
+            powerMultiplier: 0.5,
+            riskPct: 0.2,
+            governance: {},
+            rationaleCode: 'SENTINEL_CIRCUIT_BREAKER_VETO',
+            trace: payload.trace
+          };
+          this.logDecision(vetoDecision, false, 'SENTINEL_CIRCUIT_BREAKER_TRIGGERED');
+          return {
+            executed: false,
+            decision: vetoDecision,
+            fallbackLocal: true,
+            rejectionReason: 'MACRO_SENTINEL_CIRCUIT_BREAKER_ACTIVE',
+            latencyMs: 0
+          };
+        }
+      } catch {
+        // Fallback silencioso para não interromper fluxo se sentinel oscilar
+      }
     }
 
     // 🛡️ 1. Quarentena de VETO Local: Se o par tomou VETO recente (ex: spread ou risco), suprime chamadas por 60s

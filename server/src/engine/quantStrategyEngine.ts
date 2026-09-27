@@ -516,6 +516,15 @@ export class QuantStrategyEngine {
     const directions = ['BUY', 'SELL'];
     const byDirection = buildSegment(directions, t => t.type);
 
+    // Segmentação por Regime Macro do Sentinel
+    const sentinelRegimes = ['BULLISH', 'BEARISH_DUMP', 'NEUTRAL_RANGING'];
+    const bySentinelRegime = buildSegment(sentinelRegimes, t => {
+      const reg = String((t as any).macroRegime || t.marketRegime || 'NEUTRAL_RANGING').toUpperCase();
+      if (reg.includes('BEAR') || reg.includes('DUMP')) return 'BEARISH_DUMP';
+      if (reg.includes('BULL')) return 'BULLISH';
+      return 'NEUTRAL_RANGING';
+    });
+
     // Auditoria Específica de Temperatura (1.5x até 5.0x Deus)
     const tempTiers: { level: TemperatureLevel; label: string }[] = [
       { level: 'DIVINE_CONFLUENCE', label: '⚡🏛️ Extração Suprema / Deus (5.0x)' },
@@ -590,6 +599,7 @@ export class QuantStrategyEngine {
       bySession,
       byDayOfWeek,
       byDirection,
+      bySentinelRegime,
       byTemperature,
       optimalTemperatureLimit,
       exposureImpactVerdict

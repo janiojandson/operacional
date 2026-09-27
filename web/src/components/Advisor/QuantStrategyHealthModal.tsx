@@ -488,6 +488,30 @@ export const QuantStrategyHealthModal: React.FC<QuantStrategyHealthModalProps> =
                         ))}
                       </div>
                     </div>
+
+                    {/* Regime Macro Sentinel (:4005) */}
+                    <div className="p-4 rounded-xl bg-surface/80 border border-border/80 space-y-2 col-span-2">
+                      <span className="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
+                        <Zap className="w-4 h-4 text-cyan-400" />
+                        <span>POR REGIME MACRO SENTINEL (:4005)</span>
+                      </span>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(report.segmentation.bySentinelRegime || []).map((item: { key: string; totalTrades: number; winRate: number; profitFactor: number; pnlUsd: number; mathExpectationR: number }, idx: number) => (
+                          <div key={idx} className="p-2.5 rounded bg-background/60 border border-border/40 flex flex-col justify-between text-xs space-y-1">
+                            <div className="flex justify-between items-center">
+                              <span className="font-bold text-white uppercase text-[11px]">{item.key}</span>
+                              <span className="text-slate-400 text-[10px]">{item.totalTrades} ops</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-amber-400 font-bold">{item.winRate}% WR</span>
+                              <span className={`font-bold ${item.pnlUsd >= 0 ? 'text-buy' : 'text-sell'}`}>
+                                {item.pnlUsd >= 0 ? `+$${item.pnlUsd}` : `-$${Math.abs(item.pnlUsd)}`}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
 
                   {/* Auditoria Específica de Temperatura e Impacto da Potência */}

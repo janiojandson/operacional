@@ -89,6 +89,12 @@ export default function TradingTerminal() {
     }
   }, [totalUnrealizedPnl, liveEquity]);
 
+  const [sentinelData, setSentinelData] = useState<{
+    regime: string;
+    predictiveScore: number;
+    isCircuitBreakerActive: boolean;
+  }>({ regime: 'NEUTRAL_RANGING', predictiveScore: 0, isCircuitBreakerActive: false });
+
   useEffect(() => {
     fetch('/api/admin/config/toggles', {
       headers: {
@@ -103,6 +109,25 @@ export default function TradingTerminal() {
         }
       })
       .catch(() => { });
+
+    const fetchSentinel = () => {
+      fetch('/api/macro-regime')
+        .then(res => res.json())
+        .then((data: any) => {
+          if (data?.macroSentinel) {
+            setSentinelData({
+              regime: data.macroSentinel.regime || 'NEUTRAL_RANGING',
+              predictiveScore: data.macroSentinel.predictiveScore ?? 0,
+              isCircuitBreakerActive: Boolean(data.macroSentinel.isCircuitBreakerActive)
+            });
+          }
+        })
+        .catch(() => { });
+    };
+
+    fetchSentinel();
+    const sentInterval = setInterval(fetchSentinel, 10000);
+    return () => clearInterval(sentInterval);
   }, []);
 
   const handleToggleTrailing = async () => {
@@ -252,6 +277,31 @@ export default function TradingTerminal() {
 
           {/* Botão Governança Laya (Logo após o Shadow Mode) */}
           <LayaGovernanceControl />
+
+          {/* Pílula de Telemetria do Macro Sentinel (:4005) */}
+          <div
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg border font-mono text-xs font-semibold shadow-sm transition-all ${
+              sentinelData.isCircuitBreakerActive
+                ? 'bg-rose-950/70 border-rose-500/80 text-rose-300 animate-pulse'
+                : sentinelData.predictiveScore > 20
+                ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
+                : sentinelData.predictiveScore < -20
+                ? 'bg-rose-950/40 border-rose-500/50 text-rose-300'
+                : 'bg-slate-900/90 border-slate-700/80 text-slate-300'
+            }`}
+            title={`Macro Sentinel (:4005) | Regime: ${sentinelData.regime} | Score: ${sentinelData.predictiveScore} | Circuit Breaker: ${sentinelData.isCircuitBreakerActive ? 'DISPARADO 🛑' : 'SEGURO 🟢'}`}
+          >
+            <span className={`w-2 h-2 rounded-full ${
+              sentinelData.isCircuitBreakerActive
+                ? 'bg-rose-500 animate-ping'
+                : sentinelData.predictiveScore > 0
+                ? 'bg-emerald-400'
+                : 'bg-amber-400'
+            }`} />
+            <span>
+              SENTINEL: <b className="text-white">{sentinelData.regime}</b> ({sentinelData.predictiveScore > 0 ? `+${sentinelData.predictiveScore}` : sentinelData.predictiveScore}) | CB: <b className={sentinelData.isCircuitBreakerActive ? 'text-rose-400 font-black' : 'text-emerald-400'}>{sentinelData.isCircuitBreakerActive ? 'ATIVO 🛑' : 'INATIVO 🟢'}</b>
+            </span>
+          </div>
 
           {/* Botão Dashboard dos 10 Blocos (Laya ↔ Motor v3.0) */}
           <button

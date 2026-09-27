@@ -40,6 +40,7 @@ interface AccountInfo {
   realMaskedKey?: string;
   realConnected?: boolean;
   hasTestKeys?: boolean;
+  testConnected?: boolean;
   testMaskedKey?: string;
   testBalance?: number;
   testEquity?: number;

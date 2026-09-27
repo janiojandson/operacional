@@ -46,6 +46,8 @@ export interface SimulatedTrade {
   closeReason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST';
   realizedR?: number;
   decisionFactors?: string[];
+  isRunner?: boolean;
+  trailingStopPrice?: number;
 }
 
 export interface PaperAccount {
@@ -145,6 +147,7 @@ export interface ContextSegmentationBlock {
   bySession: SegmentItem[];
   byDayOfWeek: SegmentItem[];
   byDirection: SegmentItem[];
+  bySentinelRegime?: SegmentItem[];
   byTemperature: TemperatureImpactAnalysis[];
   optimalTemperatureLimit: string;
   exposureImpactVerdict: string;

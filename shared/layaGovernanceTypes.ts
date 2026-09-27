@@ -30,6 +30,7 @@ export type LayaRationaleCode =
   | 'SPOOFING_DETECTED_VETO'
   | 'SPREAD_TOXIC_VETO'
   | 'BETA_DIVERGENCE_VETO'
+  | 'SENTINEL_CIRCUIT_BREAKER_VETO'
   | 'NO_OPPORTUNITY';
 
 export interface LayaGovernanceProposal {
