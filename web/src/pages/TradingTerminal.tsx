@@ -187,28 +187,42 @@ export default function TradingTerminal() {
     if (!window.confirm('Deseja realmente zerar todo o histórico, ordens e banco do Master aguardando 15s para sincronização?')) {
       return;
     }
-    setResetTimer(15);
-    const interval = setInterval(() => {
-      setResetTimer((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
 
     try {
-      await fetch('/api/paper-trading/reset', {
+      const res = await fetch('/api/trading/reset', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('mfp_token') || ''}`
         },
-        body: JSON.stringify({ initialBalance: walletBalance })
+        body: JSON.stringify({ masterBalance: walletBalance, mirrorBalance: 500 })
       });
-    } catch (e) {
+
+      if (res.status === 409) {
+        const errorData = await res.json().catch(() => ({}));
+        alert(`❌ NÃO É POSSÍVEL ZERAR A SESSÃO:\n\n${errorData.message || 'Feche todas as posições abertas antes de resetar a sessão.'}`);
+        return;
+      }
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        alert(`❌ Erro ao resetar sessão: ${errorData.message || res.statusText}`);
+        return;
+      }
+
+      setResetTimer(15);
+      const interval = setInterval(() => {
+        setResetTimer((prev) => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } catch (e: any) {
       console.error('Failed to reset paper data:', e);
+      alert(`❌ Falha de conexão ao resetar sessão: ${e.message || e}`);
     }
   };
 
@@ -233,9 +247,9 @@ export default function TradingTerminal() {
       />
 
       {/* Barra de Controle de Estratégias no Cabeçalho */}
-      <div className="bg-[#0b1120] border-b border-slate-800/80 px-3.5 py-1.5 flex items-center justify-between z-20 shrink-0 text-xs shadow-md">
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold hidden sm:inline">
+      <div className="bg-[#0b1120] border-b border-slate-800/80 px-3 py-1.5 flex items-center justify-between z-20 shrink-0 text-xs shadow-md overflow-x-auto no-scrollbar gap-2">
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold hidden xl:inline shrink-0">
             Controle Operacional:
           </span>
 
@@ -335,7 +349,7 @@ export default function TradingTerminal() {
           </button>
         </div>
 
-        <div className="hidden lg:flex items-center gap-2.5 text-[11px] font-mono text-slate-400">
+        <div className="hidden lg:flex items-center gap-2.5 text-[11px] font-mono text-slate-400 shrink-0 pl-2">
           <span className="flex items-center gap-1 text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
             <span>BingX V2 AO VIVO</span>

@@ -133,18 +133,34 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
     const handleResize = () => {
       if (chartContainerRef.current && chartRef.current) {
-        chartRef.current.applyOptions({
-          width: chartContainerRef.current.clientWidth,
-          height: chartContainerRef.current.clientHeight,
-        });
+        const w = chartContainerRef.current.clientWidth;
+        const h = chartContainerRef.current.clientHeight;
+        if (w > 0 && h > 0) {
+          chartRef.current.applyOptions({ width: w, height: h });
+        }
       }
     };
 
     window.addEventListener('resize', handleResize);
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && chartContainerRef.current) {
+      resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const { width, height } = entry.contentRect;
+          if (width > 0 && height > 0 && chartRef.current) {
+            chartRef.current.applyOptions({ width, height });
+          }
+        }
+      });
+      resizeObserver.observe(chartContainerRef.current);
+    }
+
     handleResize();
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      resizeObserver?.disconnect();
       chart.remove();
     };
   }, []);

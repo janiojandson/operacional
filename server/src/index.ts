@@ -735,6 +735,15 @@ app.get('/api/trading/mirror/account', requireAuth, (req, res) => {
 // POST /api/trading/reset — Reset parametrizado Master + Mirror
 app.post('/api/trading/reset', requireAuth, async (req, res) => {
   try {
+    const openPositionsCount = paperTrading.getOpenPositionsCount();
+    if (openPositionsCount > 0) {
+      return res.status(409).json({
+        success: false,
+        error: 'CONFLICT_OPEN_POSITIONS',
+        message: `Feche as ${openPositionsCount} posições abertas antes de resetar a sessão.`
+      });
+    }
+
     const { masterBalance = 10000, mirrorBalance = 500 } = req.body || {};
     const result = await resetTradingAccounts(Number(masterBalance), Number(mirrorBalance));
     
@@ -1115,7 +1124,7 @@ app.post('/api/ai-advisor/chat', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/assets/:symbol/state', requireAuth, (req, res) => {
+app.get('/api/assets/:symbol/state', (req, res) => {
   const symbol = decodeURIComponent(String(req.params.symbol));
   const state = marketManager.getSymbolState(symbol);
   if (!state) {
@@ -1144,7 +1153,7 @@ app.get('/api/assets/:symbol/state', requireAuth, (req, res) => {
   });
 });
 
-app.get('/api/assets/:symbol/klines', requireAuth, async (req, res) => {
+app.get('/api/assets/:symbol/klines', async (req, res) => {
   const symbol = decodeURIComponent(String(req.params.symbol));
   const tf = (req.query.tf as string) || '1m';
   const state = marketManager.getSymbolState(symbol);
@@ -1152,14 +1161,15 @@ app.get('/api/assets/:symbol/klines', requireAuth, async (req, res) => {
     return res.status(404).json({ error: 'Ativo não encontrado' });
   }
 
-  const direct = await marketManager.getKlines(symbol, tf, 400);
+  const direct = await marketManager.getKlines(symbol, tf, 200);
   if (direct && direct.length > 0) {
     return res.json({ symbol, tf, candles: direct, source: 'BINGX' });
   }
 
   const baseCandles = state.candles || [];
   if (tf === '1m' || baseCandles.length === 0) {
-    return res.json({ symbol, tf, candles: baseCandles, source: 'LOCAL_FALLBACK' });
+    const source = baseCandles.length > 0 ? 'BINGX' : 'LOCAL_FALLBACK';
+    return res.json({ symbol, tf, candles: baseCandles, source });
   }
 
   let minutes = 1;
@@ -1202,7 +1212,8 @@ app.get('/api/assets/:symbol/klines', requireAuth, async (req, res) => {
   }
 
   const aggregatedCandles = Array.from(aggregatedMap.values()).sort((a, b) => a.time - b.time);
-  res.json({ symbol, tf, candles: aggregatedCandles, source: 'LOCAL_FALLBACK' });
+  const source = aggregatedCandles.length > 0 ? 'BINGX' : 'LOCAL_FALLBACK';
+  res.json({ symbol, tf, candles: aggregatedCandles, source });
 });
 
 app.get('/api/signals', requireAuth, (req, res) => {

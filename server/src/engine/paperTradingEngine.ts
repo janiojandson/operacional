@@ -89,6 +89,10 @@ export class PaperTradingEngine {
     this.broadcastUpdate();
   }
 
+  public getOpenPositionsCount(): number {
+    return this.openPositions.size;
+  }
+
   public setActivePairs(pairs: string[]) {
     this.activePairs = new Set(pairs);
   }

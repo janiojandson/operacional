@@ -442,14 +442,16 @@ export class MarketDataManager {
     }
   }
 
-  public async getKlines(symbol: string, tf: string, limit = 400): Promise<CandleData[] | null> {
+  public async getKlines(symbol: string, tf: string, limit = 200): Promise<CandleData[] | null> {
     try {
       const ccxtSymbol = toExchangeLinear(symbol);
       const ccxtTf = tf === '1D' ? '1d' : tf === '1W' ? '1w' : tf;
-      const ohlcv = await this.exchange.fetchOHLCV(ccxtSymbol, ccxtTf as any, undefined, limit);
+      const safeLimit = Math.min(Math.max(limit, 10), 200);
+      const ohlcv = await this.exchange.fetchOHLCV(ccxtSymbol, ccxtTf as any, undefined, safeLimit);
       if (!Array.isArray(ohlcv) || ohlcv.length === 0) return null;
       return this.normalizeCandles(ohlcv, symbol);
-    } catch {
+    } catch (err: any) {
+      console.warn(`[MarketData] Falha ao obter klines para ${symbol} (${tf}):`, err?.message || err);
       return null;
     }
   }
