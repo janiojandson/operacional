@@ -13,6 +13,7 @@ export const MAX_VALIDITY_SPAN_MS = 3000;
 export const MAX_SESSION_PARDONS = 3;
 export const MAX_SAFE_SPREAD_BPS = 5.0; // 5 basis points = 0.05% de spread máximo tolerável
 export const VETO_QUARANTINE_MS = 60000; // 60s de quarentena para pares que tomaram VETO
+export const MAX_ALLOWED_RISK_CAP = 5.0; // Teto absoluto de potência (PowerMultiplier)
 
 export function isSpreadToxicLocal(spreadBps?: number): boolean {
   if (spreadBps === undefined || spreadBps === null) return false;
@@ -194,10 +195,16 @@ export class LayaGovernanceService {
       };
     }
 
-    // 🛡️ 0. Macro Sentinel Circuit Breaker: Veto imediato em dumps sistêmicos / crash de mercado
+    // 🛡️ 0. Macro Sentinel (Defesa Direcional, Circuit Breaker e Modulação Ofensiva)
+    let macroPred: any = null;
     if (!isProtection) {
       try {
-        const macroPred = await macroSentinelClient.getMacroPrediction();
+        const sentinelTimeoutMs = 500;
+        macroPred = await Promise.race([
+          macroSentinelClient.getMacroPrediction(),
+          new Promise<null>((_, reject) => setTimeout(() => reject(new Error('SENTINEL_TIMEOUT_500MS')), sentinelTimeoutMs))
+        ]);
+
         if (macroPred?.isCircuitBreakerActive) {
           const now = Date.now();
           const vetoDecision: LayaGovernanceResponse = {
@@ -222,8 +229,35 @@ export class LayaGovernanceService {
             latencyMs: 0
           };
         }
-      } catch {
-        // Fallback silencioso para não interromper fluxo se sentinel oscilar
+
+        // 🛡️ Veto Direcional: Se regime for BEARISH_DUMP, veta ordens de BUY (compras em faca caindo)
+        if (macroPred?.regime === 'BEARISH_DUMP' && payload.side === 'BUY') {
+          const now = Date.now();
+          const vetoDecision: LayaGovernanceResponse = {
+            decisionId: `sentinel-directional-veto-${now}`,
+            stateVersion: payload.stateVersion,
+            issuedAt: now,
+            expiresAt: now + 3000,
+            action: 'VETO',
+            symbol: payload.symbol,
+            powerMultiplier: 0.5,
+            riskPct: 0.2,
+            governance: {},
+            rationaleCode: 'SENTINEL_DIRECTIONAL_VETO' as any,
+            trace: payload.trace
+          };
+          this.logDecision(vetoDecision, false, 'SENTINEL_BEARISH_DUMP_BUY_VETO');
+          return {
+            executed: false,
+            decision: vetoDecision,
+            fallbackLocal: true,
+            rejectionReason: 'SENTINEL_BEARISH_DUMP_BUY_VETO',
+            latencyMs: 0
+          };
+        }
+      } catch (error: any) {
+        console.warn('[WARN] Sentinel unavailable, defaulting to neutral governance:', error?.message || error);
+        macroPred = null;
       }
     }
 
@@ -417,6 +451,24 @@ export class LayaGovernanceService {
       const isScaleInIntent = intentGroup === 'POSITION_LIFECYCLE' && intentSubgroup === 'SCALE_IN_REQUEST';
       const allowScaleIn = isScaleInIntent && (choice === 'AUTHORIZE' || choice === 'AUTHORIZE_SCALE_IN');
 
+      let baseMultiplier = choice === 'AUTHORIZE' ? 1.5 : 1.0;
+      let rationaleCode = choice === 'AUTHORIZE'
+        ? 'DYNAMIC_POWER_AGGRESSION'
+        : (choice === 'VETO' ? 'SPREAD_TOXIC_VETO' : 'NO_OPPORTUNITY');
+
+      // 🚀 Modulação Ofensiva pelo Sentinel (se score e confiança forem altos)
+      if (choice === 'AUTHORIZE' && macroPred && macroPred.confidencePct >= 70) {
+        if (macroPred.regime === 'BULLISH' && payload.side === 'BUY') {
+          baseMultiplier = Math.min(Math.max(baseMultiplier * 1.5, 2.0), MAX_ALLOWED_RISK_CAP);
+          rationaleCode = 'SENTINEL_OFFENSIVE_SURGE' as any;
+        } else if (macroPred.regime === 'BEARISH_DUMP' && payload.side === 'SELL') {
+          baseMultiplier = Math.min(Math.max(baseMultiplier * 1.5, 2.0), MAX_ALLOWED_RISK_CAP);
+          rationaleCode = 'SENTINEL_OFFENSIVE_SURGE' as any;
+        }
+      }
+
+      const finalMultiplier = Math.min(Math.max(baseMultiplier, 0.5), MAX_ALLOWED_RISK_CAP);
+
       const proposal: LayaGovernanceResponse = {
         decisionId: `laya-${layaRaw?.model || 'rl'}-${now}`,
         stateVersion: payload.stateVersion,
@@ -424,15 +476,13 @@ export class LayaGovernanceService {
         expiresAt: now + 3000,
         action: choice as any,
         symbol: payload.symbol,
-        powerMultiplier: choice === 'AUTHORIZE' ? 1.5 : 1.0,
+        powerMultiplier: finalMultiplier,
         riskPct: choice === 'AUTHORIZE' ? 1.0 : 0.5,
         governance: {
           allowScaleIn,
           cooldownOverride: choice === 'OVERRIDE_COOLDOWN'
         },
-        rationaleCode: choice === 'AUTHORIZE'
-          ? 'DYNAMIC_POWER_AGGRESSION'
-          : (choice === 'VETO' ? 'SPREAD_TOXIC_VETO' : 'NO_OPPORTUNITY'),
+        rationaleCode,
         trace: payload.trace
       };
 

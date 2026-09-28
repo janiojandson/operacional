@@ -122,6 +122,56 @@ const MIN_LOTS: Record<string, number> = {
   'SUIUSDT': 1.0,
 };
 
+const MIN_NOTIONALS: Record<string, number> = {
+  'BTC/USDT': 5.0,
+  'BTCUSDT': 5.0,
+  'ETH/USDT': 5.0,
+  'ETHUSDT': 5.0,
+  'SOL/USDT': 5.0,
+  'SOLUSDT': 5.0,
+  'BNB/USDT': 5.0,
+  'BNBUSDT': 5.0,
+  'AVAX/USDT': 5.0,
+  'AVAXUSDT': 5.0,
+  'LINK/USDT': 5.0,
+  'LINKUSDT': 5.0,
+  'ADA/USDT': 5.0,
+  'ADAUSDT': 5.0,
+  'NEAR/USDT': 5.0,
+  'NEARUSDT': 5.0,
+  'XRP/USDT': 5.0,
+  'XRPUSDT': 5.0,
+  'DOGE/USDT': 5.0,
+  'DOGEUSDT': 5.0,
+  'SUI/USDT': 5.0,
+  'SUIUSDT': 5.0,
+};
+
+const STEP_SIZES: Record<string, { stepSize: number; precision: number }> = {
+  'BTC/USDT': { stepSize: 0.001, precision: 3 },
+  'BTCUSDT': { stepSize: 0.001, precision: 3 },
+  'ETH/USDT': { stepSize: 0.01, precision: 2 },
+  'ETHUSDT': { stepSize: 0.01, precision: 2 },
+  'SOL/USDT': { stepSize: 0.1, precision: 1 },
+  'SOLUSDT': { stepSize: 0.1, precision: 1 },
+  'BNB/USDT': { stepSize: 0.01, precision: 2 },
+  'BNBUSDT': { stepSize: 0.01, precision: 2 },
+  'AVAX/USDT': { stepSize: 0.1, precision: 1 },
+  'AVAXUSDT': { stepSize: 0.1, precision: 1 },
+  'LINK/USDT': { stepSize: 0.1, precision: 1 },
+  'LINKUSDT': { stepSize: 0.1, precision: 1 },
+  'ADA/USDT': { stepSize: 10.0, precision: 0 },
+  'ADAUSDT': { stepSize: 10.0, precision: 0 },
+  'NEAR/USDT': { stepSize: 1.0, precision: 0 },
+  'NEARUSDT': { stepSize: 1.0, precision: 0 },
+  'XRP/USDT': { stepSize: 10.0, precision: 0 },
+  'XRPUSDT': { stepSize: 10.0, precision: 0 },
+  'DOGE/USDT': { stepSize: 10.0, precision: 0 },
+  'DOGEUSDT': { stepSize: 10.0, precision: 0 },
+  'SUI/USDT': { stepSize: 1.0, precision: 0 },
+  'SUIUSDT': { stepSize: 1.0, precision: 0 },
+};
+
 const BYBIT_FEES = { maker: 0.0002, taker: 0.00055 };
 
 export function getMinLot(symbol: string): number {
@@ -129,34 +179,74 @@ export function getMinLot(symbol: string): number {
   return MIN_LOTS[clean] || 0.001;
 }
 
+export function getMinNotional(symbol: string): number {
+  const clean = symbol.replace(':USDT', '');
+  return MIN_NOTIONALS[clean] || 5.0;
+}
+
+export function normalizeQuantityToStepSize(symbol: string, rawQty: number): { normalizedQty: number; stepSize: number; precision: number } {
+  const clean = symbol.replace(':USDT', '');
+  const stepInfo = STEP_SIZES[clean] || { stepSize: 0.001, precision: 3 };
+  const { stepSize, precision } = stepInfo;
+  
+  if (stepSize <= 0) return { normalizedQty: rawQty, stepSize: 0.001, precision: 3 };
+  
+  const stepped = Math.floor(rawQty / stepSize) * stepSize;
+  const normalizedQty = Number(stepped.toFixed(precision));
+  return { normalizedQty, stepSize, precision };
+}
+
 export function validateOrderMarginAndLot(
   symbol: string,
   price: number,
-  qty: number,
-  balance: number,
+  rawQty: number,
+  availableMargin: number,
   leverage = 10,
   isMaker = false
-): { valid: boolean; reason?: string; marginRequired: number; fee: number } {
+): { valid: boolean; reason?: string; marginRequired: number; fee: number; normalizedQty: number; notional: number } {
+  const { normalizedQty } = normalizeQuantityToStepSize(symbol, rawQty);
   const minQty = getMinLot(symbol);
-  if (qty < minQty) {
-    return { valid: false, reason: `Quantidade ${qty} abaixo do lote mínimo (${minQty})`, marginRequired: 0, fee: 0 };
+  const minNotional = getMinNotional(symbol);
+  const notional = Number((price * normalizedQty).toFixed(4));
+
+  if (normalizedQty < minQty) {
+    console.warn(`[SIGNAL_SKIPPED_MIN_LOT] ${symbol}: Qty ${normalizedQty} abaixo do lote mínimo (${minQty})`, {
+      symbol,
+      requiredMinLot: minQty,
+      calculatedQty: normalizedQty,
+      availableMargin,
+      price
+    });
+    return { valid: false, reason: `SIGNAL_SKIPPED_MIN_LOT: Qty ${normalizedQty} abaixo do lote mínimo (${minQty})`, marginRequired: 0, fee: 0, normalizedQty, notional };
   }
 
-  const notional = price * qty;
-  const marginRequired = notional / leverage;
-  const feeRate = isMaker ? BYBIT_FEES.maker : BYBIT_FEES.taker;
-  const fee = notional * feeRate;
+  if (notional < minNotional) {
+    console.warn(`[SIGNAL_SKIPPED_MIN_LOT] ${symbol}: Notional $${notional.toFixed(2)} abaixo do mínimo ($${minNotional.toFixed(2)})`, {
+      symbol,
+      requiredNotional: minNotional,
+      calculatedNotional: notional,
+      availableMargin,
+      price
+    });
+    return { valid: false, reason: `SIGNAL_SKIPPED_MIN_LOT: Notional $${notional.toFixed(2)} < minNotional $${minNotional.toFixed(2)}`, marginRequired: 0, fee: 0, normalizedQty, notional };
+  }
 
-  if (marginRequired + fee > balance) {
+  const marginRequired = Number((notional / leverage).toFixed(4));
+  const feeRate = isMaker ? BYBIT_FEES.maker : BYBIT_FEES.taker;
+  const fee = Number((notional * feeRate).toFixed(4));
+
+  if (marginRequired + fee > availableMargin) {
     return { 
       valid: false, 
-      reason: `Saldo insuficiente ($${balance.toFixed(2)}) para margem ($${marginRequired.toFixed(2)}) + taxa ($${fee.toFixed(2)})`, 
+      reason: `Margem livre insuficiente ($${availableMargin.toFixed(2)}) para margem ($${marginRequired.toFixed(2)}) + taxa ($${fee.toFixed(2)})`, 
       marginRequired, 
-      fee 
+      fee,
+      normalizedQty,
+      notional
     };
   }
 
-  return { valid: true, marginRequired, fee };
+  return { valid: true, marginRequired, fee, normalizedQty, notional };
 }
 
 export async function initPaperTables(): Promise<void> {

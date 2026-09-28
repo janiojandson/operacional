@@ -197,12 +197,11 @@ export const ChartPro: React.FC<ChartProProps> = ({
         }
       } catch (err) {
         console.warn('Erro ao carregar klines para timeframe:', err);
-        setCandleSource('UNAVAILABLE');
       }
 
       const liveCandles = candlesRef.current;
-      if (!isCancelled && selectedTf === '1m' && liveCandles.length > 0) {
-        setCandleSource((prev) => (prev === 'UNAVAILABLE' ? 'LOCAL_FALLBACK' : prev));
+      if (!isCancelled && liveCandles.length > 0) {
+        setCandleSource('LOCAL_FALLBACK');
         const chartCandles = liveCandles.map(c => ({
           time: c.time,
           open: Number(c.open),
@@ -223,6 +222,8 @@ export const ChartPro: React.FC<ChartProProps> = ({
           chartRef.current?.timeScale().fitContent();
           historyKeyRef.current = historyKey;
         }
+      } else if (!isCancelled) {
+        setCandleSource('UNAVAILABLE');
       }
     };
 
@@ -231,7 +232,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [symbol, selectedTf]);
+  }, [symbol, selectedTf, candles]);
 
   useEffect(() => {
     if (!activeCandle || !candleSeriesRef.current || !volumeSeriesRef.current) return;
