@@ -43,15 +43,8 @@ export class PaperTradingEngine {
   private onUpdateCallback?: (account: PaperAccount, newTradeEvent?: SimulatedTrade) => void;
   private activePairs: Set<string> = new Set(['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT']);
   private minTemperature: number = 1.5;
-  private sessionId: string = `sess-${Date.now()}`;
-
-  public getSessionId(): string {
-    return this.sessionId;
-  }
-
-  public getOpenPositionsCount(): number {
-    return this.openPositions.size;
-  }
+  private trailingStopEnabled: boolean = true;
+  private lastExitTimestamp: Map<string, number> = new Map();
 
   public setTrailingStopEnabled(enabled: boolean) {
     this.trailingStopEnabled = enabled;
@@ -82,36 +75,18 @@ export class PaperTradingEngine {
       this.realizedPnl = 0;
       this.openPositions.clear();
       this.history = [];
-      this.sessionId = `sess-${Date.now()}`;
       this.broadcastUpdate();
     }
   }
 
-  public resetSession(customBalance?: number): { success: boolean; sessionId: string; message?: string } {
-    if (this.openPositions.size > 0) {
-      return {
-        success: false,
-        sessionId: this.sessionId,
-        message: `CONFLICT_OPEN_POSITIONS: Feche as ${this.openPositions.size} posições abertas antes de resetar a sessão.`
-      };
-    }
-
-    const targetBalance = customBalance && customBalance > 0 ? customBalance : this.balance;
+  public resetData(customBalance?: number) {
+    const targetBalance = customBalance || this.initialBalance;
     this.initialBalance = targetBalance;
     this.balance = targetBalance;
     this.realizedPnl = 0;
+    this.openPositions.clear();
     this.history = [];
-    this.sessionId = `sess-${Date.now()}`;
     this.broadcastUpdate();
-
-    return {
-      success: true,
-      sessionId: this.sessionId
-    };
-  }
-
-  public resetData(customBalance?: number) {
-    return this.resetSession(customBalance);
   }
 
   public setActivePairs(pairs: string[]) {
@@ -209,13 +184,9 @@ export class PaperTradingEngine {
     const masterBalanceAtEntry = this.balance;
     const requestedNotional = Math.max(100, masterBalanceAtEntry * 0.20) * (powerMultiplier / 1.5);
     const openNotional = adaptiveRisk?.notionalUsd ?? requestedNotional;
-    const rawQty = openNotional / currentPrice;
-    const execution = validateOrderExecution(signal.symbol, currentPrice, rawQty, masterBalanceAtEntry, 10, false);
+    const qty = Number((openNotional / currentPrice).toFixed(8));
+    const execution = validateOrderExecution(signal.symbol, currentPrice, qty, masterBalanceAtEntry, 10, false);
     if (!execution.valid) return;
-
-    const qty = execution.normalizedQty;
-    const finalNotional = execution.notional;
-
     const newTrade: SimulatedTradeWithTrailing = {
       id: `sim-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       symbol: signal.symbol,
@@ -239,7 +210,7 @@ export class PaperTradingEngine {
       trailingTriggerPrice,
       trailingStopPrice: undefined,
       qty,
-      notionalUsd: finalNotional,
+      notionalUsd: openNotional,
       riskUsd: adaptiveRisk?.riskUsd ?? undefined,
       grossR: adaptiveRisk?.grossR ?? undefined,
       netR: adaptiveRisk?.netR ?? undefined,

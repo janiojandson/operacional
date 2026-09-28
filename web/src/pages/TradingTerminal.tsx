@@ -187,42 +187,28 @@ export default function TradingTerminal() {
     if (!window.confirm('Deseja realmente zerar todo o histórico, ordens e banco do Master aguardando 15s para sincronização?')) {
       return;
     }
+    setResetTimer(15);
+    const interval = setInterval(() => {
+      setResetTimer((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
 
     try {
-      const res = await fetch('/api/trading/reset', {
+      await fetch('/api/paper-trading/reset', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('mfp_token') || ''}`
         },
-        body: JSON.stringify({ masterBalance: walletBalance, mirrorBalance: 500 })
+        body: JSON.stringify({ initialBalance: walletBalance })
       });
-
-      if (res.status === 409) {
-        const errorData = await res.json().catch(() => ({}));
-        alert(`❌ NÃO É POSSÍVEL ZERAR A SESSÃO:\n\n${errorData.message || 'Feche todas as posições abertas antes de resetar a sessão.'}`);
-        return;
-      }
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        alert(`❌ Erro ao resetar sessão: ${errorData.message || res.statusText}`);
-        return;
-      }
-
-      setResetTimer(15);
-      const interval = setInterval(() => {
-        setResetTimer((prev) => {
-          if (prev <= 1) {
-            clearInterval(interval);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    } catch (e: any) {
+    } catch (e) {
       console.error('Failed to reset paper data:', e);
-      alert(`❌ Falha de conexão ao resetar sessão: ${e.message || e}`);
     }
   };
 

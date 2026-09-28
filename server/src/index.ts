@@ -732,23 +732,14 @@ app.get('/api/trading/mirror/account', requireAuth, (req, res) => {
   res.json(mirrorTrading.getAccountState());
 });
 
-// POST /api/trading/reset — Reset parametrizado Master + Mirror com trava de integridade
+// POST /api/trading/reset — Reset parametrizado Master + Mirror
 app.post('/api/trading/reset', requireAuth, async (req, res) => {
   try {
-    const openPositionsCount = paperTrading.getOpenPositionsCount();
-    if (openPositionsCount > 0) {
-      return res.status(409).json({
-        success: false,
-        error: 'CONFLICT_OPEN_POSITIONS',
-        message: `Feche as ${openPositionsCount} posições abertas antes de resetar a sessão.`
-      });
-    }
-
     const { masterBalance = 10000, mirrorBalance = 500 } = req.body || {};
     const result = await resetTradingAccounts(Number(masterBalance), Number(mirrorBalance));
     
-    // Reset em memória com geração de novo sessionId
-    const masterResetResult = paperTrading.resetSession(result.masterBalance);
+    // Reset em memória
+    paperTrading.resetData(result.masterBalance);
     mirrorTrading.resetData(result.mirrorBalance);
     
     // Zera o Shadow Mode Auditor e histórico de oportunidades
@@ -774,15 +765,14 @@ app.post('/api/trading/reset', requireAuth, async (req, res) => {
     io.emit('paper_account_update', paperState);
     io.emit('mirror_account_update', mirrorState);
     io.emit('master_feed_update', { metrics: paperState, masterOpenPositions: [], masterHistory: [] });
-    io.emit('trading_reset', { ...result, sessionId: masterResetResult.sessionId, cooldownSeconds: 15, cooldownUntil: masterResetCooldownUntil });
+    io.emit('trading_reset', { ...result, cooldownSeconds: 15, cooldownUntil: masterResetCooldownUntil });
     
     res.json({ 
       success: true, 
       ...result, 
-      sessionId: masterResetResult.sessionId,
       cooldownSeconds: 15,
       cooldownUntil: masterResetCooldownUntil,
-      message: 'Bancas Master e Mirror resetadas. Novo sessionId gerado. Aguardando 15s para sincronização total.' 
+      message: 'Bancas Master e Mirror resetadas. Aguardando 15s para sincronização total do mercado e clientes.' 
     });
   } catch (err: any) {
     console.error('[TradingReset] Erro:', err.message);
@@ -1125,7 +1115,7 @@ app.post('/api/ai-advisor/chat', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/assets/:symbol/state', (req, res) => {
+app.get('/api/assets/:symbol/state', requireAuth, (req, res) => {
   const symbol = decodeURIComponent(String(req.params.symbol));
   const state = marketManager.getSymbolState(symbol);
   if (!state) {
@@ -1154,7 +1144,7 @@ app.get('/api/assets/:symbol/state', (req, res) => {
   });
 });
 
-app.get('/api/assets/:symbol/klines', async (req, res) => {
+app.get('/api/assets/:symbol/klines', requireAuth, async (req, res) => {
   const symbol = decodeURIComponent(String(req.params.symbol));
   const tf = (req.query.tf as string) || '1m';
   const state = marketManager.getSymbolState(symbol);
