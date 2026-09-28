@@ -13,7 +13,7 @@ export const MAX_VALIDITY_SPAN_MS = 3000;
 export const MAX_SESSION_PARDONS = 3;
 export const MAX_SAFE_SPREAD_BPS = 5.0; // 5 basis points = 0.05% de spread máximo tolerável
 export const VETO_QUARANTINE_MS = 60000; // 60s de quarentena para pares que tomaram VETO
-export const MAX_ALLOWED_RISK_CAP = 5.0; // Teto absoluto de potência (PowerMultiplier)
+export const MAX_ALLOWED_RISK_CAP = 2.0; // Teto prudente de potência (PowerMultiplier max 2.0x)
 
 export function isSpreadToxicLocal(spreadBps?: number): boolean {
   if (spreadBps === undefined || spreadBps === null) return false;
@@ -459,10 +459,10 @@ export class LayaGovernanceService {
       // 🚀 Modulação Ofensiva pelo Sentinel (se score e confiança forem altos)
       if (choice === 'AUTHORIZE' && macroPred && macroPred.confidencePct >= 70) {
         if (macroPred.regime === 'BULLISH' && payload.side === 'BUY') {
-          baseMultiplier = Math.min(Math.max(baseMultiplier * 1.5, 2.0), MAX_ALLOWED_RISK_CAP);
+          baseMultiplier = Math.min(baseMultiplier * 1.25, MAX_ALLOWED_RISK_CAP);
           rationaleCode = 'SENTINEL_OFFENSIVE_SURGE' as any;
         } else if (macroPred.regime === 'BEARISH_DUMP' && payload.side === 'SELL') {
-          baseMultiplier = Math.min(Math.max(baseMultiplier * 1.5, 2.0), MAX_ALLOWED_RISK_CAP);
+          baseMultiplier = Math.min(baseMultiplier * 1.25, MAX_ALLOWED_RISK_CAP);
           rationaleCode = 'SENTINEL_OFFENSIVE_SURGE' as any;
         }
       }

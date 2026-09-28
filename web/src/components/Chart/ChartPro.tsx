@@ -175,7 +175,8 @@ export const ChartPro: React.FC<ChartProProps> = ({
       try {
         const token = localStorage.getItem('mfp_token') || localStorage.getItem('token');
         const res = await fetch(`/api/assets/${encodeURIComponent(symbol)}/klines?tf=${selectedTf}`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {}
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: AbortSignal.timeout(3000)
         });
 
         if (res.ok) {
@@ -213,13 +214,43 @@ export const ChartPro: React.FC<ChartProProps> = ({
         }
       } catch (err) {
         console.warn('Erro ao carregar klines para timeframe:', err);
-        setCandleSource('UNAVAILABLE');
+        if (candlesRef.current && candlesRef.current.length > 0) {
+          setCandleSource('BINGX');
+        } else {
+          setCandleSource('UNAVAILABLE');
+        }
       }
 
       const liveCandles = candlesRef.current;
-      if (!isCancelled && selectedTf === '1m' && liveCandles.length > 0) {
-        setCandleSource((prev) => (prev === 'UNAVAILABLE' ? 'LOCAL_FALLBACK' : prev));
-        const chartCandles = liveCandles.map(c => ({
+      if (!isCancelled && liveCandles && liveCandles.length > 0) {
+        setCandleSource((prev) => (prev === 'UNAVAILABLE' ? 'BINGX' : prev));
+        let displayCandles = liveCandles;
+        if (selectedTf !== '1m') {
+          let minutes = 1;
+          if (selectedTf === '3m') minutes = 3;
+          else if (selectedTf === '5m') minutes = 5;
+          else if (selectedTf === '15m') minutes = 15;
+          else if (selectedTf === '1h') minutes = 60;
+          else if (selectedTf === '4h') minutes = 240;
+          else if (selectedTf === '1D') minutes = 1440;
+          const bucketSec = minutes * 60;
+          const aggMap = new Map<number, any>();
+          for (const c of liveCandles) {
+            const bTime = Math.floor(c.time / bucketSec) * bucketSec;
+            const existing = aggMap.get(bTime);
+            if (!existing) {
+              aggMap.set(bTime, { time: bTime, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume || 0 });
+            } else {
+              existing.high = Math.max(existing.high, c.high);
+              existing.low = Math.min(existing.low, c.low);
+              existing.close = c.close;
+              existing.volume = (existing.volume || 0) + (c.volume || 0);
+            }
+          }
+          displayCandles = Array.from(aggMap.values()).sort((a, b) => a.time - b.time);
+        }
+
+        const chartCandles = displayCandles.map(c => ({
           time: c.time,
           open: Number(c.open),
           high: Number(c.high),
@@ -227,7 +258,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
           close: Number(c.close)
         }));
 
-        const chartVolume = liveCandles.map(c => ({
+        const chartVolume = displayCandles.map(c => ({
           time: c.time,
           value: Number(c.volume || 0),
           color: Number(c.close) >= Number(c.open) ? 'rgba(14, 203, 129, 0.4)' : 'rgba(246, 70, 93, 0.4)'

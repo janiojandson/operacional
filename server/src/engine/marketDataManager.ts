@@ -51,6 +51,7 @@ export class MarketDataManager {
   private wsExchange: any;
   private isInitialized = false;
   private isRefreshingBooks = false;
+  private isUpdatingTickers = false;
   private isStreamingWS = false;
   private processedTradeIds = new Map<string, Set<string>>();
 
@@ -313,14 +314,17 @@ export class MarketDataManager {
   }
 
   private async updateTickers(): Promise<void> {
-    for (const [symbol, state] of this.symbols.entries()) {
-      try {
-        const ccxtSymbol = toExchangeLinear(symbol);
-        const [ticker, rawTrades] = await Promise.all([
-          this.exchange.fetchTicker(ccxtSymbol),
-          this.exchange.fetchTrades(ccxtSymbol, undefined, 50).catch(() => [])
-        ]);
-        if (!ticker.last) continue;
+    if (this.isUpdatingTickers) return;
+    this.isUpdatingTickers = true;
+    try {
+      for (const [symbol, state] of this.symbols.entries()) {
+        try {
+          const ccxtSymbol = toExchangeLinear(symbol);
+          const [ticker, rawTrades] = await Promise.all([
+            this.exchange.fetchTicker(ccxtSymbol),
+            this.exchange.fetchTrades(ccxtSymbol, undefined, 50).catch(() => [])
+          ]);
+          if (!ticker.last) continue;
 
         const prevPrice = state.lastPrice;
         state.lastPrice = ticker.last;
@@ -358,7 +362,10 @@ export class MarketDataManager {
         console.debug(`[MarketData] Ticker update failed for ${symbol}:`, err.message);
       }
     }
+  } finally {
+    this.isUpdatingTickers = false;
   }
+}
 
 
   private updateLiveCandle(state: ActiveSymbolState, price: number): void {
@@ -447,7 +454,10 @@ export class MarketDataManager {
       const ccxtSymbol = toExchangeLinear(symbol);
       const ccxtTf = tf === '1D' ? '1d' : tf === '1W' ? '1w' : tf;
       const safeLimit = Math.min(Math.max(limit, 10), 200);
-      const ohlcv = await this.exchange.fetchOHLCV(ccxtSymbol, ccxtTf as any, undefined, safeLimit);
+      const ohlcv = await Promise.race([
+        this.exchange.fetchOHLCV(ccxtSymbol, ccxtTf as any, undefined, safeLimit),
+        new Promise<null>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_KLINES_1500MS')), 1500))
+      ]);
       if (!Array.isArray(ohlcv) || ohlcv.length === 0) return null;
       return this.normalizeCandles(ohlcv, symbol);
     } catch (err: any) {

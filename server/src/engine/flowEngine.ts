@@ -187,9 +187,9 @@ export function evaluateActivePositionRisk(
 
   // 1. REGRAS PARA POSIÇÃO LONG (COMPRA)
   if (isBuy) {
-    // Se o trade estiver em leve prejuízo (-0.8R a -0.05R) e houver BOOK_IMBALANCE severo de venda com agressão de venda
-    if (currentR < -0.05 && currentR > -0.95) {
-      if (imbalance < 0.35 && (dominantSide === 'sell' || whaleCount > 0)) {
+    // Se o trade estiver em prejuízo comprovado (-0.35R a -0.95R) com desbalanceamento severo e agressão de baleia
+    if (currentR <= -0.35 && currentR > -0.95) {
+      if (imbalance <= 0.30 && (dominantSide === 'sell' || whaleCount > 0)) {
         return { shouldClose: true, reason: 'ACTIVE_FLOW_INVALIDATION_BEARISH_PRESSURE' };
       }
     }
@@ -204,9 +204,9 @@ export function evaluateActivePositionRisk(
 
   // 2. REGRAS PARA POSIÇÃO SHORT (VENDA)
   if (!isBuy) {
-    // Se o trade estiver em leve prejuízo (-0.8R a -0.05R) e houver BOOK_IMBALANCE severo de compra com agressão de compra
-    if (currentR < -0.05 && currentR > -0.95) {
-      if (imbalance > 2.8 && (dominantSide === 'buy' || whaleCount > 0)) {
+    // Se o trade estiver em prejuízo comprovado (-0.35R a -0.95R) com desbalanceamento severo e agressão de baleia
+    if (currentR <= -0.35 && currentR > -0.95) {
+      if (imbalance >= 3.0 && (dominantSide === 'buy' || whaleCount > 0)) {
         return { shouldClose: true, reason: 'ACTIVE_FLOW_INVALIDATION_BULLISH_PRESSURE' };
       }
     }

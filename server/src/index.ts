@@ -350,7 +350,7 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
           EventStoreService.recordTradeEvent({
             tradeId: tradeEvent.id,
             symbol: tradeEvent.symbol,
-            direction: tradeEvent.type as 'LONG' | 'SHORT',
+            direction: (tradeEvent.type === 'BUY' || (tradeEvent.type as any) === 'LONG') ? 'LONG' : 'SHORT',
             entryTs: new Date(tradeEvent.entryTime || (Date.now() - 60000)),
             exitTs: new Date(tradeEvent.closeTime || Date.now()),
             exitType,
@@ -735,16 +735,18 @@ app.get('/api/trading/mirror/account', requireAuth, (req, res) => {
 // POST /api/trading/reset — Reset parametrizado Master + Mirror
 app.post('/api/trading/reset', requireAuth, async (req, res) => {
   try {
-    const openPositionsCount = paperTrading.getOpenPositionsCount();
-    if (openPositionsCount > 0) {
-      return res.status(409).json({
-        success: false,
-        error: 'CONFLICT_OPEN_POSITIONS',
-        message: `Feche as ${openPositionsCount} posições abertas antes de resetar a sessão.`
-      });
+    const { masterBalance = 10000, mirrorBalance = 500 } = req.body || {};
+
+    // Fechamento automático a mercado de qualquer posição pendente antes do reset
+    const masterPositions = paperTrading.getAccountState().openPositions || [];
+    for (const pos of masterPositions) {
+      paperTrading.closePosition(pos.symbol, pos.currentPrice || pos.entryPrice, false, 'MANUAL');
+    }
+    const mirrorPositions = mirrorTrading.getAccountState().openPositions || [];
+    for (const pos of mirrorPositions) {
+      mirrorTrading.closePosition(pos.symbol, pos.currentPrice || pos.entryPrice, false);
     }
 
-    const { masterBalance = 10000, mirrorBalance = 500 } = req.body || {};
     const result = await resetTradingAccounts(Number(masterBalance), Number(mirrorBalance));
     
     // Reset em memória
@@ -1161,12 +1163,17 @@ app.get('/api/assets/:symbol/klines', async (req, res) => {
     return res.status(404).json({ error: 'Ativo não encontrado' });
   }
 
+  const baseCandles = state.candles || [];
+
+  if (tf === '1m' && baseCandles.length > 0) {
+    return res.json({ symbol, tf, candles: baseCandles, source: 'BINGX' });
+  }
+
   const direct = await marketManager.getKlines(symbol, tf, 200);
   if (direct && direct.length > 0) {
     return res.json({ symbol, tf, candles: direct, source: 'BINGX' });
   }
 
-  const baseCandles = state.candles || [];
   if (tf === '1m' || baseCandles.length === 0) {
     const source = baseCandles.length > 0 ? 'BINGX' : 'LOCAL_FALLBACK';
     return res.json({ symbol, tf, candles: baseCandles, source });
