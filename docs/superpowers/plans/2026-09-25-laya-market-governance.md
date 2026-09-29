@@ -241,14 +241,20 @@ Para eliminar qualquer ambiguidade entre o monitoramento semanal e a função SQ
 | **Consistência Estatística** | Meta Central | **$WinRate \ge 48.0\%$ OU $PF \ge 1.30$** | Garantia de assimetria favorável e robustez da distribuição |
 | **Fallback Taker (1500ms)** | Veto Suave | **$\le 10.0\%$** | Se excedido, bloqueia promoção (`METAS_OK_MICROSTRUCTURE_VETO`) sem reprovar a IA |
 | **Taxa de Missed Trades** | Veto Suave | **$\le 15.0\%$** | Se excedido, exige ajuste da agressão passiva antes do capital real |
+| **Fee Drag (% Lucro Bruto)** | Veto Suave | **$\le 40.0\%$** | Custo operacional total (fees+slip+spread+funding) sobre o lucro bruto |
 | **Amostra na Janela ($n$)** | Maturidade | **$n \ge 20$** trades | Evita decisões prematuras em semanas de baixa volatilidade |
 | **Amostra Global ($N$)** | Promocão Final | **$N \ge 300$** trades | Exigência cumulativa no modo SHADOW para acionar `GATE_PASSED_PAPER_MASTER` |
 
 ### Vereditos Oficiais da Função `fn_generate_weekly_kpi_snapshot`:
 1. `INSUFFICIENT_SAMPLE`: $n < 20$ trades na janela semanal.
 2. `METAS_OK_COLETA_EM_CURSO`: Metas centrais e de microestrutura aprovadas, porém $N < 300$ trades acumulados.
-3. `METAS_OK_MICROSTRUCTURE_VETO`: Metas econômicas aprovadas, mas atrito de execução excedeu o limiar (Fallback $> 10\%$ ou Miss $> 15\%$). Promoção pausada para ajuste de roteamento.
+3. `METAS_OK_MICROSTRUCTURE_VETO`: Metas econômicas aprovadas, mas atrito de execução excedeu o limiar (Fallback $> 10\%$, Miss $> 15\%$ ou Fee Drag $> 40\%$). Promoção pausada para ajuste de roteamento.
 4. `RECALIBRATION_NEEDED`: Uma ou mais metas centrais ($E_{net}$, $DD$, Invalidações) violaram os limites contratuais.
 5. `GATE_PASSED_PAPER_MASTER`: Todas as metas centrais e de microestrutura aprovadas com amostra global $N \ge 300$ trades.
+
+### Espelhamento na View Analítica (`vw_transition_pi_calibration`):
+- `econ_gate_qualified`: Avalia apenas o núcleo econômico ($E_{net} \ge +0.10R$, Invalidações $\le 30\%$, $N \ge 300$).
+- `full_gate_qualified`: Avalia a condição integral (núcleo econômico + consistência estatística + teto de DD $\le 10\%$ + 3 vetos suaves de microestrutura: Fallback $\le 10\%$, Miss $\le 15\%$, Fee Drag $\le 40\%$).
+- `gate_qualified`: Espelha com fidelidade absoluta o `full_gate_qualified`, garantindo que consultas à view e à função retornem rigorosamente o mesmo veredito booleano.
 
 

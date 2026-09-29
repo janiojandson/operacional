@@ -164,7 +164,7 @@ export async function initEventStoreTables(): Promise<void> {
       console.log('[EventStore] ✅ Laya Governança v2.0 & Views Looker Studio sincronizadas de:', migrationPath);
     }
 
-    // Blindagem de versionamento do modelo calibrado (p_theory)
+    // Blindagem de versionamento do modelo calibrado (p_theory) e métrica de fee drag
     await query(`
       ALTER TABLE kpi_weekly_snapshots 
       ADD COLUMN IF NOT EXISTS p_theory JSONB NOT NULL DEFAULT '{"p1":0.05,"p2":0.35,"p3":0.29,"p4":0.21,"p5":0.08,"p6":0.02}'::jsonb;
@@ -172,6 +172,10 @@ export async function initEventStoreTables(): Promise<void> {
     await query(`
       ALTER TABLE kpi_weekly_snapshots 
       ALTER COLUMN p_theory SET DEFAULT '{"p1":0.05,"p2":0.35,"p3":0.29,"p4":0.21,"p5":0.08,"p6":0.02}'::jsonb;
+    `).catch(() => {});
+    await query(`
+      ALTER TABLE kpi_weekly_snapshots 
+      ADD COLUMN IF NOT EXISTS fee_drag_pct NUMERIC(6, 2) DEFAULT 0.00;
     `).catch(() => {});
   } catch (err: any) {
     console.warn('[EventStore] Aviso ao carregar migração v2:', err.message);

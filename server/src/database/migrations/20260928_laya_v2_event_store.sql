@@ -562,6 +562,7 @@ CREATE TABLE IF NOT EXISTS kpi_weekly_snapshots (
     miss_rate_pct NUMERIC(6, 2) DEFAULT 0.00,
     friction_r_avg NUMERIC(8, 4) NOT NULL,
     fee_drag_usd_total NUMERIC(14, 4) NOT NULL,
+    fee_drag_pct NUMERIC(6, 2) DEFAULT 0.00,
     
     -- Avaliação do Gate e Versionamento do Modelo
     p_theory JSONB NOT NULL DEFAULT '{"p1":0.05,"p2":0.35,"p3":0.29,"p4":0.21,"p5":0.08,"p6":0.02}'::jsonb,
@@ -603,6 +604,7 @@ DECLARE
     v_miss NUMERIC(6,2);
     v_friction_avg NUMERIC(8,4);
     v_fee_drag NUMERIC(14,4);
+    v_drag_pct NUMERIC(6,2);
     v_qualified BOOLEAN;
     v_verdict VARCHAR(30);
     v_notes TEXT;
@@ -623,11 +625,12 @@ BEGIN
         COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE entry_type = 'MAKER_POST_ONLY' AND entry_fill_status = 'FILLED_MAKER') / NULLIF(COUNT(*), 0), 2), 0.00),
         COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE wh_fill_type = 'TAKER_FALLBACK_1500MS') / NULLIF(COUNT(*), 0), 2), 0.00),
         COALESCE(ROUND(AVG(r_multiple_gross - r_multiple_net), 4), 0.0000),
-        COALESCE(ROUND(SUM(total_friction_usd), 4), 0.0000)
+        COALESCE(ROUND(SUM(total_friction_usd), 4), 0.0000),
+        COALESCE(ROUND(100.0 * SUM(total_friction_usd) / NULLIF(SUM(GREATEST(gross_pnl_usd, 0)), 0), 2), 0.00)
     INTO
         v_n_trades, v_e_net, v_win_rate, v_pf, v_invalidation_all,
         v_b1, v_b2, v_b3, v_b4, v_b5, v_b6,
-        v_maker, v_taker_fb, v_friction_avg, v_fee_drag
+        v_maker, v_taker_fb, v_friction_avg, v_fee_drag, v_drag_pct
     FROM trade_events
     WHERE closed_at >= p_window_start 
       AND closed_at <= p_window_end
@@ -660,10 +663,10 @@ BEGIN
         v_notes := format('Amostra semanal n=%s inferior a 20 trades.', v_n_trades);
     ELSIF v_e_net >= 0.1000 AND (v_win_rate >= 48.0 OR v_pf >= 1.300) AND v_invalidation_all <= 30.0 AND v_max_dd <= 10.0 THEN
         -- Verificação de Vetos Suaves de Microestrutura (Atrito Operacional)
-        IF v_taker_fb > 10.0 OR v_miss > 15.0 THEN
+        IF v_taker_fb > 10.0 OR v_miss > 15.0 OR v_drag_pct > 40.0 THEN
             v_qualified := FALSE;
             v_verdict := 'METAS_OK_MICROSTRUCTURE_VETO';
-            v_notes := format('Metas centrais aprovadas, mas atrito de microestrutura excede limiar: Taker Fallback=%s%% (teto 10%%) ou Miss Rate=%s%% (teto 15%%). Promoção suspensa até calibração de roteamento.', v_taker_fb, v_miss);
+            v_notes := format('Metas centrais aprovadas, mas atrito de microestrutura excede limiar: Taker Fallback=%s%% (teto 10%%), Miss Rate=%s%% (teto 15%%) ou Fee Drag=%s%% (teto 40%%). Promoção suspensa até calibração de roteamento.', v_taker_fb, v_miss, v_drag_pct);
         ELSIF v_cum_trades >= 300 THEN
             v_qualified := TRUE;
             v_verdict := 'GATE_PASSED_PAPER_MASTER';
@@ -686,14 +689,14 @@ BEGIN
         n_trades, cumulative_trades,
         e_net_r, win_rate_net_pct, profit_factor_net, pct_invalidation_all, max_drawdown_pct,
         pct_b1, pct_b2, pct_b3, pct_b4, pct_b5, pct_b6,
-        maker_fill_pct, taker_fallback_pct, miss_rate_pct, friction_r_avg, fee_drag_usd_total,
+        maker_fill_pct, taker_fallback_pct, miss_rate_pct, friction_r_avg, fee_drag_usd_total, fee_drag_pct,
         gate_qualified, gate_verdict, recalibration_notes
     ) VALUES (
         p_snapshot_label, p_window_start, p_window_end, p_run_mode, p_pair,
         v_n_trades, v_cum_trades,
         v_e_net, v_win_rate, v_pf, v_invalidation_all, v_max_dd,
         v_b1, v_b2, v_b3, v_b4, v_b5, v_b6,
-        v_maker, v_taker_fb, v_miss, v_friction_avg, v_fee_drag,
+        v_maker, v_taker_fb, v_miss, v_friction_avg, v_fee_drag, v_drag_pct,
         v_qualified, v_verdict, v_notes
     )
     ON CONFLICT (snapshot_label) DO UPDATE SET
@@ -719,6 +722,7 @@ BEGIN
         miss_rate_pct = EXCLUDED.miss_rate_pct,
         friction_r_avg = EXCLUDED.friction_r_avg,
         fee_drag_usd_total = EXCLUDED.fee_drag_usd_total,
+        fee_drag_pct = EXCLUDED.fee_drag_pct,
         gate_qualified = EXCLUDED.gate_qualified,
         gate_verdict = EXCLUDED.gate_verdict,
         recalibration_notes = EXCLUDED.recalibration_notes,
@@ -753,7 +757,13 @@ WITH empirical AS (
         COALESCE(ROUND(AVG(r_multiple_gross) FILTER (WHERE branch_classification='B6_MACRO_EMERGENCY'), 4), 0.0000) AS r_b6_empirical_avg,
         COALESCE(ROUND(AVG(r_multiple_gross), 4), 0.0000) AS e_gross_empirical,
         COALESCE(ROUND(AVG(r_multiple_net), 4), 0.0000) AS e_net_empirical,
-        COALESCE(ROUND(AVG(r_multiple_gross - r_multiple_net), 4), 0.0000) AS friction_r_empirical
+        COALESCE(ROUND(AVG(r_multiple_gross - r_multiple_net), 4), 0.0000) AS friction_r_empirical,
+        COALESCE(ROUND(100.0 * AVG((r_multiple_net > 0)::int), 2), 0.00) AS win_rate_net_pct,
+        COALESCE(ROUND(SUM(GREATEST(r_multiple_net,0)) / NULLIF(-SUM(LEAST(r_multiple_net,0)),0), 3), 0.000) AS profit_factor_net,
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE wh_fill_type = 'TAKER_FALLBACK_1500MS') / NULLIF(COUNT(*), 0), 2), 0.00) AS taker_fallback_pct,
+        COALESCE(ROUND(100.0 * (SELECT COUNT(*) FILTER (WHERE entry_fill_status = 'MISSED_NO_FILL') FROM trade_events WHERE run_mode = 'SHADOW') / NULLIF((SELECT COUNT(*) FROM trade_events WHERE run_mode = 'SHADOW'), 0), 2), 0.00) AS miss_rate_pct,
+        COALESCE(ROUND(100.0 * SUM(total_friction_usd) / NULLIF(SUM(GREATEST(gross_pnl_usd, 0)), 0), 2), 0.00) AS fee_drag_pct,
+        COALESCE((SELECT MAX(drawdown_pct) FROM vw_drawdown_hwm), 0.00) AS max_drawdown_pct
     FROM trade_events
     WHERE entry_fill_status <> 'MISSED_NO_FILL'
       AND closed_at IS NOT NULL
@@ -777,11 +787,32 @@ SELECT
     r_b5_empirical_avg,  2.0500 AS r5_b5_theoretical, ROUND(r_b5_empirical_avg - 2.0500, 4) AS delta_r5,
     r_b6_empirical_avg, -0.6000 AS r6_b6_theoretical, ROUND(r_b6_empirical_avg - (-0.6000), 4) AS delta_r6,
 
-    -- Expectância Agregada e Gate Oficial
+    -- Expectância Agregada e Métricas de Microestrutura
     e_gross_empirical, 0.3395 AS e_gross_theoretical, ROUND(e_gross_empirical - 0.3395, 4) AS delta_e_gross,
     friction_r_empirical,
     e_net_empirical, 0.1260 AS e_net_theoretical, ROUND(e_net_empirical - 0.1260, 4) AS delta_e_net,
-    (e_net_empirical >= 0.1000 AND pct_invalidation_all_pct <= 30.00 AND n_total >= 300) AS gate_qualified
+    win_rate_net_pct,
+    profit_factor_net,
+    max_drawdown_pct,
+    taker_fallback_pct,
+    miss_rate_pct,
+    fee_drag_pct,
+
+    -- Gates Unificados (Parcial Econômico vs Integral com Microestrutura)
+    (e_net_empirical >= 0.1000 AND pct_invalidation_all_pct <= 30.00 AND n_total >= 300) AS econ_gate_qualified,
+    (e_net_empirical >= 0.1000 AND pct_invalidation_all_pct <= 30.00 AND n_total >= 300 
+     AND (win_rate_net_pct >= 48.0 OR profit_factor_net >= 1.300) 
+     AND max_drawdown_pct <= 10.0 
+     AND taker_fallback_pct <= 10.0 
+     AND miss_rate_pct <= 15.0 
+     AND fee_drag_pct <= 40.0) AS full_gate_qualified,
+    -- gate_qualified espelha a condição integral idêntica à função SQL do snapshot
+    (e_net_empirical >= 0.1000 AND pct_invalidation_all_pct <= 30.00 AND n_total >= 300 
+     AND (win_rate_net_pct >= 48.0 OR profit_factor_net >= 1.300) 
+     AND max_drawdown_pct <= 10.0 
+     AND taker_fallback_pct <= 10.0 
+     AND miss_rate_pct <= 15.0 
+     AND fee_drag_pct <= 40.0) AS gate_qualified
 FROM empirical;
 
 
