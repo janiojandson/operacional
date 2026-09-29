@@ -209,6 +209,7 @@ export class EventStoreService {
 
     const signalSource = input.signalSource || input.decisionType || 'FLOW_SIGNAL';
     const runMode = input.runMode || 'SHADOW';
+    const normalizedRunMode = runMode === 'LIVE_REAL' ? 'LIVE_REAL' : runMode === 'PAPER_MASTER' ? 'PAPER_MASTER' : 'SHADOW';
 
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const decisionUuid = uuidRegex.test(input.decisionId) ? input.decisionId : crypto.randomUUID();
@@ -230,7 +231,7 @@ export class EventStoreService {
       decisionUuid,
       input.symbol,
       signalSource,
-      runMode,
+      normalizedRunMode,
       actionRequested,
       input.spreadBps ?? 0,
       input.deltaStopBps ?? 0,
