@@ -412,37 +412,48 @@ export class LayaGovernanceService {
         : 0;
 
       const systemOnePayload = {
-        stateVersion: '2.0',
-        requestId: crypto.randomUUID(),
-        timestamp: Date.now(),
-        symbol: payload.symbol,
-        side: payload.side,
-        currentPrice,
-        proposedStopLoss: proposedStop,
-        proposedTakeProfit: Number(payload.proposedTakeProfit || 0),
-        delta_stop_bps: deltaStopBps,
-        signalSource: payload.signalSource || 'ABSORPTION_BUY',
-        microstructure: {
-          bestBid: Number(payload.trace?.bestBid || 0),
-          bestAsk: Number(payload.trace?.bestAsk || 0),
-          spreadBps: Number(payload.trace?.spreadBps || 0),
-          depthImbalanceRatio: Number(payload.trace?.depthImbalanceRatio || 1.0),
-          whaleWallDetected: Boolean(payload.trace?.whaleWallDetected),
-          whaleWallDistancePct: Number(payload.trace?.whaleWallDistancePct || 0),
-          whaleWallVolumeUsd: Number(payload.trace?.whaleWallVolumeUsd || 0),
-          wall_persistence_ms: Number(payload.trace?.wallPersistenceMs || 0)
+        state: {
+          origem: 'mercado_financeiro',
+          body: contextDescription,
+          stateVersion: '2.0',
+          requestId: crypto.randomUUID(),
+          timestamp: Date.now(),
+          symbol: payload.symbol,
+          side: payload.side,
+          currentPrice,
+          proposedStopLoss: proposedStop,
+          proposedTakeProfit: Number(payload.proposedTakeProfit || 0),
+          delta_stop_bps: deltaStopBps,
+          signalSource: payload.signalSource || 'ABSORPTION_BUY',
+          microstructure: {
+            bestBid: Number(payload.trace?.bestBid || 0),
+            bestAsk: Number(payload.trace?.bestAsk || 0),
+            spreadBps: Number(payload.trace?.spreadBps || 0),
+            depthImbalanceRatio: Number(payload.trace?.depthImbalanceRatio || 1.0),
+            whaleWallDetected: Boolean(payload.trace?.whaleWallDetected),
+            whaleWallDistancePct: Number(payload.trace?.whaleWallDistancePct || 0),
+            whaleWallVolumeUsd: Number(payload.trace?.whaleWallVolumeUsd || 0),
+            wall_persistence_ms: Number(payload.trace?.wallPersistenceMs || 0)
+          },
+          macro: {
+            regime: payload.macro?.regime || 'NEUTRAL',
+            circuitBreakerActive: Boolean(payload.macro?.isCircuitBreakerActive),
+            powerMultiplier: Number(payload.macro?.powerMultiplier || 1.0),
+            btcFundingRate: Number(payload.macro?.btcFundingRate || 0.0001)
+          },
+          risk: {
+            accountEquity: Number(payload.risk?.accountEquity || 10000),
+            currentRiskAggregatePct: Number(payload.risk?.currentRiskAggregatePct || 0),
+            proposedRiskPct: Number(payload.risk?.proposedRiskPct || 0.01),
+            atr14: Number(payload.risk?.atr14 || 0)
+          }
         },
-        macro: {
-          regime: payload.macro?.regime || 'NEUTRAL',
-          circuitBreakerActive: Boolean(payload.macro?.isCircuitBreakerActive),
-          powerMultiplier: Number(payload.macro?.powerMultiplier || 1.0),
-          btcFundingRate: Number(payload.macro?.btcFundingRate || 0.0001)
-        },
-        risk: {
-          accountEquity: Number(payload.risk?.accountEquity || 10000),
-          currentRiskAggregatePct: Number(payload.risk?.currentRiskAggregatePct || 0),
-          proposedRiskPct: Number(payload.risk?.proposedRiskPct || 0.01),
-          atr14: Number(payload.risk?.atr14 || 0)
+        questions: {
+          action: {
+            type: 'choice',
+            instructions: questionInstructions,
+            criteria
+          }
         }
       };
 
