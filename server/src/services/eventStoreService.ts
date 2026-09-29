@@ -103,6 +103,16 @@ export class EventStoreService {
     const exitReason = input.exitReason ?? (input.exitType === 'STOP_FULL' ? 'STOP_LOSS_FULL' : input.exitType === 'STOP_EARLY' ? 'ACTIVE_INVALIDATION' : 'WAVE_HARVEST_BREAKEVEN');
     const branch = input.branchClassification ?? (exitReason === 'ACTIVE_INVALIDATION' ? 'B2_INVALIDATION' : exitReason === 'STOP_LOSS_FULL' ? 'B1_STOP_FULL' : 'B3_BE_POST_HARVEST');
     const posSize = input.positionSizeUsd ?? 250.0;
+    const feesEntry = input.feesEntryUsd ?? (input.fees ? input.fees / 2 : 0.05);
+    const feesExit = input.feesExitUsd ?? (input.fees ? input.fees / 2 : 0.05);
+    const spreadCost = input.spreadCostUsd ?? 0.0625;
+    const slippage = input.estimatedSlippageUsd ?? (input.slippage ?? 0.05);
+    const funding = input.fundingCostUsd ?? (input.funding ?? 0);
+    const totalFriction = feesEntry + feesExit + spreadCost + slippage + funding;
+    const riskUsd = (posSize * deltaStopBps) / 10000.0;
+    const frictionR = riskUsd > 0 ? totalFriction / riskUsd : 0;
+    const rNetCalculated = Number((input.rGross - frictionR).toFixed(4));
+    const rNet = input.rNet !== undefined && Math.abs(input.rNet - rNetCalculated) < 0.1 ? input.rNet : rNetCalculated;
 
     query(`
       INSERT INTO trade_events (
@@ -132,25 +142,36 @@ export class EventStoreService {
       deltaStopBps, entryType, entryFillStatus, runMode,
       Boolean(input.waveHarvestReached), input.waveHarvestPrice ?? null, input.whFillType ?? 'NOT_APPLICABLE',
       input.exitPrice ?? entryPrice, exitReason, branch,
-      posSize, input.grossPnlUsd ?? (input.rGross * 2.5), input.netPnlUsd ?? (input.rNet * 2.5),
-      input.rGross, input.rNet,
-      input.feesEntryUsd ?? (input.fees ? input.fees / 2 : 0.05), input.feesExitUsd ?? (input.fees ? input.fees / 2 : 0.05),
-      input.spreadCostUsd ?? 0.0625, input.estimatedSlippageUsd ?? (input.slippage ?? 0.05), input.fundingCostUsd ?? (input.funding ?? 0),
+      posSize, input.grossPnlUsd ?? (input.rGross * 2.5), input.netPnlUsd ?? (rNet * 2.5),
+      input.rGross, rNet,
+      feesEntry, feesExit, spreadCost, slippage, funding,
       input.entryTs, input.exitTs
-    ]).then(() => {
-      query('SELECT fn_evaluate_session_lockout()').catch(() => {});
+    ]).then(async () => {
+      await query('SELECT fn_evaluate_session_lockout()').catch(() => {});
+      await query('SELECT fn_evaluate_safe_halt()').catch(() => {});
     }).catch((err) => {
       console.warn('[EventStore] Erro ao gravar trade_event v2:', err.message);
     });
   }
 
   /**
-   * Consulta o estado persistente de Lockout Diário (-3.0R)
+   * Consulta o estado persistente de Lockout Diário (-3.0R) e SAFE_HALT (15% DD)
    */
   static async isLockoutActive(): Promise<boolean> {
     try {
-      const res = await query<{ daily_lockout_active: boolean }>('SELECT daily_lockout_active FROM system_state WHERE id = 1');
-      return Boolean(res[0]?.daily_lockout_active);
+      const res = await query<{ daily_lockout_active: boolean; safe_halt_active: boolean }>(
+        'SELECT daily_lockout_active, safe_halt_active FROM system_state WHERE id = 1'
+      );
+      return Boolean(res[0]?.daily_lockout_active || res[0]?.safe_halt_active);
+    } catch {
+      return false;
+    }
+  }
+
+  static async isSafeHaltActive(): Promise<boolean> {
+    try {
+      const res = await query<{ safe_halt_active: boolean }>('SELECT safe_halt_active FROM system_state WHERE id = 1');
+      return Boolean(res[0]?.safe_halt_active);
     } catch {
       return false;
     }

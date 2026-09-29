@@ -226,13 +226,16 @@ DO $$ BEGIN
     END IF;
 END $$;
 
--- 7. FUNÇÃO DE AVALIAÇÃO DO LOCKOUT DIÁRIO (-3.0R UTC)
+-- 7. FUNÇÕES DE AVALIAÇÃO DE SEGURANÇA (LOCKOUT DIÁRIO & SAFE_HALT)
 CREATE OR REPLACE FUNCTION fn_evaluate_session_lockout() RETURNS VOID AS $$
 DECLARE
     v_today DATE := (NOW() AT TIME ZONE 'UTC')::date;
     v_cum   NUMERIC;
     v_locked BOOLEAN;
 BEGIN
+    -- Serializa avaliações concorrentes para evitar duplicidade de eventos
+    PERFORM pg_advisory_xact_lock(4242);
+
     SELECT COALESCE(MIN(cum_r_net), 0) INTO v_cum
     FROM (
         SELECT SUM(r_multiple_net) OVER (
@@ -261,6 +264,46 @@ BEGIN
                lockout_session_date = NULL WHERE id = 1;
         INSERT INTO system_state_events (event_type, r_at_event)
         VALUES ('SESSION_RESET', v_cum);
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION fn_evaluate_safe_halt() RETURNS VOID AS $$
+DECLARE
+    v_base_bal NUMERIC;
+    v_cum_pnl  NUMERIC;
+    v_equity   NUMERIC;
+    v_curr_hwm NUMERIC;
+    v_new_hwm  NUMERIC;
+    v_halted   BOOLEAN;
+BEGIN
+    -- Serializa avaliação de Safe Halt
+    PERFORM pg_advisory_xact_lock(4243);
+
+    SELECT COALESCE(starting_balance_usd, 10000.00) INTO v_base_bal FROM account_state LIMIT 1;
+    SELECT COALESCE(SUM(net_pnl_usd), 0) INTO v_cum_pnl 
+    FROM trade_events 
+    WHERE closed_at IS NOT NULL AND entry_fill_status <> 'MISSED_NO_FILL';
+
+    v_equity := v_base_bal + v_cum_pnl;
+
+    SELECT hwm_usd, safe_halt_active INTO v_curr_hwm, v_halted FROM system_state WHERE id = 1;
+    v_new_hwm := GREATEST(COALESCE(v_curr_hwm, v_base_bal), v_equity);
+
+    -- Atualiza HWM se houver novo pico
+    IF v_new_hwm > COALESCE(v_curr_hwm, 0) THEN
+        UPDATE system_state SET hwm_usd = v_new_hwm, hwm_reached_at = NOW() WHERE id = 1;
+    END IF;
+
+    -- Gatilho de SAFE_HALT aos 15% de drawdown sobre HWM (piso de banca de 85%)
+    IF v_equity <= (0.85 * v_new_hwm) AND NOT COALESCE(v_halted, FALSE) THEN
+        UPDATE system_state 
+        SET safe_halt_active = TRUE,
+            safe_halt_reason = 'DRAWDOWN_BREACH_15PCT',
+            safe_halt_triggered_at = NOW()
+        WHERE id = 1;
+        INSERT INTO system_state_events (event_type, r_at_event, detail)
+        VALUES ('SAFE_HALT_ON', 0, jsonb_build_object('equity', v_equity, 'hwm', v_new_hwm, 'dd_pct', ROUND(100.0 * (v_new_hwm - v_equity) / v_new_hwm, 2)));
     END IF;
 END;
 $$ LANGUAGE plpgsql;
@@ -414,3 +457,24 @@ SELECT
     ROUND(SUM(net_pnl_usd), 2)                      AS net_pnl_usd_day
 FROM running
 GROUP BY session_date;
+
+-- 8.5 View 5: vw_integrity_r_consistency (Auditoria Contábil de R_net vs Atrito)
+CREATE OR REPLACE VIEW vw_integrity_r_consistency AS
+SELECT
+    trade_id,
+    pair,
+    run_mode,
+    position_size_usd,
+    delta_stop_bps,
+    ROUND(position_size_usd * delta_stop_bps / 10000.0, 4) AS risk_usd_calc,
+    total_friction_usd,
+    ROUND(total_friction_usd / NULLIF(position_size_usd * delta_stop_bps / 10000.0, 0), 4) AS friction_r_calc,
+    r_multiple_gross,
+    r_multiple_net,
+    ROUND(r_multiple_gross - (total_friction_usd / NULLIF(position_size_usd * delta_stop_bps / 10000.0, 0)), 4) AS r_net_calc,
+    ABS(r_multiple_net - (r_multiple_gross - (total_friction_usd / NULLIF(position_size_usd * delta_stop_bps / 10000.0, 0)))) < 0.001 AS ok,
+    closed_at
+FROM trade_events
+WHERE entry_fill_status <> 'MISSED_NO_FILL'
+  AND closed_at IS NOT NULL;
+
