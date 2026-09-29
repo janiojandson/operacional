@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS trade_events (
     branch_classification branch_enum,
     
     -- Métricas Financeiras e Assimetria de R
+    account_balance_usd NUMERIC(18, 4),               -- Saldo da conta no momento da operação (V5: Risco ~1.0%)
     position_size_usd NUMERIC(18, 4) NOT NULL,
     gross_pnl_usd NUMERIC(18, 4),
     net_pnl_usd NUMERIC(18, 4),
@@ -123,6 +124,8 @@ CREATE TABLE IF NOT EXISTS trade_events (
     closed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE trade_events ADD COLUMN IF NOT EXISTS account_balance_usd NUMERIC(18, 4);
 
 -- Índices de Performance da Tabela trade_events
 CREATE INDEX IF NOT EXISTS idx_trade_events_pair_closed ON trade_events(pair, closed_at);
@@ -459,14 +462,18 @@ FROM running
 GROUP BY session_date;
 
 -- 8.5 View 5: vw_integrity_r_consistency (Auditoria Contábil de R_net vs Atrito)
+DROP VIEW IF EXISTS vw_integrity_r_consistency CASCADE;
 CREATE OR REPLACE VIEW vw_integrity_r_consistency AS
 SELECT
     trade_id,
     pair,
     run_mode,
+    account_balance_usd,
     position_size_usd,
     delta_stop_bps,
     ROUND(position_size_usd * delta_stop_bps / 10000.0, 4) AS risk_usd_calc,
+    ROUND(100.0 * (position_size_usd * delta_stop_bps / 10000.0) / NULLIF(account_balance_usd, 0), 2) AS risk_pct_of_balance,
+    (account_balance_usd IS NULL OR ABS(((position_size_usd * delta_stop_bps / 10000.0) / NULLIF(account_balance_usd, 0)) - 0.010) <= 0.005) AS risk_sizing_ok,
     total_friction_usd,
     ROUND(total_friction_usd / NULLIF(position_size_usd * delta_stop_bps / 10000.0, 0), 4) AS friction_r_calc,
     r_multiple_gross,
@@ -477,4 +484,39 @@ SELECT
 FROM trade_events
 WHERE entry_fill_status <> 'MISSED_NO_FILL'
   AND closed_at IS NOT NULL;
+
+-- 8.6 View 6: vw_integrity_branch_consistency (Auditoria de Classificação de Ramos B1-B6)
+DROP VIEW IF EXISTS vw_integrity_branch_consistency CASCADE;
+CREATE OR REPLACE VIEW vw_integrity_branch_consistency AS
+SELECT 
+    trade_id,
+    pair,
+    run_mode,
+    r_multiple_gross,
+    wave_harvest_reached,
+    exit_reason,
+    branch_classification,
+    CASE
+        WHEN exit_reason = 'ACTIVE_INVALIDATION' THEN 'B2_INVALIDATION'
+        WHEN exit_reason = 'CIRCUIT_BREAKER_EMERGENCY' THEN 'B6_MACRO_EMERGENCY'
+        WHEN exit_reason = 'STOP_LOSS_FULL' THEN 'B1_STOP_FULL'
+        WHEN wave_harvest_reached AND (r_multiple_gross - 0.30) / 0.5 >= 3.5 THEN 'B5_RUNNER_EXTREME'
+        WHEN wave_harvest_reached AND (r_multiple_gross - 0.30) / 0.5 >= 2.0 THEN 'B4_TARGET_RUNNER'
+        WHEN wave_harvest_reached THEN 'B3_BE_POST_HARVEST'
+        ELSE 'B1_STOP_FULL'
+    END AS branch_expected,
+    (branch_classification::text = CASE
+        WHEN exit_reason = 'ACTIVE_INVALIDATION' THEN 'B2_INVALIDATION'
+        WHEN exit_reason = 'CIRCUIT_BREAKER_EMERGENCY' THEN 'B6_MACRO_EMERGENCY'
+        WHEN exit_reason = 'STOP_LOSS_FULL' THEN 'B1_STOP_FULL'
+        WHEN wave_harvest_reached AND (r_multiple_gross - 0.30) / 0.5 >= 3.5 THEN 'B5_RUNNER_EXTREME'
+        WHEN wave_harvest_reached AND (r_multiple_gross - 0.30) / 0.5 >= 2.0 THEN 'B4_TARGET_RUNNER'
+        WHEN wave_harvest_reached THEN 'B3_BE_POST_HARVEST'
+        ELSE 'B1_STOP_FULL'
+    END) AS ok,
+    closed_at
+FROM trade_events
+WHERE entry_fill_status <> 'MISSED_NO_FILL'
+  AND closed_at IS NOT NULL;
+
 

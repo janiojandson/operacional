@@ -43,6 +43,7 @@ export interface RecordTradeEventInput {
   exitPrice?: number;
   exitReason?: string;
   branchClassification?: string;
+  accountBalanceUsd?: number;
   positionSizeUsd?: number;
   grossPnlUsd?: number;
   netPnlUsd?: number;
@@ -121,7 +122,7 @@ export class EventStoreService {
         delta_stop_bps, entry_type, entry_fill_status, run_mode,
         wave_harvest_reached, wave_harvest_price, wh_fill_type,
         exit_price, exit_reason, branch_classification,
-        position_size_usd, gross_pnl_usd, net_pnl_usd,
+        account_balance_usd, position_size_usd, gross_pnl_usd, net_pnl_usd,
         r_multiple_gross, r_multiple_net,
         fees_entry_usd, fees_exit_usd, spread_cost_usd, estimated_slippage_usd, funding_cost_usd,
         opened_at, closed_at
@@ -131,10 +132,10 @@ export class EventStoreService {
         $7, $8, $9, $10,
         $11, $12, $13,
         $14, $15, $16,
-        $17, $18, $19,
-        $20, $21,
-        $22, $23, $24, $25, $26,
-        $27, $28
+        $17, $18, $19, $20,
+        $21, $22,
+        $23, $24, $25, $26, $27,
+        $28, $29
       )
     `, [
       tradeUuid, input.symbol, side,
@@ -142,7 +143,7 @@ export class EventStoreService {
       deltaStopBps, entryType, entryFillStatus, runMode,
       Boolean(input.waveHarvestReached), input.waveHarvestPrice ?? null, input.whFillType ?? 'NOT_APPLICABLE',
       input.exitPrice ?? entryPrice, exitReason, branch,
-      posSize, input.grossPnlUsd ?? (input.rGross * 2.5), input.netPnlUsd ?? (rNet * 2.5),
+      input.accountBalanceUsd ?? 10000.0, posSize, input.grossPnlUsd ?? (input.rGross * 2.5), input.netPnlUsd ?? (rNet * 2.5),
       input.rGross, rNet,
       feesEntry, feesExit, spreadCost, slippage, funding,
       input.entryTs, input.exitTs
