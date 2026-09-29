@@ -6,6 +6,7 @@ import PresellPage from './pages/PresellPage';
 import LoginPage from './pages/LoginPage';
 import AdminDashboard from './pages/AdminDashboard';
 import ClientDashboard from './pages/ClientDashboard';
+import TradingTerminal from './pages/TradingTerminal';
 import './index.css';
 
 // ─── Rotas Protegidas ─────────────────────────────────────────────────────
@@ -49,6 +50,7 @@ function AppRouter() {
         {/* Pre-sell / Apresentação Institucional */}
         <Route path="/" element={<PresellPage />} />
         <Route path="/presell" element={<PresellPage />} />
+        <Route path="/terminal" element={<TradingTerminal />} />
 
         {/* Login — redireciona se já autenticado */}
         <Route

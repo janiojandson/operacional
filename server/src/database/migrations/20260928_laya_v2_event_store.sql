@@ -560,7 +560,7 @@ CREATE TABLE IF NOT EXISTS kpi_weekly_snapshots (
     fee_drag_usd_total NUMERIC(14, 4) NOT NULL,
     
     -- Avaliação do Gate e Versionamento do Modelo
-    p_theory JSONB NOT NULL DEFAULT '{"p1":0.20,"p2":0.20,"p3":0.25,"p4":0.25,"p5":0.08,"p6":0.02}'::jsonb,
+    p_theory JSONB NOT NULL DEFAULT '{"p1":0.05,"p2":0.35,"p3":0.29,"p4":0.21,"p5":0.08,"p6":0.02}'::jsonb,
     gate_qualified BOOLEAN NOT NULL DEFAULT FALSE,
     gate_verdict VARCHAR(30) NOT NULL DEFAULT 'OBSERVATION',
     recalibration_notes TEXT,
@@ -751,10 +751,10 @@ WITH empirical AS (
 )
 SELECT
     n_total,
-    p1_b1_empirical_pct, 20.00 AS p1_theoretical_pct, ROUND(p1_b1_empirical_pct - 20.00, 2) AS delta_p1_pct,
-    p2_b2_empirical_pct, 20.00 AS p2_theoretical_pct, ROUND(p2_b2_empirical_pct - 20.00, 2) AS delta_p2_pct,
-    p3_b3_empirical_pct, 25.00 AS p3_theoretical_pct, ROUND(p3_b3_empirical_pct - 25.00, 2) AS delta_p3_pct,
-    p4_b4_empirical_pct, 25.00 AS p4_theoretical_pct, ROUND(p4_b4_empirical_pct - 25.00, 2) AS delta_p4_pct,
+    p1_b1_empirical_pct, 5.00 AS p1_theoretical_pct, ROUND(p1_b1_empirical_pct - 5.00, 2) AS delta_p1_pct,
+    p2_b2_empirical_pct, 35.00 AS p2_theoretical_pct, ROUND(p2_b2_empirical_pct - 35.00, 2) AS delta_p2_pct,
+    p3_b3_empirical_pct, 29.00 AS p3_theoretical_pct, ROUND(p3_b3_empirical_pct - 29.00, 2) AS delta_p3_pct,
+    p4_b4_empirical_pct, 21.00 AS p4_theoretical_pct, ROUND(p4_b4_empirical_pct - 21.00, 2) AS delta_p4_pct,
     p5_b5_empirical_pct, 8.00 AS p5_theoretical_pct, ROUND(p5_b5_empirical_pct - 8.00, 2) AS delta_p5_pct,
     p6_b6_empirical_pct, 2.00 AS p6_theoretical_pct, ROUND(p6_b6_empirical_pct - 2.00, 2) AS delta_p6_pct,
     pct_invalidation_all_pct,

@@ -153,12 +153,26 @@ export async function initEventStoreTables(): Promise<void> {
   try {
     const fs = await import('fs');
     const path = await import('path');
-    const migrationPath = path.resolve(process.cwd(), 'src/database/migrations/20260928_laya_v2_event_store.sql');
-    if (fs.existsSync(migrationPath)) {
+    const candidatePaths = [
+      path.resolve(process.cwd(), 'server/src/database/migrations/20260928_laya_v2_event_store.sql'),
+      path.resolve(process.cwd(), 'src/database/migrations/20260928_laya_v2_event_store.sql'),
+    ];
+    const migrationPath = candidatePaths.find(p => fs.existsSync(p));
+    if (migrationPath) {
       const sql = fs.readFileSync(migrationPath, 'utf8');
       await query(sql);
-      console.log('[EventStore] ✅ Laya Governança v2.0 & Views Looker Studio sincronizadas.');
+      console.log('[EventStore] ✅ Laya Governança v2.0 & Views Looker Studio sincronizadas de:', migrationPath);
     }
+
+    // Blindagem de versionamento do modelo calibrado (p_theory)
+    await query(`
+      ALTER TABLE kpi_weekly_snapshots 
+      ADD COLUMN IF NOT EXISTS p_theory JSONB NOT NULL DEFAULT '{"p1":0.05,"p2":0.35,"p3":0.29,"p4":0.21,"p5":0.08,"p6":0.02}'::jsonb;
+    `).catch(() => {});
+    await query(`
+      ALTER TABLE kpi_weekly_snapshots 
+      ALTER COLUMN p_theory SET DEFAULT '{"p1":0.05,"p2":0.35,"p3":0.29,"p4":0.21,"p5":0.08,"p6":0.02}'::jsonb;
+    `).catch(() => {});
   } catch (err: any) {
     console.warn('[EventStore] Aviso ao carregar migração v2:', err.message);
   }

@@ -219,4 +219,11 @@ Expected: 0 errors.
 - [x] **Frente 2 (Modelo de Expectância Líquida $E_{net}$):** 5 pilares de atrito (Maker 2.0 bps, Taker 5.0 bps, Slippage 0-2.0 bps, Spread cost explícito, Funding prorata em 480 min). Árvore de ramos B1 a B6 (`B1_STOP_FULL`, `B2_INVALIDATION`, `B3_BE_POST_HARVEST`, `B4_TARGET_RUNNER`, `B5_RUNNER_EXTREME`, `B6_MACRO_EMERGENCY`).
 - [x] **Frente 3 (Views SQL Looker Studio & Event Store):** DDLs canônicas de `trade_events` v2, `decision_events` v2, `system_state`, `system_state_events`, `fn_evaluate_session_lockout` e as 4 views de BI (`vw_expectancy_net`, `vw_fee_drag_breakdown`, `vw_drawdown_hwm`, `vw_session_lockout`).
 - [x] **Frente 4 (Dossiê Executivo v3 & Coleta SHADOW):** Dossiê atualizado com formulação de atrito e piso $\delta \ge 55\text{ bps}$. Amostra $N \ge 300$ no modo `SHADOW` pronta para validação empírica.
+- [x] **Frente 5 (Trading Terminal Pro Responsivo & Governança Visual):** Arquitetura `<ResponsiveShell>` em 4 breakpoints, isolamento estrito de botões de execução no mobile (<768px), formatação monetária unificada pt-BR (`1.234,56`), correção do canvas do gráfico (0px colapso eliminado com hidratação reativa) e versionamento calibrado do modelo teórico em `kpi_weekly_snapshots`.
+
+### Evidências de Validação Visual (Screenshots Auditáveis):
+- **Widescreen / 4K (≥1600px):** [terminal_1920_desktop.png](file:///d:/Programas/Desenvolvendo/Mercado%20Financeiro/docs/screenshots/terminal_1920_desktop.png) (3 colunas completas, Tape colapsável).
+- **Notebook (1280–1599px / 1366x768):** [terminal_1366_notebook.png](file:///d:/Programas/Desenvolvendo/Mercado%20Financeiro/docs/screenshots/terminal_1366_notebook.png) (Aba alternada "DOM | Tape", gráfico amplo, 2 colunas de operações).
+- **Tablet (768–1279px / 1024x768):** [terminal_1024_tablet.png](file:///d:/Programas/Desenvolvendo/Mercado%20Financeiro/docs/screenshots/terminal_1024_tablet.png) (Layout 2 zonas: gráfico prioritário no topo + acordeão com Book/Tape/Radar/Operações).
+- **Mobile (<768px / 375x812):** [terminal_375_mobile.png](file:///d:/Programas/Desenvolvendo/Mercado%20Financeiro/docs/screenshots/terminal_375_mobile.png) (Modo Somente Leitura estrito, execução desabilitada com aviso explícito de segurança).
 

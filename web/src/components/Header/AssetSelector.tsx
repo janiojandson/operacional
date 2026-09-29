@@ -154,7 +154,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
 
         {/* ─── MARGEM ALOCADA & DISPONÍVEL (pt-BR) ─── */}
         <div
-          className="hidden sm:flex items-center space-x-2 bg-slate-900/95 px-2.5 py-1 rounded-lg border border-amber-500/40 text-xs font-mono shrink-0 shadow-md transition-all"
+          className="hidden xl:flex items-center space-x-2 bg-slate-900/95 px-2.5 py-1 rounded-lg border border-amber-500/40 text-xs font-mono shrink-0 shadow-md transition-all"
           title={`Margem em Operação: ${formatCurrencyPtBr(marginUsed)} | Livre: ${formatCurrencyPtBr(availableMargin ?? (safeBalance - marginUsed))}`}
         >
           <div className="flex flex-col text-right">
