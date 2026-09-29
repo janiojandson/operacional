@@ -239,7 +239,7 @@ export class EventStoreService {
       'NOT_APPLICABLE',
       verdict,
       vetoRuleCode,
-      input.latencyMs ?? 0
+      Math.round(input.latencyMs ?? 0)
     ]).catch((err) => {
       console.warn('[EventStore] Erro ao gravar decision_event:', err.message);
     });
