@@ -177,6 +177,14 @@ export async function initEventStoreTables(): Promise<void> {
       ALTER TABLE kpi_weekly_snapshots 
       ADD COLUMN IF NOT EXISTS fee_drag_pct NUMERIC(6, 2) DEFAULT 0.00;
     `).catch(() => {});
+    await query(`
+      ALTER TABLE trade_events 
+      ADD COLUMN IF NOT EXISTS venue VARCHAR(30) NOT NULL DEFAULT 'BingX';
+    `).catch(() => {});
+    await query(`
+      ALTER TABLE kpi_weekly_snapshots 
+      ADD COLUMN IF NOT EXISTS venue VARCHAR(30) NOT NULL DEFAULT 'ALL';
+    `).catch(() => {});
   } catch (err: any) {
     console.warn('[EventStore] Aviso ao carregar migração v2:', err.message);
   }

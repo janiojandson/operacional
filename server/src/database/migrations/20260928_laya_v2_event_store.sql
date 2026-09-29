@@ -126,6 +126,8 @@ CREATE TABLE IF NOT EXISTS trade_events (
 );
 
 ALTER TABLE trade_events ADD COLUMN IF NOT EXISTS account_balance_usd NUMERIC(18, 4);
+ALTER TABLE trade_events ADD COLUMN IF NOT EXISTS venue VARCHAR(30) NOT NULL DEFAULT 'BingX';
+CREATE INDEX IF NOT EXISTS idx_trade_events_venue ON trade_events(venue);
 
 -- Convenção Contábil Canônica: R ponderado por execuções parciais (R = SUM(w_k * r_k))
 COMMENT ON COLUMN trade_events.r_multiple_gross IS 'Múltiplo R bruto ponderado pelas execuções parciais: R_realizado = SUM(w_k * r_k). Ex: Wave Harvest 50% a +0.6R (0.30R) + Runner 50% a r_runner. Proibido armazenar o R cheio do runner isolado.';
@@ -536,6 +538,7 @@ CREATE TABLE IF NOT EXISTS kpi_weekly_snapshots (
     window_end TIMESTAMPTZ NOT NULL,
     run_mode run_mode_enum NOT NULL DEFAULT 'SHADOW',
     pair VARCHAR(20) NOT NULL DEFAULT 'ALL',
+    venue VARCHAR(30) NOT NULL DEFAULT 'ALL',
     
     -- Volume Amostral
     n_trades INTEGER NOT NULL CHECK (n_trades >= 0),
@@ -573,7 +576,7 @@ CREATE TABLE IF NOT EXISTS kpi_weekly_snapshots (
 );
 
 CREATE INDEX IF NOT EXISTS idx_kpi_snapshots_window ON kpi_weekly_snapshots(window_start DESC, window_end DESC);
-CREATE INDEX IF NOT EXISTS idx_kpi_snapshots_mode ON kpi_weekly_snapshots(run_mode, pair);
+CREATE INDEX IF NOT EXISTS idx_kpi_snapshots_mode ON kpi_weekly_snapshots(run_mode, pair, venue);
 
 -- Função de Geração/Atualização do Snapshot Semanal
 CREATE OR REPLACE FUNCTION fn_generate_weekly_kpi_snapshot(
@@ -581,7 +584,8 @@ CREATE OR REPLACE FUNCTION fn_generate_weekly_kpi_snapshot(
     p_window_start TIMESTAMPTZ,
     p_window_end TIMESTAMPTZ,
     p_run_mode run_mode_enum DEFAULT 'SHADOW',
-    p_pair VARCHAR(20) DEFAULT 'ALL'
+    p_pair VARCHAR(20) DEFAULT 'ALL',
+    p_venue VARCHAR(30) DEFAULT 'ALL'
 )
 RETURNS kpi_weekly_snapshots AS $$
 DECLARE
@@ -638,6 +642,7 @@ BEGIN
       AND closed_at <= p_window_end
       AND run_mode = p_run_mode
       AND (p_pair = 'ALL' OR pair = p_pair)
+      AND (p_venue = 'ALL' OR venue = p_venue)
       AND entry_fill_status <> 'MISSED_NO_FILL';
 
     -- 2. Total Acumulado Geral
@@ -645,13 +650,17 @@ BEGIN
     FROM trade_events
     WHERE closed_at <= p_window_end
       AND run_mode = p_run_mode
+      AND (p_pair = 'ALL' OR pair = p_pair)
+      AND (p_venue = 'ALL' OR venue = p_venue)
       AND entry_fill_status <> 'MISSED_NO_FILL';
 
     -- 3. Taxa de Missed trades
     SELECT COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE entry_fill_status = 'MISSED_NO_FILL') / NULLIF(COUNT(*), 0), 2), 0.00)
     INTO v_miss
     FROM trade_events
-    WHERE opened_at >= p_window_start AND opened_at <= p_window_end;
+    WHERE opened_at >= p_window_start 
+      AND opened_at <= p_window_end
+      AND (p_venue = 'ALL' OR venue = p_venue);
 
     -- 4. Drawdown Máximo na Janela
     SELECT COALESCE(MAX(drawdown_pct), 0.00) INTO v_max_dd
@@ -687,14 +696,14 @@ BEGIN
 
     -- 6. Upsert no Snapshot
     INSERT INTO kpi_weekly_snapshots (
-        snapshot_label, window_start, window_end, run_mode, pair,
+        snapshot_label, window_start, window_end, run_mode, pair, venue,
         n_trades, cumulative_trades,
         e_net_r, win_rate_net_pct, profit_factor_net, pct_invalidation_all, max_drawdown_pct,
         pct_b1, pct_b2, pct_b3, pct_b4, pct_b5, pct_b6,
         maker_fill_pct, taker_fallback_pct, miss_rate_pct, friction_r_avg, fee_drag_usd_total, fee_drag_pct,
         gate_qualified, gate_verdict, recalibration_notes
     ) VALUES (
-        p_snapshot_label, p_window_start, p_window_end, p_run_mode, p_pair,
+        p_snapshot_label, p_window_start, p_window_end, p_run_mode, p_pair, p_venue,
         v_n_trades, v_cum_trades,
         v_e_net, v_win_rate, v_pf, v_invalidation_all, v_max_dd,
         v_b1, v_b2, v_b3, v_b4, v_b5, v_b6,
@@ -706,6 +715,7 @@ BEGIN
         window_end = EXCLUDED.window_end,
         run_mode = EXCLUDED.run_mode,
         pair = EXCLUDED.pair,
+        venue = EXCLUDED.venue,
         n_trades = EXCLUDED.n_trades,
         cumulative_trades = EXCLUDED.cumulative_trades,
         e_net_r = EXCLUDED.e_net_r,
