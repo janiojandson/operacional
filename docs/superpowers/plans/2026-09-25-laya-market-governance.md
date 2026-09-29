@@ -227,3 +227,28 @@ Expected: 0 errors.
 - **Tablet (768–1279px / 1024x768):** [terminal_1024_tablet.png](file:///d:/Programas/Desenvolvendo/Mercado%20Financeiro/docs/screenshots/terminal_1024_tablet.png) (Layout 2 zonas: gráfico prioritário no topo + acordeão com Book/Tape/Radar/Operações).
 - **Mobile (<768px / 375x812):** [terminal_375_mobile.png](file:///d:/Programas/Desenvolvendo/Mercado%20Financeiro/docs/screenshots/terminal_375_mobile.png) (Modo Somente Leitura estrito, execução desabilitada com aviso explícito de segurança).
 
+---
+
+## ⚖️ Definição Canônica Unificada do Gate Oficial (SHADOW ➔ PAPER_MASTER)
+
+Para eliminar qualquer ambiguidade entre o monitoramento semanal e a função SQL `fn_generate_weekly_kpi_snapshot`, fica homologada a regra única do Gate:
+
+| Critério | Tipo | Limiar Canônico Homologado | Racional / Função de Controle |
+|---|---|---|---|
+| **Expectância Líquida ($E_{net}$)** | Meta Central | **$\ge +0.10R$** sustentado | Piso de viabilidade econômica líquida de atrito |
+| **Max Drawdown na Janela** | Meta Central | **$\le 10.0\%$** semanal | $10\%$ é o teto semanal de promoção; $15\%$ é o disjuntor de emergência (SAFE_HALT) |
+| **Falsos Rompimentos** | Meta Central | **$\le 30.0\%$** ($pct\_invalidation\_all$) | KPI oficial englobando B2 e saídas antecipadas pós-harvest |
+| **Consistência Estatística** | Meta Central | **$WinRate \ge 48.0\%$ OU $PF \ge 1.30$** | Garantia de assimetria favorável e robustez da distribuição |
+| **Fallback Taker (1500ms)** | Veto Suave | **$\le 10.0\%$** | Se excedido, bloqueia promoção (`METAS_OK_MICROSTRUCTURE_VETO`) sem reprovar a IA |
+| **Taxa de Missed Trades** | Veto Suave | **$\le 15.0\%$** | Se excedido, exige ajuste da agressão passiva antes do capital real |
+| **Amostra na Janela ($n$)** | Maturidade | **$n \ge 20$** trades | Evita decisões prematuras em semanas de baixa volatilidade |
+| **Amostra Global ($N$)** | Promocão Final | **$N \ge 300$** trades | Exigência cumulativa no modo SHADOW para acionar `GATE_PASSED_PAPER_MASTER` |
+
+### Vereditos Oficiais da Função `fn_generate_weekly_kpi_snapshot`:
+1. `INSUFFICIENT_SAMPLE`: $n < 20$ trades na janela semanal.
+2. `METAS_OK_COLETA_EM_CURSO`: Metas centrais e de microestrutura aprovadas, porém $N < 300$ trades acumulados.
+3. `METAS_OK_MICROSTRUCTURE_VETO`: Metas econômicas aprovadas, mas atrito de execução excedeu o limiar (Fallback $> 10\%$ ou Miss $> 15\%$). Promoção pausada para ajuste de roteamento.
+4. `RECALIBRATION_NEEDED`: Uma ou mais metas centrais ($E_{net}$, $DD$, Invalidações) violaram os limites contratuais.
+5. `GATE_PASSED_PAPER_MASTER`: Todas as metas centrais e de microestrutura aprovadas com amostra global $N \ge 300$ trades.
+
+

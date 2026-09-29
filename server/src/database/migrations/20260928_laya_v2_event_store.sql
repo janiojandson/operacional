@@ -545,8 +545,8 @@ CREATE TABLE IF NOT EXISTS kpi_weekly_snapshots (
     e_net_r NUMERIC(8, 4) NOT NULL,                 -- Meta 1: E_net >= +0.10R (Piso Sustentado)
     win_rate_net_pct NUMERIC(6, 2) NOT NULL,        -- Meta 2: Win Rate Líquido (Referência ~52%)
     profit_factor_net NUMERIC(6, 3) NOT NULL,       -- Meta 3: Profit Factor Líquido >= 1.30
-    pct_invalidation_all NUMERIC(6, 2) NOT NULL,    -- Meta 4: Falsos Rompimentos <= 25% (KPI Oficial: B2 + Invalidação B3)
-    max_drawdown_pct NUMERIC(6, 2) NOT NULL,        -- Meta 5: Max Drawdown <= 15% (Safe-Halt a 15%)
+    pct_invalidation_all NUMERIC(6, 2) NOT NULL,    -- Meta 4: Falsos Rompimentos <= 30% (KPI Oficial: B2 + Invalidação B3)
+    max_drawdown_pct NUMERIC(6, 2) NOT NULL,        -- Meta 5: Max Drawdown <= 10% (Alinhado à meta semanal; SAFE_HALT aos 15%)
     
     -- Decomposição de Ramos B1-B6
     pct_b1 NUMERIC(6, 2) NOT NULL DEFAULT 0.00,
@@ -653,26 +653,31 @@ BEGIN
     FROM vw_drawdown_hwm
     WHERE ts >= p_window_start AND ts <= p_window_end;
 
-    -- 5. Avaliação do Gate
+    -- 5. Avaliação do Gate Unificado (Roteiro Canônico Homologado)
     IF v_n_trades < 20 THEN
         v_qualified := FALSE;
         v_verdict := 'INSUFFICIENT_SAMPLE';
         v_notes := format('Amostra semanal n=%s inferior a 20 trades.', v_n_trades);
-    ELSIF v_e_net >= 0.1000 AND (v_win_rate >= 48.0 OR v_pf >= 1.300) AND v_invalidation_all <= 25.0 AND v_max_dd <= 15.0 THEN
-        IF v_cum_trades >= 300 THEN
+    ELSIF v_e_net >= 0.1000 AND (v_win_rate >= 48.0 OR v_pf >= 1.300) AND v_invalidation_all <= 30.0 AND v_max_dd <= 10.0 THEN
+        -- Verificação de Vetos Suaves de Microestrutura (Atrito Operacional)
+        IF v_taker_fb > 10.0 OR v_miss > 15.0 THEN
+            v_qualified := FALSE;
+            v_verdict := 'METAS_OK_MICROSTRUCTURE_VETO';
+            v_notes := format('Metas centrais aprovadas, mas atrito de microestrutura excede limiar: Taker Fallback=%s%% (teto 10%%) ou Miss Rate=%s%% (teto 15%%). Promoção suspensa até calibração de roteamento.', v_taker_fb, v_miss);
+        ELSIF v_cum_trades >= 300 THEN
             v_qualified := TRUE;
             v_verdict := 'GATE_PASSED_PAPER_MASTER';
-            v_notes := format('Amostra global N=%s trades atingida. Todas as 5 metas aprovadas.', v_cum_trades);
+            v_notes := format('Amostra global N=%s trades atingida. Todas as metas econômicas e de microestrutura aprovadas.', v_cum_trades);
         ELSE
             v_qualified := FALSE;
             v_verdict := 'METAS_OK_COLETA_EM_CURSO';
-            v_notes := format('Metas aprovadas na janela, acumulado N=%s/300 em progresso.', v_cum_trades);
+            v_notes := format('Metas aprovadas na janela semanal, acumulado N=%s/300 em progresso.', v_cum_trades);
         END IF;
     ELSE
         v_qualified := FALSE;
         v_verdict := 'RECALIBRATION_NEEDED';
-        v_notes := format('Metas fora do limiar: E_net=%sR, PF=%s, Invalidações=%s%%, DD=%s%%',
-                          v_e_net, v_pf, v_invalidation_all, v_max_dd);
+        v_notes := format('Metas econômicas fora do limiar: E_net=%sR (piso +0.10R), WinRate=%s%%, PF=%s, Invalidações=%s%% (teto 30%%), DD=%s%% (teto 10%%)',
+                          v_e_net, v_win_rate, v_pf, v_invalidation_all, v_max_dd);
     END IF;
 
     -- 6. Upsert no Snapshot
@@ -776,7 +781,7 @@ SELECT
     e_gross_empirical, 0.3395 AS e_gross_theoretical, ROUND(e_gross_empirical - 0.3395, 4) AS delta_e_gross,
     friction_r_empirical,
     e_net_empirical, 0.1260 AS e_net_theoretical, ROUND(e_net_empirical - 0.1260, 4) AS delta_e_net,
-    (e_net_empirical >= 0.1000 AND pct_invalidation_all_pct <= 25.00 AND n_total >= 300) AS gate_qualified
+    (e_net_empirical >= 0.1000 AND pct_invalidation_all_pct <= 30.00 AND n_total >= 300) AS gate_qualified
 FROM empirical;
 
 
