@@ -210,6 +210,9 @@ export class EventStoreService {
     const signalSource = input.signalSource || input.decisionType || 'FLOW_SIGNAL';
     const runMode = input.runMode || 'SHADOW';
 
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const decisionUuid = uuidRegex.test(input.decisionId) ? input.decisionId : crypto.randomUUID();
+
     query(`
       INSERT INTO decision_events (
         decision_id, pair, signal_source, run_mode, action_requested,
@@ -224,7 +227,7 @@ export class EventStoreService {
       )
       ON CONFLICT (decision_id) DO NOTHING
     `, [
-      input.decisionId,
+      decisionUuid,
       input.symbol,
       signalSource,
       runMode,
