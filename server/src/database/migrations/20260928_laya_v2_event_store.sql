@@ -626,6 +626,8 @@ BEGIN
         COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE wh_fill_type = 'TAKER_FALLBACK_1500MS') / NULLIF(COUNT(*), 0), 2), 0.00),
         COALESCE(ROUND(AVG(r_multiple_gross - r_multiple_net), 4), 0.0000),
         COALESCE(ROUND(SUM(total_friction_usd), 4), 0.0000),
+        -- Nota de Borda: Se a janela não tiver nenhum lucro bruto (semana 100% perdedora), NULLIF retorna NULL e COALESCE 0.00%.
+        -- O veto suave passa trivialmente, mas o sistema é reprovado pelas metas centrais (E_net < +0.10R).
         COALESCE(ROUND(100.0 * SUM(total_friction_usd) / NULLIF(SUM(GREATEST(gross_pnl_usd, 0)), 0), 2), 0.00)
     INTO
         v_n_trades, v_e_net, v_win_rate, v_pf, v_invalidation_all,
