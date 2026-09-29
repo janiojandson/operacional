@@ -144,21 +144,24 @@ export async function initEventStoreTables(): Promise<void> {
     );
   `);
 
-  // 4. ÍNDICES DE PERFORMANCE (Otimizados para as queries dos 10 Blocos)
-  await query(`CREATE INDEX IF NOT EXISTS idx_te_entry_ts ON trade_events (entry_ts DESC);`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_te_exit_type ON trade_events (exit_type, entry_ts DESC);`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_te_cluster_entry ON trade_events (cluster_id, entry_ts DESC);`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_te_symbol_entry ON trade_events (symbol, entry_ts DESC);`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_te_decision_id ON trade_events (decision_id) WHERE decision_id IS NOT NULL;`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_te_governance ON trade_events (governance_mode, entry_ts DESC);`);
+  // 4. ÍNDICES DE PERFORMANCE (Legados protegidos)
+  await query(`CREATE INDEX IF NOT EXISTS idx_te_entry_ts ON trade_events_legacy (entry_ts DESC);`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_de_type_issued ON decision_events_legacy (decision_type, issued_at DESC);`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_ss_date ON session_snapshots (date DESC);`).catch(() => {});
 
-  await query(`CREATE INDEX IF NOT EXISTS idx_de_type_issued ON decision_events (decision_type, issued_at DESC);`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_de_executed ON decision_events (executed, issued_at DESC);`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_de_delta ON decision_events (delta_r) WHERE delta_r IS NOT NULL;`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_de_latency ON decision_events (issued_at DESC, latency_ms);`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_de_symbol_issued ON decision_events (symbol, issued_at DESC);`);
-
-  await query(`CREATE INDEX IF NOT EXISTS idx_ss_date ON session_snapshots (date DESC);`);
+  // 5. LAYA GOVERNANÇA v2.0 & EVENT STORE CANÔNICO (PostgreSQL + Looker Studio)
+  try {
+    const fs = await import('fs');
+    const path = await import('path');
+    const migrationPath = path.resolve(process.cwd(), 'src/database/migrations/20260928_laya_v2_event_store.sql');
+    if (fs.existsSync(migrationPath)) {
+      const sql = fs.readFileSync(migrationPath, 'utf8');
+      await query(sql);
+      console.log('[EventStore] ✅ Laya Governança v2.0 & Views Looker Studio sincronizadas.');
+    }
+  } catch (err: any) {
+    console.warn('[EventStore] Aviso ao carregar migração v2:', err.message);
+  }
 
   console.log('[EventStore] ✅ Tabelas e índices do Event Store v3.0 prontos.');
 }

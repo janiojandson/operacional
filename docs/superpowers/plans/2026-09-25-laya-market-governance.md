@@ -210,3 +210,13 @@ Expected: 0 errors.
 3. **Safe-dev Compliance:**
    - Diffs isolados <= 40 linhas em arquivos existentes.
    - Novos módulos focados em arquivos dedicados (`layaGovernanceService.ts`, `layaGovernanceTypes.ts`).
+
+---
+
+## 4 Frentes Quantitativas Homologadas (Frentes 1 a 4)
+
+- [x] **Frente 1 (Interface Laya):** Payload `POST /v1/systemone` v2.0, Matriz determinística V1–V12, Precedência `VETO > TIGHTEN > APPROVE`, Roteamento dual (`APPROVE_PASSIVE` Maker Post-Only para absorções vs `APPROVE_AGGRESSIVE` Taker IOC para desbalanceamentos com $\delta \ge 70\text{ bps}$), Trailing stop restrito ao Top 10 do Book L2 com máquina de estados anti-spoofing (`ANCHORED`, `THREATENED`, `RE-ANCHOR`, `ATR_FALLBACK`, `PROTECT`).
+- [x] **Frente 2 (Modelo de Expectância Líquida $E_{net}$):** 5 pilares de atrito (Maker 2.0 bps, Taker 5.0 bps, Slippage 0-2.0 bps, Spread cost explícito, Funding prorata em 480 min). Árvore de ramos B1 a B6 (`B1_STOP_FULL`, `B2_INVALIDATION`, `B3_BE_POST_HARVEST`, `B4_TARGET_RUNNER`, `B5_RUNNER_EXTREME`, `B6_MACRO_EMERGENCY`).
+- [x] **Frente 3 (Views SQL Looker Studio & Event Store):** DDLs canônicas de `trade_events` v2, `decision_events` v2, `system_state`, `system_state_events`, `fn_evaluate_session_lockout` e as 4 views de BI (`vw_expectancy_net`, `vw_fee_drag_breakdown`, `vw_drawdown_hwm`, `vw_session_lockout`).
+- [x] **Frente 4 (Dossiê Executivo v3 & Coleta SHADOW):** Dossiê atualizado com formulação de atrito e piso $\delta \ge 55\text{ bps}$. Amostra $N \ge 300$ no modo `SHADOW` pronta para validação empírica.
+
