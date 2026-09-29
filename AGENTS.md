@@ -34,7 +34,7 @@ Entrada (Terminal CLI | OpenCode | Webhook Trading | Cron Bybit)
 
 - **Postgres Central Unificado (:5432):**
   - **O Mercado Financeiro já utiliza o Postgres Principal com sucesso absoluto**:
-    `DATABASE_URL=postgresql://postgres:eyxuLapofrztxnKcfhRZVgBAajjfAuUY@postgres.railway.internal:5432/railway`
+    `DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@postgres.railway.internal:5432/railway`
   - Tabelas operacionais ativas: `trade_history`, `shadow_positions`, `paper_master_account`, `paper_mirror_account`, etc.
   - **NÃO criar novos bancos ou containers**. O compartilhamento do banco principal economiza instâncias duplicadas de RAM e volumes no Railway.
 - **Política de Volumes:**

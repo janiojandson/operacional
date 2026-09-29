@@ -23,7 +23,7 @@ var PG_HOST = 'zephyr.proxy.rlwy.net';
 var PG_PORT = 25561;
 var PG_DB = 'railway';
 var PG_USER = 'postgres';
-var PG_PASS = 'eyxuLapofrztxnKcfhRZVgBAajjfAuUY';
+var PG_PASS = PropertiesService.getScriptProperties().getProperty('PG_PASS') || 'SUA_NOVA_SENHA_AQUI';
 
 // Custos Operacionais BingX / Bybit Linear VIP0
 var TAKER_FEE_PCT = 0.00050; // 0.050% por perna

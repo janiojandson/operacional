@@ -976,7 +976,7 @@ var PG_HOST = 'zephyr.proxy.rlwy.net';
 var PG_PORT = 25561;
 var PG_DB = 'railway';
 var PG_USER = 'postgres';
-var PG_PASS = 'eyxuLapofrztxnKcfhRZVgBAajjfAuUY';
+var PG_PASS = PropertiesService.getScriptProperties().getProperty('PG_PASS') || 'SUA_NOVA_SENHA_AQUI';
 
 function getPostgresConnection() {
   var url = 'jdbc:postgresql://' + PG_HOST + ':' + PG_PORT + '/' + PG_DB;
