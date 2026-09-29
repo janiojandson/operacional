@@ -81,6 +81,12 @@ export interface RecordDecisionEventInput {
   cvdDelta60s?: number;
   spoofScore?: number;
   betaDivergence?: boolean;
+  runMode?: string;
+  spreadBps?: number;
+  deltaStopBps?: number;
+  wallPersistenceMs?: number;
+  signalSource?: string;
+  vetoRuleCode?: string;
 }
 
 export class EventStoreService {
@@ -88,8 +94,6 @@ export class EventStoreService {
    * Grava um trade fechado no banco de forma estritamente imutável (Fire-and-forget assíncrono)
    */
   static recordTradeEvent(input: RecordTradeEventInput): void {
-    const sessionHour = input.sessionHour ?? input.entryTs.getUTCHours();
-    const clusterId = input.clusterId || (input.symbol.startsWith('BTC') ? 'BTC_MAJOR' : 'ALT_L1');
     const governanceMode = input.governanceMode || 'SHADOW';
 
     const side: 'BUY' | 'SELL' = input.direction === 'SHORT' ? 'SELL' : 'BUY';
@@ -184,27 +188,55 @@ export class EventStoreService {
    * Grava uma proposta da Laya no banco (Append-only)
    */
   static recordDecisionEvent(input: RecordDecisionEventInput): void {
+    const actionRequested: 'BUY' | 'SELL' =
+      input.direction === 'SHORT' ? 'SELL' : 'BUY';
+
+    let verdict: 'APPROVE_PASSIVE' | 'APPROVE_AGGRESSIVE' | 'VETO' | 'TIGHTEN' = 'VETO';
+
+    if (input.action === 'VETO' || input.constitutionRejected) {
+      verdict = 'VETO';
+    } else if (input.stopDirection === 'TIGHTEN') {
+      verdict = 'TIGHTEN';
+    } else if (input.action === 'AUTHORIZE' || input.action === 'APPROVE') {
+      verdict = (input.signalSource === 'BOOK_IMBALANCE')
+        ? 'APPROVE_AGGRESSIVE'
+        : 'APPROVE_PASSIVE';
+    }
+
+    const vetoRuleCode = input.constitutionRejected
+      ? (input.rejectionReason || 'VETO_POLICY')
+      : (input.vetoRuleCode || null);
+
+    const signalSource = input.signalSource || input.decisionType || 'FLOW_SIGNAL';
+    const runMode = input.runMode || 'SHADOW';
+
     query(`
       INSERT INTO decision_events (
-        decision_id, decision_type, symbol, direction,
-        issued_at, expires_at, latency_ms, action, executed,
-        constitution_rejected, rejection_reason, power_multiplier,
-        risk_pct, stop_loss_pct, stop_direction, cooldown_override,
-        runner_allowed, scale_in_allowed, rationale_code, confidence_score,
-        l2_depth_top20, imbalance_ratio, cvd_delta_60s, spoof_score, beta_divergence
+        decision_id, pair, signal_source, run_mode, action_requested,
+        spread_bps, delta_stop_bps, book_imbalance_ratio,
+        wall_persistence_ms, wall_state,
+        verdict, veto_rule_code, latency_ms
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
+        $1, $2, $3, $4, $5,
+        $6, $7, $8,
+        $9, $10,
+        $11, $12, $13
       )
       ON CONFLICT (decision_id) DO NOTHING
     `, [
-      input.decisionId, input.decisionType, input.symbol, input.direction ?? null,
-      input.issuedAt, input.expiresAt, input.latencyMs, input.action, Boolean(input.executed),
-      Boolean(input.constitutionRejected), input.rejectionReason ?? null, input.powerMultiplier ?? 1.0,
-      input.riskPct ?? 1.0, input.stopLossPct ?? null, input.stopDirection ?? null,
-      Boolean(input.cooldownOverride), Boolean(input.runnerAllowed), Boolean(input.scaleInAllowed),
-      input.rationaleCode, input.confidenceScore ?? 80,
-      input.l2DepthTop20 ?? 0, input.imbalanceRatio ?? 1.0, input.cvdDelta60s ?? 0,
-      input.spoofScore ?? 0, Boolean(input.betaDivergence)
+      input.decisionId,
+      input.symbol,
+      signalSource,
+      runMode,
+      actionRequested,
+      input.spreadBps ?? 0,
+      input.deltaStopBps ?? 0,
+      input.imbalanceRatio ?? 1.0,
+      input.wallPersistenceMs ?? 0,
+      'NOT_APPLICABLE',
+      verdict,
+      vetoRuleCode,
+      input.latencyMs ?? 0
     ]).catch((err) => {
       console.warn('[EventStore] Erro ao gravar decision_event:', err.message);
     });
