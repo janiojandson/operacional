@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import type {
   LayaGovernanceRequest,
   LayaGovernanceResponse,
@@ -290,10 +291,16 @@ export class LayaGovernanceService {
     }
 
     // 🛡️ 2. Pré-Filtro Local de Spread Tóxico: Se o spread do book L2 for > 5 bps, veta localmente sem HTTP
-    const spreadBps = payload.trace?.spreadBps;
+    const spreadBps = Number(payload.trace?.spreadBps || 0);
     if (isSpreadToxicLocal(spreadBps) && !isProtection) {
       const now = Date.now();
       this.vetoQuarantineMap.set(payload.symbol, { ts: now, reason: 'SPREAD_TOXIC_VETO' });
+
+      console.warn(
+        `[LayaPreFilter:SPREAD_TOXIC] Sinal ${payload.symbol} descartado localmente | ` +
+        `Spread: ${spreadBps.toFixed(2)} bps > Limite: 5.00 bps`
+      );
+
       const vetoDecision: LayaGovernanceResponse = {
         decisionId: `local-spread-veto-${now}`,
         stateVersion: payload.stateVersion,
@@ -398,17 +405,44 @@ export class LayaGovernanceService {
         }
       }
 
+      const currentPrice = Number(payload.currentPrice || payload.trace?.entryPrice || 0);
+      const proposedStop = Number(payload.proposedStopLoss || payload.trace?.stopPrice || 0);
+      const deltaStopBps = currentPrice > 0 && proposedStop > 0
+        ? Number(((Math.abs(currentPrice - proposedStop) / currentPrice) * 10000).toFixed(2))
+        : 0;
+
       const systemOnePayload = {
-        state: {
-          origem: 'mercado_financeiro',
-          body: contextDescription
+        stateVersion: '2.0',
+        requestId: crypto.randomUUID(),
+        timestamp: Date.now(),
+        symbol: payload.symbol,
+        side: payload.side,
+        currentPrice,
+        proposedStopLoss: proposedStop,
+        proposedTakeProfit: Number(payload.proposedTakeProfit || 0),
+        delta_stop_bps: deltaStopBps,
+        signalSource: payload.signalSource || 'ABSORPTION_BUY',
+        microstructure: {
+          bestBid: Number(payload.trace?.bestBid || 0),
+          bestAsk: Number(payload.trace?.bestAsk || 0),
+          spreadBps: Number(payload.trace?.spreadBps || 0),
+          depthImbalanceRatio: Number(payload.trace?.depthImbalanceRatio || 1.0),
+          whaleWallDetected: Boolean(payload.trace?.whaleWallDetected),
+          whaleWallDistancePct: Number(payload.trace?.whaleWallDistancePct || 0),
+          whaleWallVolumeUsd: Number(payload.trace?.whaleWallVolumeUsd || 0),
+          wall_persistence_ms: Number(payload.trace?.wallPersistenceMs || 0)
         },
-        questions: {
-          action: {
-            type: 'choice',
-            instructions: questionInstructions,
-            criteria
-          }
+        macro: {
+          regime: payload.macro?.regime || 'NEUTRAL',
+          circuitBreakerActive: Boolean(payload.macro?.isCircuitBreakerActive),
+          powerMultiplier: Number(payload.macro?.powerMultiplier || 1.0),
+          btcFundingRate: Number(payload.macro?.btcFundingRate || 0.0001)
+        },
+        risk: {
+          accountEquity: Number(payload.risk?.accountEquity || 10000),
+          currentRiskAggregatePct: Number(payload.risk?.currentRiskAggregatePct || 0),
+          proposedRiskPct: Number(payload.risk?.proposedRiskPct || 0.01),
+          atr14: Number(payload.risk?.atr14 || 0)
         }
       };
 
@@ -482,7 +516,7 @@ export class LayaGovernanceService {
           allowScaleIn,
           cooldownOverride: choice === 'OVERRIDE_COOLDOWN'
         },
-        rationaleCode,
+        rationaleCode: rationaleCode as any,
         trace: payload.trace
       };
 
@@ -527,32 +561,36 @@ export class LayaGovernanceService {
       const latencyMs = performance.now() - startTime;
       this.recordLatency(latencyMs);
 
-      // Identifica o erro exato
-      const isTimeout = err?.message?.includes('TIMEOUT') || controller.signal.aborted;
-      const errorLabel = isTimeout ? `TIMEOUT_${this.timeoutMs}MS` : (err?.message || 'NETWORK_ERROR');
-      console.warn(`[LayaGovernance] Falha na governança Laya (${errorLabel}) após ${latencyMs.toFixed(1)}ms`);
+      const isAbort = controller.signal.aborted;
+      const isTimeout = err?.message?.includes('TIMEOUT') || isAbort;
+      const errorCode = err?.code || (isTimeout ? 'ETIMEDOUT' : 'NETWORK_ERROR');
+      const errorDetails = err?.response?.data
+        ? JSON.stringify(err.response.data)
+        : (err?.message || 'UNKNOWN');
 
-      // Semântica de Falha Dupla
+      console.error(
+        `[LayaGovernance:ERROR] Falha de comunicação com a Laya (:8080) | ` +
+        `Code: ${errorCode} | Host: ${this.serviceUrl} | Latencia: ${latencyMs.toFixed(1)}ms | Detalhes: ${errorDetails}`
+      );
+
       if (isProtection) {
-        // Fail-Open para proteção: nunca impede o corte
         const fallbackDecision = this.createDefaultFallbackResponse(payload, requestedAction);
         this.logDecision(fallbackDecision, true, 'FALLBACK_LOCAL_PROTECTION');
         return {
           executed: true,
           decision: fallbackDecision,
           fallbackLocal: true,
-          error: errorLabel,
+          error: `${errorCode}: ${errorDetails}`,
           latencyMs
         };
       }
 
-      // Fail-Closed para novo risco (entrada, scale-in, potência): sem resposta = recusa
       const noActionDecision = this.createDefaultFallbackResponse(payload, 'NO_ACTION');
-      this.logDecision(noActionDecision, false, errorLabel);
+      this.logDecision(noActionDecision, false, `${errorCode}: ${errorDetails}`);
       return {
         executed: false,
         decision: noActionDecision,
-        error: errorLabel,
+        error: `${errorCode}: ${errorDetails}`,
         latencyMs
       };
     }

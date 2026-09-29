@@ -52,6 +52,7 @@ export interface RecordTradeEventInput {
   spreadCostUsd?: number;
   estimatedSlippageUsd?: number;
   fundingCostUsd?: number;
+  venue?: string;
 }
 
 export interface RecordDecisionEventInput {
@@ -114,6 +115,7 @@ export class EventStoreService {
     const frictionR = riskUsd > 0 ? totalFriction / riskUsd : 0;
     const rNetCalculated = Number((input.rGross - frictionR).toFixed(4));
     const rNet = input.rNet !== undefined && Math.abs(input.rNet - rNetCalculated) < 0.1 ? input.rNet : rNetCalculated;
+    const venue = input.venue ?? 'BingX';
 
     query(`
       INSERT INTO trade_events (
@@ -125,7 +127,7 @@ export class EventStoreService {
         account_balance_usd, position_size_usd, gross_pnl_usd, net_pnl_usd,
         r_multiple_gross, r_multiple_net,
         fees_entry_usd, fees_exit_usd, spread_cost_usd, estimated_slippage_usd, funding_cost_usd,
-        opened_at, closed_at
+        venue, opened_at, closed_at
       ) VALUES (
         $1, $2, $3,
         $4, $5, $6,
@@ -135,7 +137,7 @@ export class EventStoreService {
         $17, $18, $19, $20,
         $21, $22,
         $23, $24, $25, $26, $27,
-        $28, $29
+        $28, $29, $30
       )
     `, [
       tradeUuid, input.symbol, side,
@@ -146,7 +148,7 @@ export class EventStoreService {
       input.accountBalanceUsd ?? null, posSize, input.grossPnlUsd ?? (input.rGross * 2.5), input.netPnlUsd ?? (rNet * 2.5),
       input.rGross, rNet,
       feesEntry, feesExit, spreadCost, slippage, funding,
-      input.entryTs, input.exitTs
+      venue, input.entryTs, input.exitTs
     ]).then(async () => {
       await query('SELECT fn_evaluate_session_lockout()').catch(() => {});
       await query('SELECT fn_evaluate_safe_halt()').catch(() => {});

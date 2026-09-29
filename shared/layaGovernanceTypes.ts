@@ -41,6 +41,7 @@ export interface LayaGovernanceProposal {
   runnerModeAllowed?: boolean;
   runnerTrailingDistanceR?: number;
   allowScaleIn?: boolean;
+  executionMode?: 'MAKER_POST_ONLY' | 'TAKER_IOC';
 }
 
 export interface LayaTraceData {
@@ -74,6 +75,21 @@ export interface LayaGovernanceRequest {
   currentR?: number;
   clusterExposureUsdt?: number;
   trace: LayaTraceData;
+  proposedStopLoss?: number;
+  proposedTakeProfit?: number;
+  signalSource?: string;
+  macro?: {
+    regime?: string;
+    isCircuitBreakerActive?: boolean;
+    powerMultiplier?: number;
+    btcFundingRate?: number;
+  };
+  risk?: {
+    accountEquity?: number;
+    currentRiskAggregatePct?: number;
+    proposedRiskPct?: number;
+    atr14?: number;
+  };
 }
 
 export interface LayaGovernanceResponse {

@@ -173,6 +173,21 @@ export class PaperTradingEngine {
 
     if (!tradeType || decision.entrySide !== tradeType) return;
 
+    // 🛡️ Roteamento Dual: APPROVE_PASSIVE (Maker Post-Only) vs APPROVE_AGGRESSIVE (Taker IOC)
+    const executionMode = layaProposal?.governance?.executionMode || 'TAKER_IOC';
+
+    if (executionMode === 'MAKER_POST_ONLY') {
+      const isFilledPassive = tradeType === 'BUY'
+        ? (currentPrice <= (signal.price || currentPrice))
+        : (currentPrice >= (signal.price || currentPrice));
+
+      if (!isFilledPassive) {
+        console.warn(`[OrderExecution:MAKER] Preço correu sem preenchimento passivo em ${signal.symbol}. Abortando entrada.`);
+        this.recordMissedEntry(signal, 'MISSED_NO_FILL');
+        return;
+      }
+    }
+
     // 🛡️ Alvos e Stops: Se Laya propôs Micro-Stop TIGHTEN válido, usa distância reduzida
     let stopLoss = adaptiveRisk?.stopLoss ?? decision.stopLoss;
     if (layaProposal?.governance?.stopLossMoveDirection === 'TIGHTEN' && layaProposal.governance.stopLossProposalPct) {
@@ -497,11 +512,16 @@ export class PaperTradingEngine {
     };
   }
 
+  public recordMissedEntry(signal: FlowSignal, reason: 'MISSED_NO_FILL'): void {
+    console.warn(`[OrderExecution] Entrada perdida em ${signal.symbol} | Motivo: ${reason} | Sinal: ${signal.type}`);
+    this.lastExitTimestamp.set(signal.symbol, Date.now());
+  }
+
   public closePosition(
     symbol: string,
     closePrice: number,
     isMaker = false,
-    reason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST'
+    reason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST' | 'CIRCUIT_BREAKER_EMERGENCY' | 'MANUAL'
   ): { success: boolean; pnl?: number } {
     const trade = this.openPositions.get(symbol);
     if (!trade) return { success: false };

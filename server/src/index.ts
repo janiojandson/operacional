@@ -377,13 +377,14 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
             waveHarvestReached: Boolean((tradeEvent as any).waveHarvestReached),
             waveHarvestPrice: (tradeEvent as any).waveHarvestPrice,
             whFillType: Boolean((tradeEvent as any).waveHarvestReached) ? 'MAKER_LIMIT' : 'NOT_APPLICABLE',
-            exitPrice: tradeEvent.closePrice ?? tradeEvent.currentPrice,
+            exitPrice: (tradeEvent as any).closePrice ?? tradeEvent.currentPrice,
             exitReason,
             branchClassification,
             accountBalanceUsd: (tradeEvent as any).masterBalanceAtEntry ?? (tradeEvent as any).balanceAtEntry ?? null,
             positionSizeUsd: tradeEvent.notionalUsd ?? 250,
             grossPnlUsd: Number(tradeEvent.pnlUsd ?? 0),
             netPnlUsd: Number(tradeEvent.pnlUsd ?? 0),
+            venue: (tradeEvent as any).venue ?? 'BingX',
             governanceMode: layaGovernanceService.getMode()
           });
           setTimeout(() => {

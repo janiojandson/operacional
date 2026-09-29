@@ -43,7 +43,7 @@ export interface SimulatedTrade {
   totalNetPnl?: number;
   isNetPositive?: boolean;
   strategyVersion?: string;
-  closeReason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST';
+  closeReason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST' | 'CIRCUIT_BREAKER_EMERGENCY' | 'MANUAL';
   realizedR?: number;
   decisionFactors?: string[];
   isRunner?: boolean;
