@@ -235,7 +235,7 @@ export class EventStoreService {
       input.spreadBps ?? 0,
       input.deltaStopBps ?? 0,
       input.imbalanceRatio ?? 1.0,
-      input.wallPersistenceMs ?? 0,
+      Math.round(input.wallPersistenceMs ?? 0),
       'NOT_APPLICABLE',
       verdict,
       vetoRuleCode,
