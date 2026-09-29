@@ -323,7 +323,9 @@ export class LayaGovernanceService {
         riskPct: 0.5,
         governance: {},
         rationaleCode: 'SPREAD_TOXIC_VETO',
-        trace: payload.trace
+        trace: payload.trace,
+        signalSource: payload.signalSource || payload.intentSubgroup || 'FLOW_SIGNAL',
+        vetoRuleCode: 'V03_TOXIC_SPREAD'
       };
       this.logDecision(vetoDecision, false, 'SPREAD_TOXIC_VETO_LOCAL');
       return {
@@ -510,9 +512,10 @@ export class LayaGovernanceService {
       const allowScaleIn = isScaleInIntent && (choice === 'AUTHORIZE' || choice === 'AUTHORIZE_SCALE_IN');
 
       let baseMultiplier = choice === 'AUTHORIZE' ? 1.5 : 1.0;
+      const layaRationale = layaRaw?.answers?.action?.rationale || '';
       let rationaleCode = choice === 'AUTHORIZE'
         ? 'DYNAMIC_POWER_AGGRESSION'
-        : (choice === 'VETO' ? 'SPREAD_TOXIC_VETO' : 'NO_OPPORTUNITY');
+        : (choice === 'VETO' ? 'LAYA_REMOTE_VETO' : 'NO_OPPORTUNITY');
 
       // 🚀 Modulação Ofensiva pelo Sentinel (se score e confiança forem altos)
       if (choice === 'AUTHORIZE' && macroPred && macroPred.confidencePct >= 70) {
@@ -541,7 +544,9 @@ export class LayaGovernanceService {
           cooldownOverride: choice === 'OVERRIDE_COOLDOWN'
         },
         rationaleCode: rationaleCode as any,
-        trace: payload.trace
+        trace: payload.trace,
+        signalSource: payload.signalSource || payload.intentSubgroup || 'FLOW_SIGNAL',
+        vetoRuleCode: choice === 'VETO' ? (layaRationale || rationaleCode) : undefined
       };
 
       // 1. Validação temporal de expiração
