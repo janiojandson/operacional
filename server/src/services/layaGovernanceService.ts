@@ -17,7 +17,7 @@ export const VETO_QUARANTINE_MS = 60000; // 60s de quarentena para pares que tom
 export const MAX_ALLOWED_RISK_CAP = 2.0; // Teto prudente de potência (PowerMultiplier max 2.0x)
 
 export function isSpreadToxicLocal(spreadBps?: number): boolean {
-  if (spreadBps === undefined || spreadBps === null) return false;
+  if (spreadBps === undefined || spreadBps === null || spreadBps <= 0) return false;
   return spreadBps > MAX_SAFE_SPREAD_BPS;
 }
 
@@ -262,31 +262,42 @@ export class LayaGovernanceService {
       }
     }
 
-    // 🛡️ 1. Quarentena de VETO Local: Se o par tomou VETO recente (ex: spread ou risco), suprime chamadas por 60s
+    // 🛡️ 1. Quarentena de VETO Local: pares com spread tóxico confirmado suprimidos por 60s
+    //    NÃO bloqueia pares que entraram em quarentena por outros motivos (ex: VETO genérico da Laya)
     if (!isProtection) {
       const quarantine = this.vetoQuarantineMap.get(payload.symbol);
       const now = Date.now();
-      if (quarantine && now - quarantine.ts < VETO_QUARANTINE_MS) {
-        const vetoDecision: LayaGovernanceResponse = {
-          decisionId: `local-veto-quarantine-${now}`,
-          stateVersion: payload.stateVersion,
-          issuedAt: now,
-          expiresAt: now + 2000,
-          action: 'VETO',
-          symbol: payload.symbol,
-          powerMultiplier: 1.0,
-          riskPct: 0.5,
-          governance: {},
-          rationaleCode: quarantine.reason as any || 'SPREAD_TOXIC_VETO',
-          trace: payload.trace
-        };
-        return {
-          executed: false,
-          decision: vetoDecision,
-          fallbackLocal: true,
-          rejectionReason: `QUARANTINE_ACTIVE: ${quarantine.reason}`,
-          latencyMs: 0
-        };
+      if (quarantine && now - quarantine.ts < VETO_QUARANTINE_MS && quarantine.reason === 'SPREAD_TOXIC_VETO') {
+        // Verifica se o spread ATUAL ainda é tóxico antes de suprimir
+        const currentSpread = Number(payload.trace?.spreadBps || 0);
+        if (currentSpread > MAX_SAFE_SPREAD_BPS) {
+          const vetoDecision: LayaGovernanceResponse = {
+            decisionId: `local-veto-quarantine-${now}`,
+            stateVersion: payload.stateVersion,
+            issuedAt: now,
+            expiresAt: now + 2000,
+            action: 'VETO',
+            symbol: payload.symbol,
+            powerMultiplier: 1.0,
+            riskPct: 0.5,
+            governance: {},
+            rationaleCode: 'SPREAD_TOXIC_VETO' as any,
+            trace: payload.trace
+          };
+          return {
+            executed: false,
+            decision: vetoDecision,
+            fallbackLocal: true,
+            rejectionReason: `QUARANTINE_ACTIVE: ${quarantine.reason}`,
+            latencyMs: 0
+          };
+        } else {
+          // Spread normalizou: libera o par imediatamente
+          this.vetoQuarantineMap.delete(payload.symbol);
+        }
+      } else if (quarantine && now - quarantine.ts >= VETO_QUARANTINE_MS) {
+        // Quarentena expirada: limpa
+        this.vetoQuarantineMap.delete(payload.symbol);
       }
     }
 
@@ -468,6 +479,7 @@ export class LayaGovernanceService {
       try {
         const fetchPromise = doFetch(finalServiceUrl);
         response = await Promise.race([fetchPromise, timeoutPromise]);
+        console.log(`[LayaGovernance] Resposta via rota interna (${finalServiceUrl}) em ${(performance.now() - startTime).toFixed(1)}ms`);
       } catch (firstErr: any) {
         // Se a rota interna falhar por DNS/conexão imediata e não for timeout, tenta a URL pública
         if (firstErr?.message?.includes('TIMEOUT') || controller.signal.aborted) {
@@ -477,6 +489,7 @@ export class LayaGovernanceService {
         finalServiceUrl = publicUrl;
         const fallbackPromise = doFetch(finalServiceUrl);
         response = await Promise.race([fallbackPromise, timeoutPromise]);
+        console.warn(`[LayaGovernance] Resposta via FALLBACK PUBLICO (${publicUrl}) em ${(performance.now() - startTime).toFixed(1)}ms`);
       }
 
       const latencyMs = performance.now() - startTime;
@@ -556,9 +569,10 @@ export class LayaGovernanceService {
         this.overridesUsedSession++;
       }
 
-      // Se a IA respondeu VETO, colocar o par em quarentena de 60s para evitar chamadas redundantes a cada 12s
-      if (proposal.action === 'VETO') {
-        this.vetoQuarantineMap.set(payload.symbol, { ts: Date.now(), reason: proposal.rationaleCode });
+      // Se a IA respondeu VETO por spread tóxico confirmado, colocar em quarentena de 60s
+      // VETOs genéricos da Laya (ex: por confluência, regime) NÃO entram em quarentena
+      if (proposal.action === 'VETO' && proposal.rationaleCode === 'SPREAD_TOXIC_VETO') {
+        this.vetoQuarantineMap.set(payload.symbol, { ts: Date.now(), reason: 'SPREAD_TOXIC_VETO' });
       }
 
       this.logDecision(proposal, executed);
