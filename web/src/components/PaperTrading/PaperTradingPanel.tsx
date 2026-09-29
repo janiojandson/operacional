@@ -3,6 +3,13 @@ import { PaperAccount } from '../../../../shared/paperTypes';
 import { PairPerformance, DynamicPairStatus } from '../../../../shared/types';
 import { Bot, Zap, Power, Flame, CheckCircle, XCircle } from 'lucide-react';
 import { positionRiskSummary } from './positionRiskSummary';
+import {
+  formatCurrencyPtBr,
+  formatPricePtBr,
+  formatPnlPtBr,
+  formatPtBrNumber,
+  formatPercentPtBr
+} from '../../utils/formatters';
 
 interface PaperTradingPanelProps {
   account: PaperAccount | null;
@@ -11,25 +18,31 @@ interface PaperTradingPanelProps {
   dynamicPairs: DynamicPairStatus[];
   clients?: any[];
   clientLogs?: any[];
+  canExecuteOrders?: boolean;
 }
 
 export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({ 
   account, 
-  activeSymbol, 
+  activeSymbol: _activeSymbol, 
   pairStats,
-  dynamicPairs
+  dynamicPairs,
+  canExecuteOrders = true
 }) => {
   const [tab, setTab] = useState<'AUTONOMY' | 'POSITIONS' | 'HISTORY'>('AUTONOMY');
 
   if (!account) {
     return (
-      <div className="h-full flex items-center justify-center text-text-muted font-mono text-xs bg-bg-panel">
+      <div className="h-full flex items-center justify-center text-text-muted font-mono text-xs bg-bg-panel min-h-[140px]">
         Iniciando motor de execução quantitativa institucional...
       </div>
     );
   }
 
   const handleTogglePair = async (symbol: string, currentActive: boolean) => {
+    if (!canExecuteOrders) {
+      alert('Controle de ordens e pares disponível apenas em telas desktop (>= 1280px).');
+      return;
+    }
     try {
       await fetch(`/api/pairs/${encodeURIComponent(symbol)}/toggle`, {
         method: 'POST',
@@ -90,13 +103,13 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
           <div className="flex items-center space-x-1">
             <span className="text-text-muted text-[10px]">PNL:</span>
             <span className={`font-bold ${account.realizedPnl >= 0 ? 'text-trade-green' : 'text-trade-red'}`}>
-              {account.realizedPnl >= 0 ? `+$${account.realizedPnl.toFixed(2)}` : `-$${Math.abs(account.realizedPnl).toFixed(2)}`}
+              {formatPnlPtBr(account.realizedPnl)}
             </span>
           </div>
 
           <div className="flex items-center space-x-1">
             <span className="text-text-muted text-[10px]">WIN:</span>
-            <span className="font-bold text-amber-400">{account.winRate}%</span>
+            <span className="font-bold text-amber-400">{formatPercentPtBr(account.winRate, 1)}</span>
           </div>
         </div>
       </div>
@@ -140,12 +153,14 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
                     <div className="flex items-center space-x-2.5 min-w-0 flex-1">
                       <button
                         onClick={() => handleTogglePair(pair.symbol, pair.isActiveForTrading)}
+                        disabled={!canExecuteOrders}
                         className={`p-1.5 rounded shrink-0 transition-colors ${
+                          !canExecuteOrders ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500' :
                           pair.isActiveForTrading
                             ? 'bg-trade-green/20 text-trade-green hover:bg-trade-green/30'
                             : 'bg-trade-red/20 text-trade-red hover:bg-trade-red/30'
                         }`}
-                        title={pair.isActiveForTrading ? 'Clique para pausar par' : 'Clique para reativar par'}
+                        title={!canExecuteOrders ? 'Execução indisponível no mobile' : (pair.isActiveForTrading ? 'Clique para pausar par' : 'Clique para reativar par')}
                       >
                         <Power className="w-3.5 h-3.5" />
                       </button>
@@ -201,7 +216,7 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
 
                       <div className="w-12">
                         <div className="text-[9px] text-text-muted">WIN</div>
-                        <div className="font-bold text-text-primary">{stat?.winRate || 0}%</div>
+                        <div className="font-bold text-text-primary">{stat ? formatPercentPtBr(stat.winRate, 0) : '0%'}</div>
                       </div>
                     </div>
                   </div>
@@ -214,7 +229,7 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
         {/* Positions Tab */}
         {tab === 'POSITIONS' && (
           account.openPositions.length === 0 ? (
-            <div className="h-full flex items-center justify-center text-text-muted text-xs py-6">
+            <div className="h-full flex items-center justify-center text-text-muted text-xs py-6 min-h-[140px]">
               Aguardando confirmação de sinal de fluxo para nova entrada a mercado...
             </div>
           ) : (
@@ -230,38 +245,43 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
                     className="p-2.5 rounded-md bg-bg-app/90 border border-border-panel flex flex-col justify-between space-y-2 shadow-sm"
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-2 flex-wrap gap-1">
                         <span className="font-bold text-text-primary text-xs">{pos.symbol}</span>
                         <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${isBuy ? 'bg-trade-green/20 text-trade-green border border-trade-green/30' : 'bg-trade-red/20 text-trade-red border border-trade-red/30'}`}>
-                          {isBuy ? 'Posição (Buy)' : 'Posição (Sell)'}
+                          {isBuy ? 'Compra' : 'Venda'}
                         </span>
                         <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 font-bold border border-indigo-500/30">
                           10x ISOLADA
                         </span>
+                        {sizing.isBreakeven && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40">
+                            BREAKEVEN
+                          </span>
+                        )}
                       </div>
                       <div className={`font-bold text-xs ${isProfit ? 'text-trade-green' : 'text-trade-red'}`}>
-                        {isProfit ? `+$${pos.pnlUsd.toFixed(2)}` : `-$${Math.abs(pos.pnlUsd).toFixed(2)}`} ({pos.pnlPct}%)
+                        {formatPnlPtBr(pos.pnlUsd, pos.pnlPct)}
                       </div>
                     </div>
 
                     <div className="grid grid-cols-3 text-[10px] bg-bg-panel p-1.5 rounded border border-border-panel text-center">
                       <div>
                         <span className="text-text-muted text-[9px] block">ENTRADA</span>
-                        <span className="text-text-primary font-bold">${pos.entryPrice.toLocaleString()}</span>
+                        <span className="text-text-primary font-bold">${formatPricePtBr(pos.entryPrice, pos.symbol)}</span>
                       </div>
                       <div>
                         <span className="text-trade-green text-[9px] block">ALVO (TP)</span>
-                        <span className="text-trade-green font-bold">${pos.takeProfit.toLocaleString()}</span>
+                        <span className="text-trade-green font-bold">${formatPricePtBr(pos.takeProfit, pos.symbol)}</span>
                       </div>
                       <div>
                         <span className="text-trade-red text-[9px] block">STOP (SL)</span>
-                        <span className="text-trade-red font-bold">${pos.stopLoss.toLocaleString()}</span>
+                        <span className="text-trade-red font-bold">${formatPricePtBr(pos.stopLoss, pos.symbol)}</span>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-4 text-[9px] bg-slate-950/40 p-1.5 rounded border border-border-panel text-center">
                       <div><span className="text-text-muted block">NOTIONAL</span><span className="text-accent font-bold">{sizing.notionalUsd}</span></div>
-                      <div><span className="text-text-muted block">RISCO</span><span className="text-amber-400 font-bold">{sizing.riskUsd}</span></div>
+                      <div><span className="text-text-muted block">RISCO</span><span className={sizing.isBreakeven ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>{sizing.riskUsd}</span></div>
                       <div><span className="text-text-muted block">MARGEM</span><span className="text-text-primary font-bold">{sizing.marginUsd}</span></div>
                       <div><span className="text-text-muted block">EXPOSIÇÃO</span><span className="text-purple-300 font-bold">{sizing.exposurePct}</span></div>
                     </div>
@@ -276,7 +296,7 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
         {tab === 'HISTORY' && (
           <div className="space-y-1 divide-y divide-border-panel/40">
             {account.history.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-text-muted text-xs py-6">
+              <div className="h-full flex items-center justify-center text-text-muted text-xs py-6 min-h-[140px]">
                 Nenhuma operação finalizada na sessão.
               </div>
             ) : (
@@ -293,23 +313,23 @@ export const PaperTradingPanel: React.FC<PaperTradingPanelProps> = ({
                       {isTp ? <CheckCircle className="w-3.5 h-3.5 text-trade-green shrink-0" /> : <XCircle className="w-3.5 h-3.5 text-trade-red shrink-0" />}
                       <span className="font-bold text-text-primary">{hist.symbol}</span>
                       <span className={`text-[9px] px-1.5 py-0.2 rounded font-semibold ${hist.type === 'BUY' ? 'text-trade-green bg-trade-green/10' : 'text-trade-red bg-trade-red/10'}`}>
-                        {hist.type === 'BUY' ? 'BUY' : 'SELL'}
+                        {hist.type === 'BUY' ? 'COMPRA' : 'VENDA'}
                       </span>
                       {isPartial && (
                         <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30" title="Parcial de +0.6R colhida no topo/suporte">
-                          🌊 +${(hist.partialPnlUsd || 0).toFixed(2)} (0.6R)
+                          🌊 +${formatPtBrNumber(hist.partialPnlUsd || 0, 2)} (0.6R)
                         </span>
                       )}
                     </div>
 
                     <div className="text-text-muted text-[10px] hidden sm:block">
-                      ${hist.entryPrice.toLocaleString()} → ${hist.currentPrice.toLocaleString()}
+                      ${formatPricePtBr(hist.entryPrice, hist.symbol)} → ${formatPricePtBr(hist.currentPrice, hist.symbol)}
                     </div>
 
                     <div className="flex items-center space-x-2">
-                      <span className="text-text-muted text-[9px] hidden sm:inline">fee ${feeVal.toFixed(2)}</span>
+                      <span className="text-text-muted text-[9px] hidden sm:inline">fee ${formatPtBrNumber(feeVal, 2)}</span>
                       <span className={`font-bold ${totalNet >= 0 ? 'text-trade-green' : 'text-trade-red'}`}>
-                        {totalNet >= 0 ? `+$${totalNet.toFixed(2)}` : `-$${Math.abs(totalNet).toFixed(2)}`}
+                        {formatPnlPtBr(totalNet)}
                       </span>
                       <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${
                         hist.status === 'CLOSED_PARTIAL_TP' || (isPartial && totalNet > 0)

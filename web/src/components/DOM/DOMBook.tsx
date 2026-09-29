@@ -2,6 +2,7 @@ import React from 'react';
 import { OrderBookData } from '../../../../shared/types';
 import { Layers } from 'lucide-react';
 import { bookStatus } from './bookStatus';
+import { formatPricePtBr, formatPtBrNumber } from '../../utils/formatters';
 
 interface DOMBookProps {
   book: OrderBookData | null;
@@ -10,7 +11,7 @@ interface DOMBookProps {
 export const DOMBook: React.FC<DOMBookProps> = ({ book }) => {
   if (!book) {
     return (
-      <div className="h-full flex items-center justify-center text-text-muted font-mono text-xs bg-bg-panel">
+      <div className="h-full flex items-center justify-center text-text-muted font-mono text-xs bg-bg-panel min-h-[200px]">
         Carregando Book L2...
       </div>
     );
@@ -24,22 +25,25 @@ export const DOMBook: React.FC<DOMBookProps> = ({ book }) => {
   return (
     <div className="flex flex-col h-full bg-bg-panel select-none font-mono">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-panel bg-bg-panel">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-panel bg-bg-panel shrink-0">
         <div className="flex items-center space-x-2">
           <Layers className="w-3.5 h-3.5 text-accent" />
           <span className="text-[11px] font-bold text-text-primary tracking-wide uppercase">DOM — Book L2</span>
         </div>
         <div className="text-[10px] font-mono text-text-muted text-right">
-          <div>Spread: <span className="text-text-primary font-semibold">{book.spread}</span></div>
-          <div className={status.stale ? 'text-amber-400' : 'text-trade-green'}>{status.source} · {status.age}</div>
+          <div>Spread: <span className="text-text-primary font-semibold">{formatPtBrNumber(book.spread, 2)}</span></div>
+          <div className={status.stale ? 'text-amber-400 font-semibold' : 'text-trade-green font-semibold'}>
+            <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1 ${status.stale ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
+            {status.source} · {status.age}
+          </div>
         </div>
       </div>
 
       {/* Book Ratio Imbalance Bar */}
-      <div className="px-3 py-1 bg-bg-app border-b border-border-panel flex flex-col gap-1">
+      <div className="px-3 py-1 bg-bg-app border-b border-border-panel flex flex-col gap-1 shrink-0">
         <div className="flex justify-between text-[10px] font-mono">
-          <span className="text-trade-green font-semibold">COMPRA: {(book.bidDepthTotal).toLocaleString()}</span>
-          <span className="text-trade-red font-semibold">VENDA: {(book.askDepthTotal).toLocaleString()}</span>
+          <span className="text-trade-green font-semibold">COMPRA: {formatPtBrNumber(book.bidDepthTotal, 2)}</span>
+          <span className="text-trade-red font-semibold">VENDA: {formatPtBrNumber(book.askDepthTotal, 2)}</span>
         </div>
         <div className="w-full h-1.5 bg-border-panel/40 rounded-full overflow-hidden flex">
           <div 
@@ -66,21 +70,21 @@ export const DOMBook: React.FC<DOMBookProps> = ({ book }) => {
                   className="absolute right-0 top-0 bottom-0 bg-trade-red/15 pointer-events-none transition-all duration-150"
                   style={{ width: `${depthPercent}%` }}
                 />
-                <span className="text-trade-red font-semibold z-10">{ask.price.toLocaleString()}</span>
-                <span className="text-text-primary z-10">{ask.amount.toFixed(2)}</span>
-                <span className="text-text-muted text-[10px] z-10">{ask.total.toFixed(1)}</span>
+                <span className="text-trade-red font-semibold z-10">{formatPricePtBr(ask.price)}</span>
+                <span className="text-text-primary z-10">{formatPtBrNumber(ask.amount, 2)}</span>
+                <span className="text-text-muted text-[10px] z-10">{formatPtBrNumber(ask.total, 1)}</span>
               </div>
             );
           })}
         </div>
 
         {/* Current Mid Spread Divider */}
-        <div className="py-1 px-3 bg-bg-app border-y border-border-panel flex items-center justify-between text-xs font-bold text-text-primary shadow-inner">
+        <div className="py-1 px-3 bg-bg-app border-y border-border-panel flex items-center justify-between text-xs font-bold text-text-primary shadow-inner shrink-0">
           <span className="text-text-muted font-normal text-[10px]">PREÇO ATUAL</span>
           <span className="font-mono text-sm tracking-wider text-text-primary">
-            {book.bids[0]?.price.toLocaleString()}
+            {formatPricePtBr(book.bids[0]?.price)}
           </span>
-          <span className="text-accent text-[10px]">LIVE</span>
+          <span className="text-emerald-400 font-bold text-[10px] bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/30">LIVE</span>
         </div>
 
         {/* Bids (Compras) */}
@@ -94,9 +98,9 @@ export const DOMBook: React.FC<DOMBookProps> = ({ book }) => {
                   className="absolute right-0 top-0 bottom-0 bg-trade-green/15 pointer-events-none transition-all duration-150"
                   style={{ width: `${depthPercent}%` }}
                 />
-                <span className="text-trade-green font-semibold z-10">{bid.price.toLocaleString()}</span>
-                <span className="text-text-primary z-10">{bid.amount.toFixed(2)}</span>
-                <span className="text-text-muted text-[10px] z-10">{bid.total.toFixed(1)}</span>
+                <span className="text-trade-green font-semibold z-10">{formatPricePtBr(bid.price)}</span>
+                <span className="text-text-primary z-10">{formatPtBrNumber(bid.amount, 2)}</span>
+                <span className="text-text-muted text-[10px] z-10">{formatPtBrNumber(bid.total, 1)}</span>
               </div>
             );
           })}

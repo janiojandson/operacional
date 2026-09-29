@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FlowSignal } from '../../../../shared/types';
 import { Bell, ShieldAlert, Zap, Scale, Trash2 } from 'lucide-react';
+import { formatPricePtBr } from '../../utils/formatters';
 
 interface SignalsFeedProps {
   signals: FlowSignal[];
@@ -44,13 +45,16 @@ export const SignalsFeed: React.FC<SignalsFeedProps> = ({ signals }) => {
       {/* Signals List com Scroll Suave e Fade */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1.5 font-mono text-xs no-scrollbar">
         {visibleSignals.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-text-muted text-xs space-y-1 py-6">
-            <Zap className="w-5 h-5 text-text-muted/40 animate-pulse" />
-            <span>Monitorando fluxo de ordens e absorções institucionais...</span>
+          <div className="h-full flex flex-col items-center justify-center text-text-muted text-xs space-y-2 py-6 min-h-[140px]">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px]">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+              <span>feed ativo — 0 eventos/60s</span>
+            </div>
+            <span className="text-[10px] text-slate-500 text-center">Monitorando fluxo de ordens e absorções institucionais...</span>
           </div>
         ) : (
           visibleSignals.map((signal) => {
-            const timeStr = new Date(signal.timestamp).toLocaleTimeString();
+            const timeStr = new Date(signal.timestamp).toLocaleTimeString('pt-BR');
             let icon = <Zap className="w-3.5 h-3.5 text-accent shrink-0" />;
             let badgeColor = 'bg-accent/20 text-accent border-accent/30';
 
@@ -86,7 +90,7 @@ export const SignalsFeed: React.FC<SignalsFeedProps> = ({ signals }) => {
                 </div>
                 <div className="text-right text-[10px] text-text-muted shrink-0 font-mono">
                   <div>{timeStr}</div>
-                  <div className="text-text-primary font-bold mt-1">@ ${signal.price.toLocaleString()}</div>
+                  <div className="text-text-primary font-bold mt-1">@ ${formatPricePtBr(signal.price, signal.symbol)}</div>
                 </div>
               </div>
             );

@@ -380,7 +380,7 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
             exitPrice: tradeEvent.closePrice ?? tradeEvent.currentPrice,
             exitReason,
             branchClassification,
-            accountBalanceUsd: (tradeEvent as any).masterBalanceAtEntry ?? (tradeEvent as any).balanceAtEntry ?? paperTrading.getBalance(),
+            accountBalanceUsd: (tradeEvent as any).masterBalanceAtEntry ?? (tradeEvent as any).balanceAtEntry ?? null,
             positionSizeUsd: tradeEvent.notionalUsd ?? 250,
             grossPnlUsd: Number(tradeEvent.pnlUsd ?? 0),
             netPnlUsd: Number(tradeEvent.pnlUsd ?? 0),

@@ -559,7 +559,8 @@ CREATE TABLE IF NOT EXISTS kpi_weekly_snapshots (
     friction_r_avg NUMERIC(8, 4) NOT NULL,
     fee_drag_usd_total NUMERIC(14, 4) NOT NULL,
     
-    -- Avaliação do Gate
+    -- Avaliação do Gate e Versionamento do Modelo
+    p_theory JSONB NOT NULL DEFAULT '{"p1":0.20,"p2":0.20,"p3":0.25,"p4":0.25,"p5":0.08,"p6":0.02}'::jsonb,
     gate_qualified BOOLEAN NOT NULL DEFAULT FALSE,
     gate_verdict VARCHAR(30) NOT NULL DEFAULT 'OBSERVATION',
     recalibration_notes TEXT,

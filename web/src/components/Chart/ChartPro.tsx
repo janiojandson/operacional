@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createChart } from 'lightweight-charts';
 import { Eye, EyeOff, Activity } from 'lucide-react';
 import { chartHistoryKey } from './chartRefreshPolicy.js';
+import { formatPricePtBr, formatCurrencyPtBr, formatPnlPtBr, formatPtBrNumber } from '../../utils/formatters';
 
 export interface CandleData {
   time: any;
@@ -133,8 +134,8 @@ export const ChartPro: React.FC<ChartProProps> = ({
 
     const handleResize = () => {
       if (chartContainerRef.current && chartRef.current) {
-        const w = chartContainerRef.current.clientWidth;
-        const h = chartContainerRef.current.clientHeight;
+        const w = chartContainerRef.current.clientWidth || chartContainerRef.current.parentElement?.clientWidth || 0;
+        const h = Math.max(320, chartContainerRef.current.clientHeight || 320);
         if (w > 0 && h > 0) {
           chartRef.current.applyOptions({ width: w, height: h });
         }
@@ -148,15 +149,18 @@ export const ChartPro: React.FC<ChartProProps> = ({
       resizeObserver = new ResizeObserver((entries) => {
         for (const entry of entries) {
           const { width, height } = entry.contentRect;
-          if (width > 0 && height > 0 && chartRef.current) {
-            chartRef.current.applyOptions({ width, height });
+          const finalW = Math.floor(width) || chartContainerRef.current?.clientWidth || 0;
+          const finalH = Math.max(320, Math.floor(height) || 320);
+          if (finalW > 0 && finalH > 0 && chartRef.current) {
+            chartRef.current.applyOptions({ width: finalW, height: finalH });
           }
         }
       });
       resizeObserver.observe(chartContainerRef.current);
     }
 
-    handleResize();
+    // Resize inicial com fallback para renderização síncrona
+    setTimeout(handleResize, 50);
 
     return () => {
       window.removeEventListener('resize', handleResize);
@@ -164,6 +168,31 @@ export const ChartPro: React.FC<ChartProProps> = ({
       chart.remove();
     };
   }, []);
+
+  // Sincroniza velas imediatamente quando chegam via props (sem esperar clique de timeframe)
+  useEffect(() => {
+    candlesRef.current = candles;
+    if (candleSeriesRef.current && volumeSeriesRef.current && candles && candles.length > 0) {
+      if (selectedTf === '1m') {
+        const chartCandles = candles.map(c => ({
+          time: c.time,
+          open: Number(c.open),
+          high: Number(c.high),
+          low: Number(c.low),
+          close: Number(c.close)
+        }));
+        const chartVolume = candles.map(c => ({
+          time: c.time,
+          value: Number(c.volume || 0),
+          color: Number(c.close) >= Number(c.open) ? 'rgba(14, 203, 129, 0.4)' : 'rgba(246, 70, 93, 0.4)'
+        }));
+        candleSeriesRef.current.setData(chartCandles);
+        volumeSeriesRef.current.setData(chartVolume);
+        chartRef.current?.timeScale().fitContent();
+        setCandleSource((prev) => (prev === 'UNAVAILABLE' ? 'BINGX' : prev));
+      }
+    }
+  }, [candles, selectedTf]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -446,9 +475,17 @@ export const ChartPro: React.FC<ChartProProps> = ({
         <div className="flex items-center justify-between px-3 py-1.5">
           <div className="flex items-center space-x-2.5">
             <span className="font-mono font-bold text-sm text-text-primary tracking-wider">{symbol}</span>
-            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${(candleSource === 'BINGX' || candleSource === 'BINANCE' || candleSource === 'BYBIT') ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10' : candleSource === 'LOCAL_FALLBACK' ? 'text-amber-300 border-amber-500/40 bg-amber-500/10' : 'text-rose-300 border-rose-500/40 bg-rose-500/10'}`}>
-              {candleSource === 'BINGX' ? 'BINGX AO VIVO' : candleSource === 'BINANCE' ? 'BINANCE AO VIVO' : candleSource === 'BYBIT' ? 'BYBIT AO VIVO' : candleSource === 'LOCAL_FALLBACK' ? 'FALLBACK LOCAL' : 'DADOS INDISPONIVEIS'}
-            </span>
+            {(candleSource === 'BINGX' || candleSource === 'BINANCE' || candleSource === 'BYBIT') ? (
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 font-bold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                LIVE ({candleSource})
+              </span>
+            ) : (
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-300 font-bold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                SIMULADO
+              </span>
+            )}
 
             <div className="flex items-center bg-bg-app p-0.5 rounded border border-border-panel text-[11px] font-mono">
               {(['1m', '3m', '5m', '15m', '1h', '4h', '1D'] as const).map((tf) => (
@@ -486,7 +523,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
                 const cvdVal = Number(activeCandle?.cvd ?? 0);
                 return (
                   <span className={`font-semibold ${cvdVal >= 0 ? 'text-trade-green' : 'text-trade-red'}`}>
-                    {cvdVal >= 0 ? `+${cvdVal.toLocaleString()}` : cvdVal.toLocaleString()}
+                    {cvdVal >= 0 ? `+${formatPtBrNumber(cvdVal, 2)}` : formatPtBrNumber(cvdVal, 2)}
                   </span>
                 );
               })()}
@@ -542,33 +579,38 @@ export const ChartPro: React.FC<ChartProProps> = ({
               <div className="text-[10px] text-text-muted flex items-center gap-1.5">
                 <span>ENTRADA EM CURSO</span>
                 <span className="px-1 py-0.2 rounded bg-indigo-500/20 text-indigo-400 font-bold border border-indigo-500/40 text-[9px]">10x ISOLADA</span>
+                {(tradeEntryPrice > 0 && Math.abs(tradeEntryPrice - Number(currentTrade.stopLoss || 0)) < 0.0001) && (
+                  <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40 text-[9px]">
+                    BREAKEVEN — RISCO ZERO
+                  </span>
+                )}
               </div>
-              <div className="text-text-primary font-bold">${tradeEntryPrice.toLocaleString()}</div>
+              <div className="text-text-primary font-bold">${formatPricePtBr(tradeEntryPrice, symbol)}</div>
             </div>
           </div>
 
           <div className="border-l border-border-panel pl-3">
             <div className="text-[10px] text-text-muted">LUCRO / PREJUÍZO (P&L)</div>
             <div className={`font-bold ${tradePnlValue >= 0 ? 'text-trade-green' : 'text-trade-red'}`}>
-              {tradePnlValue >= 0 ? `+$${tradePnlValue.toFixed(2)}` : `-$${Math.abs(tradePnlValue).toFixed(2)}`} ({tradePnlPercentage.toFixed(2)}%)
+              {formatPnlPtBr(tradePnlValue, tradePnlPercentage)}
             </div>
             {currentTrade.marginUsd && (
               <div className="text-[10px] text-amber-400 font-medium">
-                Margem: ${Number(currentTrade.marginUsd).toFixed(2)}
+                Margem: {formatCurrencyPtBr(currentTrade.marginUsd)}
               </div>
             )}
           </div>
 
           <div className="border-l border-border-panel pl-3 text-[10px] space-y-0.5">
-            <div>TP: <span className="text-trade-green font-semibold">${tradeTpPrice.toLocaleString()}</span></div>
+            <div>TP: <span className="text-trade-green font-semibold">${formatPricePtBr(tradeTpPrice, symbol)}</span></div>
             {trailingStopEnabled ? (
               isTsRunning && runningTsPrice ? (
                 <div className="text-purple-400 font-bold flex items-center gap-1 animate-pulse">
-                  <span>TS: ${runningTsPrice.toLocaleString()}</span>
+                  <span>TS: ${formatPricePtBr(runningTsPrice, symbol)}</span>
                   <span>🚀</span>
                 </div>
               ) : (
-                <div>Gatilho TS: <span className="text-amber-400 font-semibold">${triggerToDisplay.toFixed(2)}</span></div>
+                <div>Gatilho TS: <span className="text-amber-400 font-semibold">${formatPricePtBr(triggerToDisplay, symbol)}</span></div>
               )
             ) : (
               <div className="text-slate-400 font-semibold">Alvo Fixo (100%)</div>
@@ -577,7 +619,7 @@ export const ChartPro: React.FC<ChartProProps> = ({
         </div>
       )}
 
-      <div ref={chartContainerRef} className="w-full flex-1" />
+      <div ref={chartContainerRef} className="w-full flex-1 min-h-[320px] relative" />
     </div>
   );
 };

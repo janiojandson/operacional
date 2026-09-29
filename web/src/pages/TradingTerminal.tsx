@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useMarketData } from '../hooks/useMarketData';
+import { useBreakpoint } from '../hooks/useBreakpoint';
 import { AssetSelector } from '../components/Header/AssetSelector';
 import { ChartPro } from '../components/Chart/ChartPro';
 import { DOMBook } from '../components/DOM/DOMBook';
@@ -11,15 +12,8 @@ import { QuantStrategyHealthModal } from '../components/Advisor/QuantStrategyHea
 import { MasterHealthDashboard } from '../components/Advisor/MasterHealthDashboard';
 import { ShadowAuditModal } from '../components/ShadowAuditModal';
 import { LayaGovernanceControl } from '../components/Header/LayaGovernanceControl';
-import {
-  BarChart2,
-  Zap,
-  Briefcase,
-  BookOpen,
-  Clock,
-  RefreshCw,
-  Activity
-} from 'lucide-react';
+import { ResponsiveShell } from '../components/Layout/ResponsiveShell';
+import { RefreshCw, Activity } from 'lucide-react';
 
 export default function TradingTerminal() {
   const [activeSymbol, setActiveSymbol] = useState<string>('BTC/USDT');
@@ -33,13 +27,7 @@ export default function TradingTerminal() {
   const [shadowFilterActive, setShadowFilterActive] = useState<boolean>(false);
   const [resetTimer, setResetTimer] = useState<number>(0);
 
-  // Splitter States
-  const [leftColWidthPct, setLeftColWidthPct] = useState<number>(65);
-  const [chartHeightPct, setChartHeightPct] = useState<number>(58);
-  const [signalsWidthPct, setSignalsWidthPct] = useState<number>(48);
-  const [domWidthPct, setDomWidthPct] = useState<number>(50);
-
-  const [activeMobileTab, setActiveMobileTab] = useState<'chart' | 'signals' | 'paper' | 'dom' | 'tape'>('chart');
+  const { canExecuteOrders } = useBreakpoint();
 
   const {
     isConnected,
@@ -101,20 +89,23 @@ export default function TradingTerminal() {
         'Authorization': `Bearer ${localStorage.getItem('mfp_token') || ''}`
       }
     })
-      .then(res => res.json())
-      .then((data: any) => {
-        if (data?.success) {
-          setTrailingStopEnabled(Boolean(data.trailingStopEnabled));
-          setShadowFilterActive(Boolean(data.shadowFilterActive));
+      .then((res) => res.json())
+      .then((data) => {
+        if (typeof data.trailingStopEnabled === 'boolean') {
+          setTrailingStopEnabled(data.trailingStopEnabled);
+        }
+        if (typeof data.shadowFilterActive === 'boolean') {
+          setShadowFilterActive(data.shadowFilterActive);
         }
       })
-      .catch(() => { });
+      .catch(() => {});
 
+    // Polling de telemetria do Macro Sentinel
     const fetchSentinel = () => {
       fetch('/api/macro-regime')
-        .then(res => res.json())
-        .then((data: any) => {
-          if (data?.macroSentinel) {
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && data.macroSentinel) {
             setSentinelData({
               regime: data.macroSentinel.regime || 'NEUTRAL_RANGING',
               predictiveScore: data.macroSentinel.predictiveScore ?? 0,
@@ -122,55 +113,51 @@ export default function TradingTerminal() {
             });
           }
         })
-        .catch(() => { });
+        .catch(() => {});
     };
 
     fetchSentinel();
-    const sentInterval = setInterval(fetchSentinel, 10000);
-    return () => clearInterval(sentInterval);
+    const interval = setInterval(fetchSentinel, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleToggleTrailing = async () => {
-    const nextVal = !trailingStopEnabled;
+    const newState = !trailingStopEnabled;
+    setTrailingStopEnabled(newState);
     try {
-      const response = await fetch('/api/admin/config/trailing-stop', {
+      await fetch('/api/admin/config/toggles', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('mfp_token') || ''}`
         },
-        body: JSON.stringify({ enabled: nextVal })
+        body: JSON.stringify({ trailingStopEnabled: newState })
       });
-      const payload = await response.json();
-      if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Falha ao atualizar trailing stop');
-      setTrailingStopEnabled(Boolean(payload.trailingStopEnabled));
-    } catch {
-      setTrailingStopEnabled(!nextVal);
+    } catch (e) {
+      console.error('Failed to persist Trailing Stop state:', e);
     }
   };
 
   const handleToggleShadow = async () => {
-    const nextVal = !shadowFilterActive;
+    const newState = !shadowFilterActive;
+    setShadowFilterActive(newState);
     try {
-      const response = await fetch('/api/admin/config/shadow-filter', {
+      await fetch('/api/admin/config/toggles', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('mfp_token') || ''}`
         },
-        body: JSON.stringify({ active: nextVal })
+        body: JSON.stringify({ shadowFilterActive: newState })
       });
-      const payload = await response.json();
-      if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Falha ao atualizar Shadow Mode');
-      setShadowFilterActive(Boolean(payload.shadowFilterActive));
-    } catch {
-      setShadowFilterActive(!nextVal);
+    } catch (e) {
+      console.error('Failed to persist Shadow Mode state:', e);
     }
   };
 
   const handleUpdateBalance = async (newBalance: number) => {
     try {
-      await fetch('/api/paper-trading/balance', {
+      await fetch('/api/trading/balance', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -219,394 +206,158 @@ export default function TradingTerminal() {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-bg-app text-text-primary font-sans overflow-hidden select-none">
-      {/* Cabeçalho com Banca Viva e PnL ao Vivo */}
-      <AssetSelector
-        assets={assets}
-        activeSymbol={activeSymbol}
-        onSelect={setActiveSymbol}
-        isConnected={isConnected}
-        onOpenAdvisor={() => setIsAdvisorOpen(true)}
-        onOpenQuantHealth={() => setIsQuantHealthOpen(true)}
-        onOpenShadowAudit={() => setIsShadowAuditOpen(true)}
-        currentBalance={liveEquity}
-        walletBalance={walletBalance}
-        openPnl={totalUnrealizedPnl}
-        marginUsed={totalMarginUsed}
-        availableMargin={availableMargin}
-        onUpdateBalance={handleUpdateBalance}
-        onResetData={handleResetData}
+    <>
+      <ResponsiveShell
+        header={
+          <AssetSelector
+            assets={assets}
+            activeSymbol={activeSymbol}
+            onSelect={setActiveSymbol}
+            isConnected={isConnected}
+            onOpenAdvisor={() => setIsAdvisorOpen(true)}
+            onOpenQuantHealth={() => setIsQuantHealthOpen(true)}
+            onOpenShadowAudit={() => setIsShadowAuditOpen(true)}
+            currentBalance={liveEquity}
+            walletBalance={walletBalance}
+            openPnl={totalUnrealizedPnl}
+            marginUsed={totalMarginUsed}
+            availableMargin={availableMargin}
+            onUpdateBalance={handleUpdateBalance}
+            onResetData={handleResetData}
+          />
+        }
+        governanceBar={
+          <div className="bg-[#0b1120] border-b border-slate-800/80 px-2 sm:px-3 py-1 sm:py-1.5 flex items-center justify-between z-20 shrink-0 text-xs shadow-md overflow-x-auto no-scrollbar gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold hidden xl:inline shrink-0">
+                Controle Operacional:
+              </span>
+
+              {/* Botão Trailing Stop */}
+              <button
+                onClick={handleToggleTrailing}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[11px] sm:text-xs font-semibold transition-all shrink-0 ${
+                  trailingStopEnabled
+                    ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/50 shadow-sm shadow-emerald-950/20'
+                    : 'bg-slate-900/90 border-slate-700/80 text-slate-400 hover:bg-slate-800'
+                }`}
+                title="Alternar Trailing Stop (Runner Mode 100% / Piso 2.3R) vs Alvo Fixo (100% / 2.5R)"
+              >
+                <span className={`w-2 h-2 rounded-full ${trailingStopEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+                <span>Trailing: <b className="text-white">{trailingStopEnabled ? 'RUNNER' : 'FIXO'}</b></span>
+              </button>
+
+              {/* Botão Shadow Mode */}
+              <button
+                onClick={handleToggleShadow}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[11px] sm:text-xs font-semibold transition-all shrink-0 ${
+                  shadowFilterActive
+                    ? 'bg-purple-950/50 border-purple-500/60 text-purple-300 hover:bg-purple-900/60 shadow-sm shadow-purple-950/20'
+                    : 'bg-slate-900/90 border-slate-700/80 text-slate-400 hover:bg-slate-800'
+                }`}
+                title="Alternar Executor Real vs Modo Fantasma"
+              >
+                <span className={`w-2 h-2 rounded-full ${shadowFilterActive ? 'bg-purple-400 animate-pulse' : 'bg-amber-400'}`} />
+                <span>Shadow: <b className="text-white">{shadowFilterActive ? 'REAL' : 'FANTASMA'}</b></span>
+              </button>
+
+              {/* Botão Governança Laya */}
+              <LayaGovernanceControl />
+
+              {/* Pílula de Telemetria do Macro Sentinel */}
+              <div
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[11px] sm:text-xs font-semibold shadow-sm transition-all shrink-0 ${
+                  sentinelData.isCircuitBreakerActive
+                    ? 'bg-rose-950/70 border-rose-500/80 text-rose-300 animate-pulse'
+                    : sentinelData.predictiveScore > 20
+                    ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
+                    : sentinelData.predictiveScore < -20
+                    ? 'bg-rose-950/40 border-rose-500/50 text-rose-300'
+                    : 'bg-slate-900/90 border-slate-700/80 text-slate-300'
+                }`}
+                title={`Macro Sentinel | Regime: ${sentinelData.regime} | Score: ${sentinelData.predictiveScore} | Circuit Breaker: ${sentinelData.isCircuitBreakerActive ? 'DISPARADO 🛑' : 'SEGURO 🟢'}`}
+              >
+                <span className={`w-2 h-2 rounded-full ${
+                  sentinelData.isCircuitBreakerActive
+                    ? 'bg-rose-500 animate-ping'
+                    : sentinelData.predictiveScore > 0
+                    ? 'bg-emerald-400'
+                    : 'bg-amber-400'
+                }`} />
+                <span>
+                  SENTINEL: <b className="text-white">{sentinelData.regime}</b> | CB: <b className={sentinelData.isCircuitBreakerActive ? 'text-rose-400 font-black' : 'text-emerald-400'}>{sentinelData.isCircuitBreakerActive ? 'ATIVO 🛑' : 'SEGURO 🟢'}</b>
+                </span>
+              </div>
+
+              {/* Botão Dashboard dos 10 Blocos */}
+              <button
+                onClick={() => setIsMasterHealthOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[11px] sm:text-xs font-semibold transition-all bg-cyan-950/40 border-cyan-500/50 text-cyan-300 hover:bg-cyan-900/60 shadow-sm shadow-cyan-950/20 shrink-0"
+                title="Abrir Dashboard dos 10 Blocos e Atribuição Laya v3.0"
+              >
+                <Activity className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="hidden sm:inline">10 BLOCOS &amp; SAÚDE</span>
+                <span className="sm:hidden">10 BLOCOS</span>
+              </button>
+
+              {/* Botão Direto Zerar Sessão */}
+              <button
+                onClick={handleResetData}
+                disabled={resetTimer > 0}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[11px] sm:text-xs font-semibold transition-all shrink-0 ${
+                  resetTimer > 0
+                    ? 'bg-amber-950/60 border-amber-500/60 text-amber-300 cursor-not-allowed'
+                    : 'bg-rose-950/40 border-rose-500/50 text-rose-300 hover:bg-rose-900/60 shadow-sm shadow-rose-950/20'
+                }`}
+                title="Zera histórico, ordens e banco do Master aguardando 15s para sincronização total"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-rose-400 ${resetTimer > 0 ? 'animate-spin' : ''}`} />
+                <span>
+                  {resetTimer > 0 ? (
+                    <span>SYNC: <b className="text-white">{resetTimer}s</b></span>
+                  ) : (
+                    <span>ZERAR</span>
+                  )}
+                </span>
+              </button>
+            </div>
+
+            <div className="hidden lg:flex items-center gap-2.5 text-[11px] font-mono text-slate-400 shrink-0 pl-2">
+              <span className="flex items-center gap-1 text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                <span>BingX V2 AO VIVO</span>
+              </span>
+              <span className="text-slate-500">|</span>
+              <span className="flex items-center gap-1 text-slate-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                <span>Postgres Railway</span>
+              </span>
+            </div>
+          </div>
+        }
+        chart={
+          <ChartPro
+            symbol={activeSymbol}
+            candles={candles}
+            activeCandle={activeCandle}
+            signals={signals}
+            openPosition={activePosition}
+            trailingStopEnabled={trailingStopEnabled}
+          />
+        }
+        dom={<DOMBook book={book} />}
+        tape={<TapeReader trades={trades} />}
+        radar={<SignalsFeed signals={signals} />}
+        operations={
+          <PaperTradingPanel
+            account={paperAccount}
+            activeSymbol={activeSymbol}
+            pairStats={pairStats}
+            dynamicPairs={dynamicPairs}
+            canExecuteOrders={canExecuteOrders}
+          />
+        }
       />
-
-      {/* Barra de Controle de Estratégias no Cabeçalho */}
-      <div className="bg-[#0b1120] border-b border-slate-800/80 px-3 py-1.5 flex items-center justify-between z-20 shrink-0 text-xs shadow-md overflow-x-auto no-scrollbar gap-2">
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold hidden xl:inline shrink-0">
-            Controle Operacional:
-          </span>
-
-          {/* Botão Trailing Stop */}
-          <button
-            onClick={handleToggleTrailing}
-            className={`flex items-center gap-2 px-3 py-1 rounded-lg border font-mono text-xs font-semibold transition-all ${trailingStopEnabled
-                ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/50 shadow-sm shadow-emerald-950/20'
-                : 'bg-slate-900/90 border-slate-700/80 text-slate-400 hover:bg-slate-800'
-              }`}
-            title="Alternar Trailing Stop (Runner Mode 100% / Piso 2.3R) vs Alvo Fixo (100% / 2.5R)"
-          >
-            <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-            </svg>
-            <span className="flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${trailingStopEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
-              <span>Trailing Stop: <b className="text-white">{trailingStopEnabled ? 'ATIVADO (RUNNER 100%)' : 'DESATIVADO (FIXO)'}</b></span>
-            </span>
-          </button>
-
-          {/* Botão Shadow Mode */}
-          <button
-            onClick={handleToggleShadow}
-            className={`flex items-center gap-2 px-3 py-1 rounded-lg border font-mono text-xs font-semibold transition-all ${shadowFilterActive
-                ? 'bg-purple-950/50 border-purple-500/60 text-purple-300 hover:bg-purple-900/60 shadow-sm shadow-purple-950/20'
-                : 'bg-slate-900/90 border-slate-700/80 text-slate-400 hover:bg-slate-800'
-              }`}
-            title="Alternar Executor Real (Bloqueia ordens) vs Modo Fantasma (Auditor)"
-          >
-            <svg className="w-3.5 h-3.5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-            </svg>
-            <span className="flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${shadowFilterActive ? 'bg-purple-400 animate-pulse' : 'bg-amber-400'}`} />
-              <span>Shadow Mode: <b className="text-white">{shadowFilterActive ? 'EXECUTOR REAL' : 'MODO FANTASMA'}</b></span>
-            </span>
-          </button>
-
-          {/* Botão Governança Laya (Logo após o Shadow Mode) */}
-          <LayaGovernanceControl />
-
-          {/* Pílula de Telemetria do Macro Sentinel (:4005) */}
-          <div
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg border font-mono text-xs font-semibold shadow-sm transition-all ${
-              sentinelData.isCircuitBreakerActive
-                ? 'bg-rose-950/70 border-rose-500/80 text-rose-300 animate-pulse'
-                : sentinelData.predictiveScore > 20
-                ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
-                : sentinelData.predictiveScore < -20
-                ? 'bg-rose-950/40 border-rose-500/50 text-rose-300'
-                : 'bg-slate-900/90 border-slate-700/80 text-slate-300'
-            }`}
-            title={`Macro Sentinel (:4005) | Regime: ${sentinelData.regime} | Score: ${sentinelData.predictiveScore} | Circuit Breaker: ${sentinelData.isCircuitBreakerActive ? 'DISPARADO 🛑' : 'SEGURO 🟢'}`}
-          >
-            <span className={`w-2 h-2 rounded-full ${
-              sentinelData.isCircuitBreakerActive
-                ? 'bg-rose-500 animate-ping'
-                : sentinelData.predictiveScore > 0
-                ? 'bg-emerald-400'
-                : 'bg-amber-400'
-            }`} />
-            <span>
-              SENTINEL: <b className="text-white">{sentinelData.regime}</b> ({sentinelData.predictiveScore > 0 ? `+${sentinelData.predictiveScore}` : sentinelData.predictiveScore}) | CB: <b className={sentinelData.isCircuitBreakerActive ? 'text-rose-400 font-black' : 'text-emerald-400'}>{sentinelData.isCircuitBreakerActive ? 'ATIVO 🛑' : 'INATIVO 🟢'}</b>
-            </span>
-          </div>
-
-          {/* Botão Dashboard dos 10 Blocos (Laya ↔ Motor v3.0) */}
-          <button
-            onClick={() => setIsMasterHealthOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-lg border font-mono text-xs font-semibold transition-all bg-cyan-950/40 border-cyan-500/50 text-cyan-300 hover:bg-cyan-900/60 shadow-sm shadow-cyan-950/20"
-            title="Abrir Dashboard dos 10 Blocos e Atribuição Laya v3.0"
-          >
-            <Activity className="w-3.5 h-3.5 text-cyan-400" />
-            <span>10 BLOCOS & SAÚDE 📊</span>
-          </button>
-
-          {/* Botão Direto Zerar Sessão (Acesso Imediato) */}
-          <button
-            onClick={handleResetData}
-            disabled={resetTimer > 0}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg border font-mono text-xs font-semibold transition-all ${
-              resetTimer > 0
-                ? 'bg-amber-950/60 border-amber-500/60 text-amber-300 cursor-not-allowed'
-                : 'bg-rose-950/40 border-rose-500/50 text-rose-300 hover:bg-rose-900/60 shadow-sm shadow-rose-950/20'
-            }`}
-            title="Zera histórico, ordens e banco do Master aguardando 15s para sincronização total"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 text-rose-400 ${resetTimer > 0 ? 'animate-spin' : ''}`} />
-            <span>
-              {resetTimer > 0 ? (
-                <span>SINCRONIZANDO: <b className="text-white">{resetTimer}s</b></span>
-              ) : (
-                <span>ZERAR SESSÃO</span>
-              )}
-            </span>
-          </button>
-        </div>
-
-        <div className="hidden lg:flex items-center gap-2.5 text-[11px] font-mono text-slate-400 shrink-0 pl-2">
-          <span className="flex items-center gap-1 text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-            <span>BingX V2 AO VIVO</span>
-          </span>
-          <span className="text-slate-500">|</span>
-          <span className="flex items-center gap-1 text-slate-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            <span>PostgreSQL Railway Conectado</span>
-          </span>
-        </div>
-      </div>
-
-      {/* Layout Desktop */}
-      <main className="flex-1 hidden lg:flex overflow-hidden relative p-2 gap-2 bg-[#060913]">
-        <section
-          style={{ width: `${leftColWidthPct}%` }}
-          className="flex flex-col h-full overflow-hidden gap-2"
-        >
-          <div
-            style={{ height: `${chartHeightPct}%` }}
-            className="w-full min-h-[150px] relative overflow-hidden bg-slate-950/80 border border-slate-800 rounded-xl shadow-lg"
-          >
-            <ChartPro
-              symbol={activeSymbol}
-              candles={candles}
-              activeCandle={activeCandle}
-              signals={signals}
-              openPosition={activePosition}
-              trailingStopEnabled={trailingStopEnabled}
-            />
-          </div>
-
-          <div
-            title="Arraste para ajustar a altura"
-            className="h-2 w-full bg-slate-800/40 hover:bg-cyan-500/80 cursor-row-resize flex justify-center items-center group transition-colors select-none z-20 shrink-0 rounded-full"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              const startY = e.clientY;
-              const startHeight = chartHeightPct;
-              const containerHeight = window.innerHeight - 85;
-              const handleMouseMove = (moveEvent: MouseEvent) => {
-                const deltaY = moveEvent.clientY - startY;
-                const deltaPct = (deltaY / containerHeight) * 100;
-                setChartHeightPct(Math.min(82, Math.max(25, startHeight + deltaPct)));
-              };
-              const handleMouseUp = () => {
-                window.removeEventListener('mousemove', handleMouseMove);
-                window.removeEventListener('mouseup', handleMouseUp);
-              };
-              window.addEventListener('mousemove', handleMouseMove);
-              window.addEventListener('mouseup', handleMouseUp);
-            }}
-          >
-            <div className="h-0.5 w-10 bg-slate-600 group-hover:bg-white rounded-full" />
-          </div>
-
-          <div
-            style={{ height: `${100 - chartHeightPct}%` }}
-            className="w-full min-h-[120px] flex overflow-hidden gap-2"
-          >
-            <div
-              style={{ width: `${signalsWidthPct}%` }}
-              className="h-full overflow-hidden bg-slate-950/80 border border-slate-800 rounded-xl shadow-lg"
-            >
-              <SignalsFeed signals={signals} />
-            </div>
-
-            <div
-              title="Arraste para ajustar largura"
-              className="w-2 h-full bg-slate-800/40 hover:bg-cyan-500/80 cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-10 shrink-0 rounded-full"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                const startX = e.clientX;
-                const startWidth = signalsWidthPct;
-                const leftContainerWidth = (window.innerWidth * leftColWidthPct) / 100;
-                const handleMouseMove = (moveEvent: MouseEvent) => {
-                  const deltaX = moveEvent.clientX - startX;
-                  const deltaPct = (deltaX / leftContainerWidth) * 100;
-                  setSignalsWidthPct(Math.min(75, Math.max(25, startWidth + deltaPct)));
-                };
-                const handleMouseUp = () => {
-                  window.removeEventListener('mousemove', handleMouseMove);
-                  window.removeEventListener('mouseup', handleMouseUp);
-                };
-                window.addEventListener('mousemove', handleMouseMove);
-                window.addEventListener('mouseup', handleMouseUp);
-              }}
-            >
-              <div className="w-0.5 h-8 bg-slate-600 group-hover:bg-cyan-300 rounded-full" />
-            </div>
-
-            <div
-              style={{ width: `${100 - signalsWidthPct}%` }}
-              className="h-full overflow-hidden bg-slate-950/80 border border-slate-800 rounded-xl shadow-lg"
-            >
-              <PaperTradingPanel
-                account={paperAccount}
-                activeSymbol={activeSymbol}
-                pairStats={pairStats}
-                dynamicPairs={dynamicPairs}
-              />
-            </div>
-          </div>
-        </section>
-
-        <div
-          title="Arraste para ajustar largura"
-          className="w-2 h-full bg-slate-800/40 hover:bg-cyan-500/80 cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-20 shrink-0 rounded-full"
-          onMouseDown={(e) => {
-            e.preventDefault();
-            const startX = e.clientX;
-            const startWidth = leftColWidthPct;
-            const handleMouseMove = (moveEvent: MouseEvent) => {
-              const deltaX = moveEvent.clientX - startX;
-              const deltaPct = (deltaX / window.innerWidth) * 100;
-              setLeftColWidthPct(Math.min(82, Math.max(35, startWidth + deltaPct)));
-            };
-            const handleMouseUp = () => {
-              window.removeEventListener('mousemove', handleMouseMove);
-              window.removeEventListener('mouseup', handleMouseUp);
-            };
-            window.addEventListener('mousemove', handleMouseMove);
-            window.addEventListener('mouseup', handleMouseUp);
-          }}
-        >
-          <div className="w-0.5 h-10 bg-slate-600 group-hover:bg-cyan-300 rounded-full" />
-        </div>
-
-        <section
-          style={{ width: `${100 - leftColWidthPct}%` }}
-          className="flex h-full overflow-hidden gap-2"
-        >
-          <div
-            style={{ width: `${domWidthPct}%` }}
-            className="h-full overflow-hidden bg-slate-950/80 border border-slate-800 rounded-xl shadow-lg"
-          >
-            <DOMBook book={book} />
-          </div>
-
-          <div
-            title="Arraste para ajustar largura"
-            className="w-2 h-full bg-slate-800/40 hover:bg-cyan-500/80 cursor-col-resize flex flex-col justify-center items-center group transition-colors select-none z-10 shrink-0 rounded-full"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              const startX = e.clientX;
-              const startWidth = domWidthPct;
-              const rightContainerWidth = (window.innerWidth * (100 - leftColWidthPct)) / 100;
-              const handleMouseMove = (moveEvent: MouseEvent) => {
-                const deltaX = moveEvent.clientX - startX;
-                const deltaPct = (deltaX / rightContainerWidth) * 100;
-                setDomWidthPct(Math.min(75, Math.max(25, startWidth + deltaPct)));
-              };
-              const handleMouseUp = () => {
-                window.removeEventListener('mousemove', handleMouseMove);
-                window.removeEventListener('mouseup', handleMouseUp);
-              };
-              window.addEventListener('mousemove', handleMouseMove);
-              window.addEventListener('mouseup', handleMouseUp);
-            }}
-          >
-            <div className="w-0.5 h-8 bg-slate-600 group-hover:bg-cyan-300 rounded-full" />
-          </div>
-
-          <div
-            style={{ width: `${100 - domWidthPct}%` }}
-            className="h-full overflow-hidden bg-slate-950/80 border border-slate-800 rounded-xl shadow-lg"
-          >
-            <TapeReader trades={trades} />
-          </div>
-        </section>
-      </main>
-
-      {/* Layout Mobile */}
-      <div className="flex-1 flex flex-col lg:hidden overflow-hidden">
-        <div className="flex-1 overflow-hidden relative">
-          {activeMobileTab === 'chart' && (
-            <div className="h-full w-full">
-              <ChartPro
-                symbol={activeSymbol}
-                candles={candles}
-                activeCandle={activeCandle}
-                signals={signals}
-                openPosition={activePosition}
-                trailingStopEnabled={trailingStopEnabled}
-              />
-            </div>
-          )}
-
-          {activeMobileTab === 'signals' && (
-            <div className="h-full w-full overflow-hidden p-2">
-              <SignalsFeed signals={signals} />
-            </div>
-          )}
-
-          {activeMobileTab === 'paper' && (
-            <div className="h-full w-full overflow-hidden p-2">
-              <PaperTradingPanel
-                account={paperAccount}
-                activeSymbol={activeSymbol}
-                pairStats={pairStats}
-                dynamicPairs={dynamicPairs}
-              />
-            </div>
-          )}
-
-          {activeMobileTab === 'dom' && (
-            <div className="h-full w-full overflow-hidden p-2">
-              <DOMBook book={book} />
-            </div>
-          )}
-
-          {activeMobileTab === 'tape' && (
-            <div className="h-full w-full overflow-hidden p-2">
-              <TapeReader trades={trades} />
-            </div>
-          )}
-        </div>
-
-        <nav className="h-14 bg-surface/95 border-t border-border/80 flex items-center justify-around px-2 z-30 shrink-0 backdrop-blur-md">
-          <button
-            onClick={() => setActiveMobileTab('chart')}
-            className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${activeMobileTab === 'chart' ? 'text-accent font-bold scale-105' : 'text-slate-400 hover:text-white'
-              }`}
-          >
-            <BarChart2 className="w-4 h-4" />
-            <span className="text-[10px] mt-0.5 font-mono">Gráfico</span>
-          </button>
-
-          <button
-            onClick={() => setActiveMobileTab('signals')}
-            className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${activeMobileTab === 'signals' ? 'text-accent font-bold scale-105' : 'text-slate-400 hover:text-white'
-              }`}
-          >
-            <Zap className="w-4 h-4" />
-            <span className="text-[10px] mt-0.5 font-mono">Sinais</span>
-          </button>
-
-          <button
-            onClick={() => setActiveMobileTab('paper')}
-            className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${activeMobileTab === 'paper' ? 'text-accent font-bold scale-105' : 'text-slate-400 hover:text-white'
-              }`}
-          >
-            <Briefcase className="w-4 h-4" />
-            <span className="text-[10px] mt-0.5 font-mono">Operações</span>
-          </button>
-
-          <button
-            onClick={() => setActiveMobileTab('dom')}
-            className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${activeMobileTab === 'dom' ? 'text-accent font-bold scale-105' : 'text-slate-400 hover:text-white'
-              }`}
-          >
-            <BookOpen className="w-4 h-4" />
-            <span className="text-[10px] mt-0.5 font-mono">DOM</span>
-          </button>
-
-          <button
-            onClick={() => setActiveMobileTab('tape')}
-            className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${activeMobileTab === 'tape' ? 'text-accent font-bold scale-105' : 'text-slate-400 hover:text-white'
-              }`}
-          >
-            <Clock className="w-4 h-4" />
-            <span className="text-[10px] mt-0.5 font-mono">Tape</span>
-          </button>
-        </nav>
-      </div>
 
       <AIAdvisorModal
         isOpen={isAdvisorOpen}
@@ -628,6 +379,6 @@ export default function TradingTerminal() {
         isOpen={isShadowAuditOpen}
         onClose={() => setIsShadowAuditOpen(false)}
       />
-    </div>
+    </>
   );
 }

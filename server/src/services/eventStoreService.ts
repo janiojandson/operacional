@@ -143,7 +143,7 @@ export class EventStoreService {
       deltaStopBps, entryType, entryFillStatus, runMode,
       Boolean(input.waveHarvestReached), input.waveHarvestPrice ?? null, input.whFillType ?? 'NOT_APPLICABLE',
       input.exitPrice ?? entryPrice, exitReason, branch,
-      input.accountBalanceUsd ?? 10000.0, posSize, input.grossPnlUsd ?? (input.rGross * 2.5), input.netPnlUsd ?? (rNet * 2.5),
+      input.accountBalanceUsd ?? null, posSize, input.grossPnlUsd ?? (input.rGross * 2.5), input.netPnlUsd ?? (rNet * 2.5),
       input.rGross, rNet,
       feesEntry, feesExit, spreadCost, slippage, funding,
       input.entryTs, input.exitTs

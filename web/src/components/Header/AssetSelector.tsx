@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   TrendingUp,
   TrendingDown,
@@ -8,9 +8,17 @@ import {
   RefreshCw,
   X,
   Check,
-  Activity
+  Activity,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { TenantSelector } from './TenantSelector';
+import {
+  formatCurrencyPtBr,
+  formatPricePtBr,
+  formatPnlPtBr,
+  formatPtBrNumber
+} from '../../utils/formatters';
 
 export interface AssetSummary {
   symbol: string;
@@ -57,8 +65,16 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const safeBalance = Number(currentBalance || 10000);
   const [customBalanceInput, setCustomBalanceInput] = useState(String(safeBalance));
-
   const [resetCountdown, setResetCountdown] = useState<number>(0);
+
+  const tickersContainerRef = useRef<HTMLDivElement>(null);
+
+  const scrollTickers = (direction: 'left' | 'right') => {
+    if (tickersContainerRef.current) {
+      const offset = direction === 'left' ? -180 : 180;
+      tickersContainerRef.current.scrollBy({ left: offset, behavior: 'smooth' });
+    }
+  };
 
   const handleSaveBalance = (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,38 +106,39 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
   const floatingPnl = Number(openPnl || 0);
 
   return (
-    <header className="flex items-center justify-between px-3 md:px-4 py-2 bg-bg-panel border-b border-border-panel select-none font-sans z-30 relative gap-3">
-      <div className="flex items-center space-x-3 md:space-x-4 min-w-0 flex-1">
+    <header className="flex items-center justify-between px-2.5 sm:px-4 py-1.5 sm:py-2 bg-bg-panel border-b border-border-panel select-none font-sans z-30 relative gap-2 shrink-0">
+      <div className="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
+        {/* Logo */}
         <div className="flex items-center space-x-2 shrink-0">
-          <div className="w-8 h-8 rounded bg-gradient-to-tr from-accent to-purple-600 flex items-center justify-center font-bold text-white shadow-md text-sm">
+          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded bg-gradient-to-tr from-accent to-purple-600 flex items-center justify-center font-bold text-white shadow-md text-xs sm:text-sm">
             MF
           </div>
-          <div className="hidden sm:block">
-            <span className="font-bold text-xs md:text-sm text-text-primary tracking-wide">
+          <div className="hidden md:block">
+            <span className="font-bold text-xs sm:text-sm text-text-primary tracking-wide">
               MARKETFLOW <span className="text-accent">PRO</span>
             </span>
-            <div className="text-[9px] md:text-[10px] text-text-muted font-mono flex items-center space-x-1">
+            <div className="text-[9px] text-text-muted font-mono flex items-center space-x-1">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-trade-green animate-pulse"></span>
               <span>24/7 INSTITUCIONAL</span>
             </div>
           </div>
         </div>
 
-        <div className="hidden lg:block shrink-0">
+        <div className="hidden xl:block shrink-0">
           <TenantSelector />
         </div>
 
-        {/* ─── BANCA VIVA COM PNL AO VIVO ─── */}
+        {/* ─── BANCA VIVA COM PNL AO VIVO (pt-BR) ─── */}
         <div
-          className="flex items-center space-x-2 bg-slate-900/90 px-3 py-1 rounded-lg border border-slate-700/80 text-xs font-mono shrink-0 shadow-sm transition-all"
-          title={`Saldo Caixa: $${cashBalance.toFixed(2)} | PnL Aberto: ${floatingPnl >= 0 ? '+' : ''}$${floatingPnl.toFixed(2)}`}
+          className="flex items-center space-x-2 bg-slate-900/90 px-2.5 sm:px-3 py-1 rounded-lg border border-slate-700/80 text-xs font-mono shrink-0 shadow-sm transition-all"
+          title={`Saldo Caixa: ${formatCurrencyPtBr(cashBalance)} | PnL Aberto: ${formatPnlPtBr(floatingPnl)}`}
         >
           <div className="flex flex-col text-right">
             <span className="text-slate-400 text-[9px] uppercase tracking-wider leading-tight font-semibold">
               Banca Viva (Equity)
             </span>
             <span className="font-bold text-white tracking-tight text-xs sm:text-sm">
-              ${safeBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {formatCurrencyPtBr(safeBalance)}
             </span>
           </div>
 
@@ -130,24 +147,24 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
                 ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 animate-pulse'
                 : 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-pulse'
               }`}>
-              {floatingPnl > 0 ? `+${floatingPnl.toFixed(2)}` : floatingPnl.toFixed(2)}
+              {formatPnlPtBr(floatingPnl)}
             </div>
           )}
         </div>
 
-        {/* ─── MARGEM ALOCADA & DISPONÍVEL (HUD LIVE TIKTOK) ─── */}
+        {/* ─── MARGEM ALOCADA & DISPONÍVEL (pt-BR) ─── */}
         <div
-          className="flex items-center space-x-2 bg-slate-900/95 px-2.5 py-1 rounded-lg border border-amber-500/40 text-xs font-mono shrink-0 shadow-md transition-all"
-          title={`Margem em Operação: $${marginUsed.toFixed(2)} | Livre: $${(availableMargin ?? (safeBalance - marginUsed)).toFixed(2)}`}
+          className="hidden sm:flex items-center space-x-2 bg-slate-900/95 px-2.5 py-1 rounded-lg border border-amber-500/40 text-xs font-mono shrink-0 shadow-md transition-all"
+          title={`Margem em Operação: ${formatCurrencyPtBr(marginUsed)} | Livre: ${formatCurrencyPtBr(availableMargin ?? (safeBalance - marginUsed))}`}
         >
           <div className="flex flex-col text-right">
             <span className="text-amber-400 text-[9px] uppercase tracking-wider leading-tight font-bold">
               Margem Alocada
             </span>
             <span className="font-black text-amber-300 tracking-tight text-xs">
-              ${marginUsed.toFixed(2)}{' '}
+              {formatCurrencyPtBr(marginUsed)}{' '}
               <span className="text-[10px] text-slate-400 font-normal">
-                ({safeBalance > 0 ? ((marginUsed / safeBalance) * 100).toFixed(1) : '0.0'}%)
+                ({safeBalance > 0 ? formatPtBrNumber((marginUsed / safeBalance) * 100, 1) : '0,0'}%)
               </span>
             </span>
           </div>
@@ -157,50 +174,75 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
               Margem Livre
             </span>
             <span className="font-black text-emerald-400 tracking-tight text-xs">
-              ${(availableMargin ?? Math.max(0, safeBalance - marginUsed)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {formatCurrencyPtBr(availableMargin ?? Math.max(0, safeBalance - marginUsed))}
             </span>
           </div>
         </div>
 
-        {/* Lista de Ativos */}
-        <div className="flex items-center space-x-1.5 overflow-x-auto py-0.5 max-w-full no-scrollbar">
-          {assets.map((asset) => {
-            const isActive = asset.symbol === activeSymbol;
-            const isPositive = asset.change24h >= 0;
+        {/* ─── Tickers com Scroll Horizontal Suave e Setas ─── */}
+        <div className="relative flex items-center min-w-0 max-w-full overflow-hidden">
+          <button
+            onClick={() => scrollTickers('left')}
+            className="p-0.5 rounded hover:bg-slate-800 text-slate-400 hover:text-white shrink-0 mr-0.5 z-10 transition-colors hidden sm:block"
+            title="Rolar ativos para a esquerda"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+          </button>
 
-            return (
-              <button
-                key={asset.symbol}
-                onClick={() => onSelect(asset.symbol)}
-                className={`flex items-center space-x-1.5 px-2.5 py-1 rounded border text-[11px] font-mono whitespace-nowrap transition-all duration-150 shrink-0 ${isActive
-                    ? 'bg-accent/20 border-accent text-white shadow-sm'
-                    : 'bg-bg-app border-border-panel hover:bg-surface-hover text-text-muted hover:text-text-primary'
-                  }`}
-              >
-                <span className="font-semibold">{asset.symbol}</span>
-                <span className="text-text-primary font-bold hidden sm:inline">${asset.lastPrice.toLocaleString()}</span>
-                <span className={`flex items-center text-[9px] font-semibold ${isPositive ? 'text-trade-green' : 'text-trade-red'}`}>
-                  {isPositive ? <TrendingUp className="w-2.5 h-2.5 mr-0.5 inline" /> : <TrendingDown className="w-2.5 h-2.5 mr-0.5 inline" />}
-                  {isPositive ? `+${asset.change24h}%` : `${asset.change24h}%`}
-                </span>
-              </button>
-            );
-          })}
+          <div
+            ref={tickersContainerRef}
+            className="flex items-center space-x-1.5 overflow-x-auto py-0.5 max-w-full no-scrollbar scroll-smooth"
+          >
+            {assets.map((asset) => {
+              const isActive = asset.symbol === activeSymbol;
+              const isPositive = asset.change24h >= 0;
+
+              return (
+                <button
+                  key={asset.symbol}
+                  onClick={() => onSelect(asset.symbol)}
+                  className={`flex items-center space-x-1.5 px-2.5 py-1 rounded border text-[11px] font-mono whitespace-nowrap transition-all duration-150 shrink-0 ${isActive
+                      ? 'bg-accent/20 border-accent text-white shadow-sm'
+                      : 'bg-bg-app border-border-panel hover:bg-surface-hover text-text-muted hover:text-text-primary'
+                    }`}
+                >
+                  <span className="font-semibold">{asset.symbol}</span>
+                  <span className="text-text-primary font-bold hidden md:inline">
+                    ${formatPricePtBr(asset.lastPrice, asset.symbol)}
+                  </span>
+                  <span className={`flex items-center text-[9px] font-semibold ${isPositive ? 'text-trade-green' : 'text-trade-red'}`}>
+                    {isPositive ? <TrendingUp className="w-2.5 h-2.5 mr-0.5 inline" /> : <TrendingDown className="w-2.5 h-2.5 mr-0.5 inline" />}
+                    {isPositive ? `+${formatPtBrNumber(asset.change24h, 2)}%` : `${formatPtBrNumber(asset.change24h, 2)}%`}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={() => scrollTickers('right')}
+            className="p-0.5 rounded hover:bg-slate-800 text-slate-400 hover:text-white shrink-0 ml-0.5 z-10 transition-colors hidden sm:block"
+            title="Rolar ativos para a direita"
+          >
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
-      <div className="flex items-center space-x-2 shrink-0">
+      {/* Ações Direitas */}
+      <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
         <button
           onClick={onOpenShadowAudit}
-          className="flex items-center space-x-1.5 px-3 py-1.5 rounded bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-400 border border-cyan-500/40 text-xs font-bold font-mono transition-all whitespace-nowrap shadow-sm shadow-cyan-500/10"
+          className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-400 border border-cyan-500/40 text-[11px] sm:text-xs font-bold font-mono transition-all whitespace-nowrap shadow-sm shadow-cyan-500/10"
         >
           <Activity className="w-3.5 h-3.5 animate-pulse text-cyan-400" />
-          <span>📊 SHADOW MODE</span>
+          <span className="hidden sm:inline">📊 SHADOW MODE</span>
+          <span className="sm:hidden">SHADOW</span>
         </button>
 
         <button
           onClick={onOpenQuantHealth}
-          className="flex items-center space-x-1.5 px-3 py-1.5 rounded bg-trade-green/15 hover:bg-trade-green/25 text-trade-green border border-trade-green/40 text-xs font-bold font-mono transition-all whitespace-nowrap shadow-sm"
+          className="hidden md:flex items-center space-x-1.5 px-2.5 py-1.5 rounded bg-trade-green/15 hover:bg-trade-green/25 text-trade-green border border-trade-green/40 text-xs font-bold font-mono transition-all whitespace-nowrap shadow-sm"
         >
           <span className="w-2 h-2 rounded-full bg-trade-green animate-pulse"></span>
           <span>7 BLOCOS</span>
@@ -208,21 +250,22 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
 
         <button
           onClick={onOpenAdvisor}
-          className="flex items-center space-x-1.5 px-3 py-1.5 rounded bg-gradient-to-r from-accent to-purple-600 hover:from-accent/90 hover:to-purple-500 text-white text-xs font-bold font-mono shadow-md shadow-accent-glow transition-all whitespace-nowrap"
+          className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded bg-gradient-to-r from-accent to-purple-600 hover:from-accent/90 hover:to-purple-500 text-white text-[11px] sm:text-xs font-bold font-mono shadow-md shadow-accent-glow transition-all whitespace-nowrap"
         >
           <Brain className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">CONSULTOR IA</span>
         </button>
 
         {resetCountdown > 0 && (
-          <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-mono shrink-0 animate-pulse">
+          <div className="flex items-center space-x-1 px-2 py-1 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-mono shrink-0 animate-pulse">
             <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />
-            <span>SINCRONIZANDO: {resetCountdown}s</span>
+            <span>SYNC {resetCountdown}s</span>
           </div>
         )}
 
-        <div className="flex items-center space-x-1 px-2.5 py-1.5 rounded bg-bg-app border border-border-panel text-[11px] font-mono shrink-0">
-          <Radio className={`w-3.5 h-3.5 ${isConnected ? 'text-trade-green animate-pulse' : 'text-trade-red'}`} />
+        {/* Conexão com indicador explícito LIVE vs OFFLINE */}
+        <div className="flex items-center space-x-1 px-2 py-1 rounded bg-bg-app border border-border-panel text-[10px] font-mono shrink-0">
+          <Radio className={`w-3 h-3 ${isConnected ? 'text-trade-green animate-pulse' : 'text-trade-red'}`} />
           <span className={`font-bold ${isConnected ? 'text-trade-green' : 'text-trade-red'}`}>
             {isConnected ? 'LIVE' : 'OFFLINE'}
           </span>
@@ -234,9 +277,9 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
             setIsSettingsOpen(!isSettingsOpen);
           }}
           title="Configurações da Sessão"
-          className="p-1.5 rounded bg-bg-app border border-border-panel text-text-muted hover:text-text-primary hover:bg-surface-hover transition-all"
+          className="p-1 sm:p-1.5 rounded bg-bg-app border border-border-panel text-text-muted hover:text-text-primary hover:bg-surface-hover transition-all"
         >
-          <Settings className="w-4 h-4" />
+          <Settings className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </button>
       </div>
 
