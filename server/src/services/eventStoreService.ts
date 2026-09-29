@@ -3,6 +3,7 @@
 // Service Layer para gravação imutável no Event Store (PostgreSQL) - Nexus v3.0
 // ==============================================================================
 
+import crypto from 'crypto';
 import { query } from '../database/db.js';
 
 export interface RecordTradeEventInput {
@@ -27,6 +28,29 @@ export interface RecordTradeEventInput {
   decisionId?: string;
   decisionType?: string;
   governanceMode?: 'OFF' | 'SHADOW' | 'ACTIVE';
+
+  // Campos Canônicos Laya v2 (Frentes 1 a 4)
+  entryPrice?: number;
+  initialStopPrice?: number;
+  initialTargetPrice?: number;
+  deltaStopBps?: number;
+  entryType?: 'MAKER_POST_ONLY' | 'TAKER_IOC';
+  entryFillStatus?: 'FILLED_MAKER' | 'FILLED_TAKER_AGGRESSIVE' | 'MISSED_NO_FILL';
+  runMode?: 'SHADOW' | 'PAPER_MASTER' | 'LIVE_REAL';
+  waveHarvestReached?: boolean;
+  waveHarvestPrice?: number;
+  whFillType?: 'MAKER_LIMIT' | 'TAKER_FALLBACK_1500MS' | 'NOT_APPLICABLE';
+  exitPrice?: number;
+  exitReason?: string;
+  branchClassification?: string;
+  positionSizeUsd?: number;
+  grossPnlUsd?: number;
+  netPnlUsd?: number;
+  feesEntryUsd?: number;
+  feesExitUsd?: number;
+  spreadCostUsd?: number;
+  estimatedSlippageUsd?: number;
+  fundingCostUsd?: number;
 }
 
 export interface RecordDecisionEventInput {
@@ -66,26 +90,70 @@ export class EventStoreService {
     const clusterId = input.clusterId || (input.symbol.startsWith('BTC') ? 'BTC_MAJOR' : 'ALT_L1');
     const governanceMode = input.governanceMode || 'SHADOW';
 
+    const side: 'BUY' | 'SELL' = input.direction === 'SHORT' ? 'SELL' : 'BUY';
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const tradeUuid = uuidRegex.test(input.tradeId) ? input.tradeId : crypto.randomUUID();
+    const entryPrice = input.entryPrice ?? 100.0;
+    const stopPrice = input.initialStopPrice ?? (side === 'BUY' ? entryPrice * 0.99 : entryPrice * 1.01);
+    const targetPrice = input.initialTargetPrice ?? (side === 'BUY' ? entryPrice * 1.02 : entryPrice * 0.98);
+    const deltaStopBps = input.deltaStopBps ?? Math.round((Math.abs(entryPrice - stopPrice) / entryPrice) * 10000);
+    const entryType = input.entryType ?? 'MAKER_POST_ONLY';
+    const entryFillStatus = input.entryFillStatus ?? 'FILLED_MAKER';
+    const runMode = input.runMode ?? (governanceMode === 'ACTIVE' ? 'LIVE_REAL' : 'SHADOW');
+    const exitReason = input.exitReason ?? (input.exitType === 'STOP_FULL' ? 'STOP_LOSS_FULL' : input.exitType === 'STOP_EARLY' ? 'ACTIVE_INVALIDATION' : 'WAVE_HARVEST_BREAKEVEN');
+    const branch = input.branchClassification ?? (exitReason === 'ACTIVE_INVALIDATION' ? 'B2_INVALIDATION' : exitReason === 'STOP_LOSS_FULL' ? 'B1_STOP_FULL' : 'B3_BE_POST_HARVEST');
+    const posSize = input.positionSizeUsd ?? 250.0;
+
     query(`
       INSERT INTO trade_events (
-        trade_id, symbol, cluster_id, direction,
-        entry_ts, exit_ts, session_hour, exit_type,
-        risk_planned_r, r_gross, r_net, fees, funding, slippage,
-        mfe_r, mae_r, rv_ol, beta_exposure,
-        decision_id, decision_type, governance_mode
+        trade_id, pair, side,
+        entry_price, initial_stop_price, initial_target_price,
+        delta_stop_bps, entry_type, entry_fill_status, run_mode,
+        wave_harvest_reached, wave_harvest_price, wh_fill_type,
+        exit_price, exit_reason, branch_classification,
+        position_size_usd, gross_pnl_usd, net_pnl_usd,
+        r_multiple_gross, r_multiple_net,
+        fees_entry_usd, fees_exit_usd, spread_cost_usd, estimated_slippage_usd, funding_cost_usd,
+        opened_at, closed_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+        $1, $2, $3,
+        $4, $5, $6,
+        $7, $8, $9, $10,
+        $11, $12, $13,
+        $14, $15, $16,
+        $17, $18, $19,
+        $20, $21,
+        $22, $23, $24, $25, $26,
+        $27, $28
       )
     `, [
-      input.tradeId, input.symbol, clusterId, input.direction,
-      input.entryTs, input.exitTs, sessionHour, input.exitType,
-      input.riskPlannedR, input.rGross, input.rNet,
-      input.fees ?? 0, input.funding ?? 0, input.slippage ?? 0,
-      input.mfeR ?? 0, input.maeR ?? 0, input.rvOL ?? 1.0, input.betaExposure ?? 0,
-      input.decisionId ?? null, input.decisionType ?? null, governanceMode
-    ]).catch((err) => {
-      console.warn('[EventStore] Erro ao gravar trade_event:', err.message);
+      tradeUuid, input.symbol, side,
+      entryPrice, stopPrice, targetPrice,
+      deltaStopBps, entryType, entryFillStatus, runMode,
+      Boolean(input.waveHarvestReached), input.waveHarvestPrice ?? null, input.whFillType ?? 'NOT_APPLICABLE',
+      input.exitPrice ?? entryPrice, exitReason, branch,
+      posSize, input.grossPnlUsd ?? (input.rGross * 2.5), input.netPnlUsd ?? (input.rNet * 2.5),
+      input.rGross, input.rNet,
+      input.feesEntryUsd ?? (input.fees ? input.fees / 2 : 0.05), input.feesExitUsd ?? (input.fees ? input.fees / 2 : 0.05),
+      input.spreadCostUsd ?? 0.0625, input.estimatedSlippageUsd ?? (input.slippage ?? 0.05), input.fundingCostUsd ?? (input.funding ?? 0),
+      input.entryTs, input.exitTs
+    ]).then(() => {
+      query('SELECT fn_evaluate_session_lockout()').catch(() => {});
+    }).catch((err) => {
+      console.warn('[EventStore] Erro ao gravar trade_event v2:', err.message);
     });
+  }
+
+  /**
+   * Consulta o estado persistente de Lockout Diário (-3.0R)
+   */
+  static async isLockoutActive(): Promise<boolean> {
+    try {
+      const res = await query<{ daily_lockout_active: boolean }>('SELECT daily_lockout_active FROM system_state WHERE id = 1');
+      return Boolean(res[0]?.daily_lockout_active);
+    } catch {
+      return false;
+    }
   }
 
   /**

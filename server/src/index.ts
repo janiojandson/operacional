@@ -341,10 +341,18 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
           io.emit('shadow_audit_outcome', outcome);
         }
 
-        // Persistência imutável no Event Store v3.0 (PostgreSQL)
-        const exitType = tradeEvent.status === 'CLOSED_TP'
-          ? (tradeEvent.closeReason === 'RUNNER_TRAILING_EXIT' ? 'RUNNER' : 'TP_FIXED')
-          : (tradeEvent.closeReason === 'ACTIVE_FLOW_INVALIDATION' ? 'STOP_EARLY' : 'STOP_FULL');
+        // Persistência imutável no Event Store v2.0 (PostgreSQL)
+        const exitReason = tradeEvent.closeReason === 'ACTIVE_FLOW_INVALIDATION'
+          ? 'ACTIVE_INVALIDATION'
+          : (tradeEvent.closeReason === 'CIRCUIT_BREAKER_EMERGENCY' ? 'CIRCUIT_BREAKER_EMERGENCY' : (tradeEvent.status === 'CLOSED_SL' ? 'STOP_LOSS_FULL' : (tradeEvent.closeReason === 'RUNNER_TRAILING_EXIT' ? 'RUNNER_TRAILING' : 'WAVE_HARVEST_BREAKEVEN')));
+        const rGross = Number(tradeEvent.rMultiple ?? 0);
+        const branchClassification = exitReason === 'ACTIVE_INVALIDATION' ? 'B2_INVALIDATION' :
+          exitReason === 'CIRCUIT_BREAKER_EMERGENCY' ? 'B6_MACRO_EMERGENCY' :
+          exitReason === 'STOP_LOSS_FULL' ? 'B1_STOP_FULL' :
+          (rGross >= 2.05 ? 'B5_RUNNER_EXTREME' : (rGross >= 1.30 ? 'B4_TARGET_RUNNER' : 'B3_BE_POST_HARVEST'));
+        const deltaStopBps = tradeEvent.entryPrice && tradeEvent.stopLoss
+          ? Math.round((Math.abs(tradeEvent.entryPrice - tradeEvent.stopLoss) / tradeEvent.entryPrice) * 10000)
+          : 55;
 
         import('./services/eventStoreService.js').then(({ EventStoreService }) => {
           EventStoreService.recordTradeEvent({
@@ -353,14 +361,34 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
             direction: (tradeEvent.type === 'BUY' || (tradeEvent.type as any) === 'LONG') ? 'LONG' : 'SHORT',
             entryTs: new Date(tradeEvent.entryTime || (Date.now() - 60000)),
             exitTs: new Date(tradeEvent.closeTime || Date.now()),
-            exitType,
+            exitType: exitReason === 'STOP_LOSS_FULL' ? 'STOP_FULL' : (exitReason === 'ACTIVE_INVALIDATION' ? 'STOP_EARLY' : 'RUNNER'),
             riskPlannedR: 1.0,
-            rGross: Number(tradeEvent.rMultiple ?? 0),
-            rNet: Number(tradeEvent.rMultiple ?? 0),
-            mfeR: Number((tradeEvent as any).maxFavorableExcursionR ?? (tradeEvent.rMultiple && tradeEvent.rMultiple > 0 ? tradeEvent.rMultiple * 1.1 : 0)),
-            maeR: Number((tradeEvent as any).maxAdverseExcursionR ?? (tradeEvent.rMultiple && tradeEvent.rMultiple < 0 ? Math.abs(tradeEvent.rMultiple) : 0.2)),
+            rGross,
+            rNet: rGross,
+            entryPrice: tradeEvent.entryPrice,
+            initialStopPrice: tradeEvent.stopLoss,
+            initialTargetPrice: tradeEvent.takeProfit,
+            deltaStopBps,
+            entryType: (tradeEvent as any).orderType === 'LIMIT' ? 'MAKER_POST_ONLY' : 'TAKER_IOC',
+            entryFillStatus: (tradeEvent as any).orderType === 'LIMIT' ? 'FILLED_MAKER' : 'FILLED_TAKER_AGGRESSIVE',
+            runMode: 'SHADOW',
+            waveHarvestReached: Boolean((tradeEvent as any).waveHarvestReached),
+            waveHarvestPrice: (tradeEvent as any).waveHarvestPrice,
+            whFillType: Boolean((tradeEvent as any).waveHarvestReached) ? 'MAKER_LIMIT' : 'NOT_APPLICABLE',
+            exitPrice: tradeEvent.closePrice ?? tradeEvent.currentPrice,
+            exitReason,
+            branchClassification,
+            positionSizeUsd: tradeEvent.notionalUsd ?? 250,
+            grossPnlUsd: Number(tradeEvent.pnlUsd ?? 0),
+            netPnlUsd: Number(tradeEvent.pnlUsd ?? 0),
             governanceMode: layaGovernanceService.getMode()
           });
+          setTimeout(() => {
+            EventStoreService.isLockoutActive().then((locked) => {
+              paperTrading.setDailyLockoutActive(locked);
+              if (locked) console.warn('[SystemState] ⛔ Lockout Diário ATIVO (-3.0R UTC). Novas entradas bloqueadas no motor.');
+            }).catch(() => {});
+          }, 1500);
         }).catch(() => {});
       } catch (err: any) {
         console.error('[ShadowAuditor] Erro ao registrar desfecho do trade:', err.message);

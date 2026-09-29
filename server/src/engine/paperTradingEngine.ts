@@ -45,6 +45,15 @@ export class PaperTradingEngine {
   private minTemperature: number = 1.5;
   private trailingStopEnabled: boolean = true;
   private lastExitTimestamp: Map<string, number> = new Map();
+  private dailyLockoutActive: boolean = false;
+
+  public setDailyLockoutActive(active: boolean) {
+    this.dailyLockoutActive = active;
+  }
+
+  public isDailyLockoutActive(): boolean {
+    return this.dailyLockoutActive;
+  }
 
   public setTrailingStopEnabled(enabled: boolean) {
     this.trailingStopEnabled = enabled;
@@ -122,6 +131,11 @@ export class PaperTradingEngine {
 
   // Executa uma entrada automatizada SEM REPAINT quando um sinal de fluxo qualificado ocorre
   public handleSignal(signal: FlowSignal, currentPrice: number, decision?: StrategyDecision, adaptiveRisk?: AdaptiveRiskResult, layaProposal?: LayaGovernanceResponse) {
+    // 0. Bloqueio imediato se Lockout Diário (-3.0R UTC) estiver ativo
+    if (this.dailyLockoutActive) {
+      return;
+    }
+
     // 1. Verificar se o par está habilitado pelo usuário
     if (!this.activePairs.has(signal.symbol)) {
       return;
