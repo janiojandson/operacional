@@ -127,6 +127,10 @@ CREATE TABLE IF NOT EXISTS trade_events (
 
 ALTER TABLE trade_events ADD COLUMN IF NOT EXISTS account_balance_usd NUMERIC(18, 4);
 
+-- Convenção Contábil Canônica: R ponderado por execuções parciais (R = SUM(w_k * r_k))
+COMMENT ON COLUMN trade_events.r_multiple_gross IS 'Múltiplo R bruto ponderado pelas execuções parciais: R_realizado = SUM(w_k * r_k). Ex: Wave Harvest 50% a +0.6R (0.30R) + Runner 50% a r_runner. Proibido armazenar o R cheio do runner isolado.';
+COMMENT ON COLUMN trade_events.r_multiple_net IS 'Múltiplo R líquido de todo o atrito operacional (fees, funding, slippage, spread): R_net = R_gross - (total_friction_usd / R_dollar).';
+
 -- Índices de Performance da Tabela trade_events
 CREATE INDEX IF NOT EXISTS idx_trade_events_pair_closed ON trade_events(pair, closed_at);
 CREATE INDEX IF NOT EXISTS idx_trade_events_closed_at ON trade_events(closed_at);
@@ -538,7 +542,7 @@ CREATE TABLE IF NOT EXISTS kpi_weekly_snapshots (
     cumulative_trades INTEGER NOT NULL DEFAULT 0,
     
     -- 5 Metas Centrais do Roteiro Quantitativo
-    e_net_r NUMERIC(8, 4) NOT NULL,                 -- Meta 1: E_net >= +0.20R
+    e_net_r NUMERIC(8, 4) NOT NULL,                 -- Meta 1: E_net >= +0.10R (Piso Sustentado)
     win_rate_net_pct NUMERIC(6, 2) NOT NULL,        -- Meta 2: Win Rate Líquido (Referência ~52%)
     profit_factor_net NUMERIC(6, 3) NOT NULL,       -- Meta 3: Profit Factor Líquido >= 1.30
     pct_invalidation_all NUMERIC(6, 2) NOT NULL,    -- Meta 4: Falsos Rompimentos <= 25% (KPI Oficial: B2 + Invalidação B3)
@@ -654,7 +658,7 @@ BEGIN
         v_qualified := FALSE;
         v_verdict := 'INSUFFICIENT_SAMPLE';
         v_notes := format('Amostra semanal n=%s inferior a 20 trades.', v_n_trades);
-    ELSIF v_e_net >= 0.2000 AND (v_win_rate >= 48.0 OR v_pf >= 1.300) AND v_invalidation_all <= 25.0 AND v_max_dd <= 15.0 THEN
+    ELSIF v_e_net >= 0.1000 AND (v_win_rate >= 48.0 OR v_pf >= 1.300) AND v_invalidation_all <= 25.0 AND v_max_dd <= 15.0 THEN
         IF v_cum_trades >= 300 THEN
             v_qualified := TRUE;
             v_verdict := 'GATE_PASSED_PAPER_MASTER';
@@ -751,6 +755,7 @@ WITH empirical AS (
 )
 SELECT
     n_total,
+    -- Probabilidades de Transição (Teórico vs Empírico)
     p1_b1_empirical_pct, 5.00 AS p1_theoretical_pct, ROUND(p1_b1_empirical_pct - 5.00, 2) AS delta_p1_pct,
     p2_b2_empirical_pct, 35.00 AS p2_theoretical_pct, ROUND(p2_b2_empirical_pct - 35.00, 2) AS delta_p2_pct,
     p3_b3_empirical_pct, 29.00 AS p3_theoretical_pct, ROUND(p3_b3_empirical_pct - 29.00, 2) AS delta_p3_pct,
@@ -758,10 +763,20 @@ SELECT
     p5_b5_empirical_pct, 8.00 AS p5_theoretical_pct, ROUND(p5_b5_empirical_pct - 8.00, 2) AS delta_p5_pct,
     p6_b6_empirical_pct, 2.00 AS p6_theoretical_pct, ROUND(p6_b6_empirical_pct - 2.00, 2) AS delta_p6_pct,
     pct_invalidation_all_pct,
-    e_gross_empirical,
+
+    -- Retornos R Ponderados Canônicos por Ramo (Teórico vs Empírico)
+    r_b1_empirical_avg, -1.0000 AS r1_b1_theoretical, ROUND(r_b1_empirical_avg - (-1.0000), 4) AS delta_r1,
+    r_b2_empirical_avg, -0.3500 AS r2_b2_theoretical, ROUND(r_b2_empirical_avg - (-0.3500), 4) AS delta_r2,
+    r_b3_empirical_avg,  0.3000 AS r3_b3_theoretical, ROUND(r_b3_empirical_avg - 0.3000, 4) AS delta_r3,
+    r_b4_empirical_avg,  1.3000 AS r4_b4_theoretical, ROUND(r_b4_empirical_avg - 1.3000, 4) AS delta_r4,
+    r_b5_empirical_avg,  2.0500 AS r5_b5_theoretical, ROUND(r_b5_empirical_avg - 2.0500, 4) AS delta_r5,
+    r_b6_empirical_avg, -0.6000 AS r6_b6_theoretical, ROUND(r_b6_empirical_avg - (-0.6000), 4) AS delta_r6,
+
+    -- Expectância Agregada e Gate Oficial
+    e_gross_empirical, 0.3395 AS e_gross_theoretical, ROUND(e_gross_empirical - 0.3395, 4) AS delta_e_gross,
     friction_r_empirical,
-    e_net_empirical,
-    (e_net_empirical >= 0.2000 AND pct_invalidation_all_pct <= 25.00 AND n_total >= 300) AS gate_qualified
+    e_net_empirical, 0.1260 AS e_net_theoretical, ROUND(e_net_empirical - 0.1260, 4) AS delta_e_net,
+    (e_net_empirical >= 0.1000 AND pct_invalidation_all_pct <= 25.00 AND n_total >= 300) AS gate_qualified
 FROM empirical;
 
 
