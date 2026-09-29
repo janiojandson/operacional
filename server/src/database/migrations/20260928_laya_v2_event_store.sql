@@ -316,6 +316,7 @@ $$ LANGUAGE plpgsql;
 -- ==============================================================================
 
 -- 8.1 View 1: vw_expectancy_net (Expectância Líquida E_net por Sessão e Par)
+DROP VIEW IF EXISTS vw_expectancy_net CASCADE;
 CREATE OR REPLACE VIEW vw_expectancy_net AS
 WITH t AS (
     SELECT *,
@@ -347,6 +348,7 @@ SELECT
     ROUND(100.0 * COUNT(*) FILTER (WHERE branch_classification='B4_TARGET_RUNNER')    / COUNT(*),2) AS pct_b4,
     ROUND(100.0 * COUNT(*) FILTER (WHERE branch_classification='B5_RUNNER_EXTREME')   / COUNT(*),2) AS pct_b5,
     ROUND(100.0 * COUNT(*) FILTER (WHERE branch_classification='B6_MACRO_EMERGENCY')  / COUNT(*),2) AS pct_b6,
+    ROUND(100.0 * COUNT(*) FILTER (WHERE exit_reason = 'ACTIVE_INVALIDATION')         / NULLIF(COUNT(*), 0), 2) AS pct_invalidation_all,
     MIN(opened_at) AS window_start,
     MAX(closed_at) AS window_end
 FROM t
@@ -497,26 +499,268 @@ SELECT
     exit_reason,
     branch_classification,
     CASE
-        WHEN exit_reason = 'ACTIVE_INVALIDATION' THEN 'B2_INVALIDATION'
-        WHEN exit_reason = 'CIRCUIT_BREAKER_EMERGENCY' THEN 'B6_MACRO_EMERGENCY'
-        WHEN exit_reason = 'STOP_LOSS_FULL' THEN 'B1_STOP_FULL'
         WHEN wave_harvest_reached AND (r_multiple_gross - 0.30) / 0.5 >= 3.5 THEN 'B5_RUNNER_EXTREME'
         WHEN wave_harvest_reached AND (r_multiple_gross - 0.30) / 0.5 >= 2.0 THEN 'B4_TARGET_RUNNER'
         WHEN wave_harvest_reached THEN 'B3_BE_POST_HARVEST'
+        WHEN exit_reason = 'ACTIVE_INVALIDATION' THEN 'B2_INVALIDATION'
+        WHEN exit_reason = 'CIRCUIT_BREAKER_EMERGENCY' THEN 'B6_MACRO_EMERGENCY'
+        WHEN exit_reason = 'STOP_LOSS_FULL' THEN 'B1_STOP_FULL'
         ELSE 'B1_STOP_FULL'
     END AS branch_expected,
     (branch_classification::text = CASE
-        WHEN exit_reason = 'ACTIVE_INVALIDATION' THEN 'B2_INVALIDATION'
-        WHEN exit_reason = 'CIRCUIT_BREAKER_EMERGENCY' THEN 'B6_MACRO_EMERGENCY'
-        WHEN exit_reason = 'STOP_LOSS_FULL' THEN 'B1_STOP_FULL'
         WHEN wave_harvest_reached AND (r_multiple_gross - 0.30) / 0.5 >= 3.5 THEN 'B5_RUNNER_EXTREME'
         WHEN wave_harvest_reached AND (r_multiple_gross - 0.30) / 0.5 >= 2.0 THEN 'B4_TARGET_RUNNER'
         WHEN wave_harvest_reached THEN 'B3_BE_POST_HARVEST'
+        WHEN exit_reason = 'ACTIVE_INVALIDATION' THEN 'B2_INVALIDATION'
+        WHEN exit_reason = 'CIRCUIT_BREAKER_EMERGENCY' THEN 'B6_MACRO_EMERGENCY'
+        WHEN exit_reason = 'STOP_LOSS_FULL' THEN 'B1_STOP_FULL'
         ELSE 'B1_STOP_FULL'
     END) AS ok,
     closed_at
 FROM trade_events
 WHERE entry_fill_status <> 'MISSED_NO_FILL'
   AND closed_at IS NOT NULL;
+
+-- ==============================================================================
+-- 9. TABELA DE SNAPSHOT SEMANAL DOS KPIS (AUDITORIA DO GATE PARA PAPER_MASTER)
+-- ==============================================================================
+
+CREATE TABLE IF NOT EXISTS kpi_weekly_snapshots (
+    id BIGSERIAL PRIMARY KEY,
+    snapshot_label VARCHAR(50) NOT NULL UNIQUE,     -- ex: '2026-W39', 'SEMANA_01_SHADOW'
+    window_start TIMESTAMPTZ NOT NULL,
+    window_end TIMESTAMPTZ NOT NULL,
+    run_mode run_mode_enum NOT NULL DEFAULT 'SHADOW',
+    pair VARCHAR(20) NOT NULL DEFAULT 'ALL',
+    
+    -- Volume Amostral
+    n_trades INTEGER NOT NULL CHECK (n_trades >= 0),
+    cumulative_trades INTEGER NOT NULL DEFAULT 0,
+    
+    -- 5 Metas Centrais do Roteiro Quantitativo
+    e_net_r NUMERIC(8, 4) NOT NULL,                 -- Meta 1: E_net >= +0.20R
+    win_rate_net_pct NUMERIC(6, 2) NOT NULL,        -- Meta 2: Win Rate Líquido (Referência ~52%)
+    profit_factor_net NUMERIC(6, 3) NOT NULL,       -- Meta 3: Profit Factor Líquido >= 1.30
+    pct_invalidation_all NUMERIC(6, 2) NOT NULL,    -- Meta 4: Falsos Rompimentos <= 25% (KPI Oficial: B2 + Invalidação B3)
+    max_drawdown_pct NUMERIC(6, 2) NOT NULL,        -- Meta 5: Max Drawdown <= 15% (Safe-Halt a 15%)
+    
+    -- Decomposição de Ramos B1-B6
+    pct_b1 NUMERIC(6, 2) NOT NULL DEFAULT 0.00,
+    pct_b2 NUMERIC(6, 2) NOT NULL DEFAULT 0.00,
+    pct_b3 NUMERIC(6, 2) NOT NULL DEFAULT 0.00,
+    pct_b4 NUMERIC(6, 2) NOT NULL DEFAULT 0.00,
+    pct_b5 NUMERIC(6, 2) NOT NULL DEFAULT 0.00,
+    pct_b6 NUMERIC(6, 2) NOT NULL DEFAULT 0.00,
+    
+    -- Microestrutura, Roteamento e Atrito
+    maker_fill_pct NUMERIC(6, 2) DEFAULT 0.00,
+    taker_fallback_pct NUMERIC(6, 2) DEFAULT 0.00,
+    miss_rate_pct NUMERIC(6, 2) DEFAULT 0.00,
+    friction_r_avg NUMERIC(8, 4) NOT NULL,
+    fee_drag_usd_total NUMERIC(14, 4) NOT NULL,
+    
+    -- Avaliação do Gate
+    gate_qualified BOOLEAN NOT NULL DEFAULT FALSE,
+    gate_verdict VARCHAR(30) NOT NULL DEFAULT 'OBSERVATION',
+    recalibration_notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_kpi_snapshots_window ON kpi_weekly_snapshots(window_start DESC, window_end DESC);
+CREATE INDEX IF NOT EXISTS idx_kpi_snapshots_mode ON kpi_weekly_snapshots(run_mode, pair);
+
+-- Função de Geração/Atualização do Snapshot Semanal
+CREATE OR REPLACE FUNCTION fn_generate_weekly_kpi_snapshot(
+    p_snapshot_label VARCHAR(50),
+    p_window_start TIMESTAMPTZ,
+    p_window_end TIMESTAMPTZ,
+    p_run_mode run_mode_enum DEFAULT 'SHADOW',
+    p_pair VARCHAR(20) DEFAULT 'ALL'
+)
+RETURNS kpi_weekly_snapshots AS $$
+DECLARE
+    v_row kpi_weekly_snapshots;
+    v_n_trades INT;
+    v_cum_trades INT;
+    v_e_net NUMERIC(8,4);
+    v_win_rate NUMERIC(6,2);
+    v_pf NUMERIC(6,3);
+    v_invalidation_all NUMERIC(6,2);
+    v_max_dd NUMERIC(6,2);
+    v_b1 NUMERIC(6,2);
+    v_b2 NUMERIC(6,2);
+    v_b3 NUMERIC(6,2);
+    v_b4 NUMERIC(6,2);
+    v_b5 NUMERIC(6,2);
+    v_b6 NUMERIC(6,2);
+    v_maker NUMERIC(6,2);
+    v_taker_fb NUMERIC(6,2);
+    v_miss NUMERIC(6,2);
+    v_friction_avg NUMERIC(8,4);
+    v_fee_drag NUMERIC(14,4);
+    v_qualified BOOLEAN;
+    v_verdict VARCHAR(30);
+    v_notes TEXT;
+BEGIN
+    -- 1. Métricas da Janela
+    SELECT 
+        COUNT(*),
+        COALESCE(ROUND(AVG(r_multiple_net), 4), 0.0000),
+        COALESCE(ROUND(100.0 * AVG((r_multiple_net > 0)::int), 2), 0.00),
+        COALESCE(ROUND(SUM(GREATEST(r_multiple_net,0)) / NULLIF(-SUM(LEAST(r_multiple_net,0)),0), 3), 0.000),
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE exit_reason = 'ACTIVE_INVALIDATION') / NULLIF(COUNT(*), 0), 2), 0.00),
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE branch_classification='B1_STOP_FULL') / NULLIF(COUNT(*), 0), 2), 0.00),
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE branch_classification='B2_INVALIDATION') / NULLIF(COUNT(*), 0), 2), 0.00),
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE branch_classification='B3_BE_POST_HARVEST') / NULLIF(COUNT(*), 0), 2), 0.00),
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE branch_classification='B4_TARGET_RUNNER') / NULLIF(COUNT(*), 0), 2), 0.00),
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE branch_classification='B5_RUNNER_EXTREME') / NULLIF(COUNT(*), 0), 2), 0.00),
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE branch_classification='B6_MACRO_EMERGENCY') / NULLIF(COUNT(*), 0), 2), 0.00),
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE entry_type = 'MAKER_POST_ONLY' AND entry_fill_status = 'FILLED_MAKER') / NULLIF(COUNT(*), 0), 2), 0.00),
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE wh_fill_type = 'TAKER_FALLBACK_1500MS') / NULLIF(COUNT(*), 0), 2), 0.00),
+        COALESCE(ROUND(AVG(r_multiple_gross - r_multiple_net), 4), 0.0000),
+        COALESCE(ROUND(SUM(total_friction_usd), 4), 0.0000)
+    INTO
+        v_n_trades, v_e_net, v_win_rate, v_pf, v_invalidation_all,
+        v_b1, v_b2, v_b3, v_b4, v_b5, v_b6,
+        v_maker, v_taker_fb, v_friction_avg, v_fee_drag
+    FROM trade_events
+    WHERE closed_at >= p_window_start 
+      AND closed_at <= p_window_end
+      AND run_mode = p_run_mode
+      AND (p_pair = 'ALL' OR pair = p_pair)
+      AND entry_fill_status <> 'MISSED_NO_FILL';
+
+    -- 2. Total Acumulado Geral
+    SELECT COUNT(*) INTO v_cum_trades
+    FROM trade_events
+    WHERE closed_at <= p_window_end
+      AND run_mode = p_run_mode
+      AND entry_fill_status <> 'MISSED_NO_FILL';
+
+    -- 3. Taxa de Missed trades
+    SELECT COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE entry_fill_status = 'MISSED_NO_FILL') / NULLIF(COUNT(*), 0), 2), 0.00)
+    INTO v_miss
+    FROM trade_events
+    WHERE opened_at >= p_window_start AND opened_at <= p_window_end;
+
+    -- 4. Drawdown Máximo na Janela
+    SELECT COALESCE(MAX(drawdown_pct), 0.00) INTO v_max_dd
+    FROM vw_drawdown_hwm
+    WHERE ts >= p_window_start AND ts <= p_window_end;
+
+    -- 5. Avaliação do Gate
+    IF v_n_trades < 20 THEN
+        v_qualified := FALSE;
+        v_verdict := 'INSUFFICIENT_SAMPLE';
+        v_notes := format('Amostra semanal n=%s inferior a 20 trades.', v_n_trades);
+    ELSIF v_e_net >= 0.2000 AND (v_win_rate >= 48.0 OR v_pf >= 1.300) AND v_invalidation_all <= 25.0 AND v_max_dd <= 15.0 THEN
+        IF v_cum_trades >= 300 THEN
+            v_qualified := TRUE;
+            v_verdict := 'GATE_PASSED_PAPER_MASTER';
+            v_notes := format('Amostra global N=%s trades atingida. Todas as 5 metas aprovadas.', v_cum_trades);
+        ELSE
+            v_qualified := FALSE;
+            v_verdict := 'METAS_OK_COLETA_EM_CURSO';
+            v_notes := format('Metas aprovadas na janela, acumulado N=%s/300 em progresso.', v_cum_trades);
+        END IF;
+    ELSE
+        v_qualified := FALSE;
+        v_verdict := 'RECALIBRATION_NEEDED';
+        v_notes := format('Metas fora do limiar: E_net=%sR, PF=%s, Invalidações=%s%%, DD=%s%%',
+                          v_e_net, v_pf, v_invalidation_all, v_max_dd);
+    END IF;
+
+    -- 6. Upsert no Snapshot
+    INSERT INTO kpi_weekly_snapshots (
+        snapshot_label, window_start, window_end, run_mode, pair,
+        n_trades, cumulative_trades,
+        e_net_r, win_rate_net_pct, profit_factor_net, pct_invalidation_all, max_drawdown_pct,
+        pct_b1, pct_b2, pct_b3, pct_b4, pct_b5, pct_b6,
+        maker_fill_pct, taker_fallback_pct, miss_rate_pct, friction_r_avg, fee_drag_usd_total,
+        gate_qualified, gate_verdict, recalibration_notes
+    ) VALUES (
+        p_snapshot_label, p_window_start, p_window_end, p_run_mode, p_pair,
+        v_n_trades, v_cum_trades,
+        v_e_net, v_win_rate, v_pf, v_invalidation_all, v_max_dd,
+        v_b1, v_b2, v_b3, v_b4, v_b5, v_b6,
+        v_maker, v_taker_fb, v_miss, v_friction_avg, v_fee_drag,
+        v_qualified, v_verdict, v_notes
+    )
+    ON CONFLICT (snapshot_label) DO UPDATE SET
+        window_start = EXCLUDED.window_start,
+        window_end = EXCLUDED.window_end,
+        run_mode = EXCLUDED.run_mode,
+        pair = EXCLUDED.pair,
+        n_trades = EXCLUDED.n_trades,
+        cumulative_trades = EXCLUDED.cumulative_trades,
+        e_net_r = EXCLUDED.e_net_r,
+        win_rate_net_pct = EXCLUDED.win_rate_net_pct,
+        profit_factor_net = EXCLUDED.profit_factor_net,
+        pct_invalidation_all = EXCLUDED.pct_invalidation_all,
+        max_drawdown_pct = EXCLUDED.max_drawdown_pct,
+        pct_b1 = EXCLUDED.pct_b1,
+        pct_b2 = EXCLUDED.pct_b2,
+        pct_b3 = EXCLUDED.pct_b3,
+        pct_b4 = EXCLUDED.pct_b4,
+        pct_b5 = EXCLUDED.pct_b5,
+        pct_b6 = EXCLUDED.pct_b6,
+        maker_fill_pct = EXCLUDED.maker_fill_pct,
+        taker_fallback_pct = EXCLUDED.taker_fallback_pct,
+        miss_rate_pct = EXCLUDED.miss_rate_pct,
+        friction_r_avg = EXCLUDED.friction_r_avg,
+        fee_drag_usd_total = EXCLUDED.fee_drag_usd_total,
+        gate_qualified = EXCLUDED.gate_qualified,
+        gate_verdict = EXCLUDED.gate_verdict,
+        recalibration_notes = EXCLUDED.recalibration_notes,
+        created_at = NOW()
+    RETURNING * INTO v_row;
+
+    RETURN v_row;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ==============================================================================
+-- 10. VIEW DE TRANSIÇÃO E RECALIBRAÇÃO: p_i TEÓRICO -> EMPÍRICO (N >= 300)
+-- ==============================================================================
+
+DROP VIEW IF EXISTS vw_transition_pi_calibration CASCADE;
+CREATE OR REPLACE VIEW vw_transition_pi_calibration AS
+WITH empirical AS (
+    SELECT
+        COUNT(*) AS n_total,
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE branch_classification='B1_STOP_FULL') / NULLIF(COUNT(*), 0), 2), 0.00) AS p1_b1_empirical_pct,
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE branch_classification='B2_INVALIDATION') / NULLIF(COUNT(*), 0), 2), 0.00) AS p2_b2_empirical_pct,
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE branch_classification='B3_BE_POST_HARVEST') / NULLIF(COUNT(*), 0), 2), 0.00) AS p3_b3_empirical_pct,
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE branch_classification='B4_TARGET_RUNNER') / NULLIF(COUNT(*), 0), 2), 0.00) AS p4_b4_empirical_pct,
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE branch_classification='B5_RUNNER_EXTREME') / NULLIF(COUNT(*), 0), 2), 0.00) AS p5_b5_empirical_pct,
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE branch_classification='B6_MACRO_EMERGENCY') / NULLIF(COUNT(*), 0), 2), 0.00) AS p6_b6_empirical_pct,
+        COALESCE(ROUND(100.0 * COUNT(*) FILTER (WHERE exit_reason = 'ACTIVE_INVALIDATION') / NULLIF(COUNT(*), 0), 2), 0.00) AS pct_invalidation_all_pct,
+        COALESCE(ROUND(AVG(r_multiple_gross) FILTER (WHERE branch_classification='B1_STOP_FULL'), 4), 0.0000) AS r_b1_empirical_avg,
+        COALESCE(ROUND(AVG(r_multiple_gross) FILTER (WHERE branch_classification='B2_INVALIDATION'), 4), 0.0000) AS r_b2_empirical_avg,
+        COALESCE(ROUND(AVG(r_multiple_gross) FILTER (WHERE branch_classification='B3_BE_POST_HARVEST'), 4), 0.0000) AS r_b3_empirical_avg,
+        COALESCE(ROUND(AVG(r_multiple_gross) FILTER (WHERE branch_classification='B4_TARGET_RUNNER'), 4), 0.0000) AS r_b4_empirical_avg,
+        COALESCE(ROUND(AVG(r_multiple_gross) FILTER (WHERE branch_classification='B5_RUNNER_EXTREME'), 4), 0.0000) AS r_b5_empirical_avg,
+        COALESCE(ROUND(AVG(r_multiple_gross) FILTER (WHERE branch_classification='B6_MACRO_EMERGENCY'), 4), 0.0000) AS r_b6_empirical_avg,
+        COALESCE(ROUND(AVG(r_multiple_gross), 4), 0.0000) AS e_gross_empirical,
+        COALESCE(ROUND(AVG(r_multiple_net), 4), 0.0000) AS e_net_empirical,
+        COALESCE(ROUND(AVG(r_multiple_gross - r_multiple_net), 4), 0.0000) AS friction_r_empirical
+    FROM trade_events
+    WHERE entry_fill_status <> 'MISSED_NO_FILL'
+      AND closed_at IS NOT NULL
+)
+SELECT
+    n_total,
+    p1_b1_empirical_pct, 20.00 AS p1_theoretical_pct, ROUND(p1_b1_empirical_pct - 20.00, 2) AS delta_p1_pct,
+    p2_b2_empirical_pct, 20.00 AS p2_theoretical_pct, ROUND(p2_b2_empirical_pct - 20.00, 2) AS delta_p2_pct,
+    p3_b3_empirical_pct, 25.00 AS p3_theoretical_pct, ROUND(p3_b3_empirical_pct - 25.00, 2) AS delta_p3_pct,
+    p4_b4_empirical_pct, 25.00 AS p4_theoretical_pct, ROUND(p4_b4_empirical_pct - 25.00, 2) AS delta_p4_pct,
+    p5_b5_empirical_pct, 8.00 AS p5_theoretical_pct, ROUND(p5_b5_empirical_pct - 8.00, 2) AS delta_p5_pct,
+    p6_b6_empirical_pct, 2.00 AS p6_theoretical_pct, ROUND(p6_b6_empirical_pct - 2.00, 2) AS delta_p6_pct,
+    pct_invalidation_all_pct,
+    e_gross_empirical,
+    friction_r_empirical,
+    e_net_empirical,
+    (e_net_empirical >= 0.2000 AND pct_invalidation_all_pct <= 25.00 AND n_total >= 300) AS gate_qualified
+FROM empirical;
 
 

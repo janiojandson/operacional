@@ -20,6 +20,7 @@ export interface SimulatedTradeWithTrailing extends SimulatedTrade {
   partialPnlUsd?: number;
   originalQty?: number;
   initialSlDistance?: number;
+  balanceAtEntry?: number;
 }
 
 // ─── Validador de Margem e Lote Mínimo (Bybit USDT Perpétuos) ────────────────

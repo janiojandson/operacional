@@ -346,10 +346,12 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
           ? 'ACTIVE_INVALIDATION'
           : (tradeEvent.closeReason === 'CIRCUIT_BREAKER_EMERGENCY' ? 'CIRCUIT_BREAKER_EMERGENCY' : (tradeEvent.status === 'CLOSED_SL' ? 'STOP_LOSS_FULL' : (tradeEvent.closeReason === 'RUNNER_TRAILING_EXIT' ? 'RUNNER_TRAILING' : 'WAVE_HARVEST_BREAKEVEN')));
         const rGross = Number(tradeEvent.rMultiple ?? 0);
-        const branchClassification = exitReason === 'ACTIVE_INVALIDATION' ? 'B2_INVALIDATION' :
-          exitReason === 'CIRCUIT_BREAKER_EMERGENCY' ? 'B6_MACRO_EMERGENCY' :
-          exitReason === 'STOP_LOSS_FULL' ? 'B1_STOP_FULL' :
-          (rGross >= 2.05 ? 'B5_RUNNER_EXTREME' : (rGross >= 1.30 ? 'B4_TARGET_RUNNER' : 'B3_BE_POST_HARVEST'));
+        const isPostHarvest = Boolean((tradeEvent as any).waveHarvestReached || tradeEvent.partialTaken);
+        const branchClassification = isPostHarvest
+          ? (rGross >= 2.05 ? 'B5_RUNNER_EXTREME' : (rGross >= 1.30 ? 'B4_TARGET_RUNNER' : 'B3_BE_POST_HARVEST'))
+          : (exitReason === 'ACTIVE_INVALIDATION' ? 'B2_INVALIDATION' :
+             exitReason === 'CIRCUIT_BREAKER_EMERGENCY' ? 'B6_MACRO_EMERGENCY' :
+             'B1_STOP_FULL');
         const deltaStopBps = tradeEvent.entryPrice && tradeEvent.stopLoss
           ? Math.round((Math.abs(tradeEvent.entryPrice - tradeEvent.stopLoss) / tradeEvent.entryPrice) * 10000)
           : 55;
@@ -378,7 +380,7 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
             exitPrice: tradeEvent.closePrice ?? tradeEvent.currentPrice,
             exitReason,
             branchClassification,
-            accountBalanceUsd: paperTrading.getBalance(),
+            accountBalanceUsd: (tradeEvent as any).masterBalanceAtEntry ?? (tradeEvent as any).balanceAtEntry ?? paperTrading.getBalance(),
             positionSizeUsd: tradeEvent.notionalUsd ?? 250,
             grossPnlUsd: Number(tradeEvent.pnlUsd ?? 0),
             netPnlUsd: Number(tradeEvent.pnlUsd ?? 0),
