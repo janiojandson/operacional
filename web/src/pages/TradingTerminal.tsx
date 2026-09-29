@@ -157,7 +157,7 @@ export default function TradingTerminal() {
 
   const handleUpdateBalance = async (newBalance: number) => {
     try {
-      await fetch('/api/trading/balance', {
+      const res = await fetch('/api/trading/balance', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -165,13 +165,17 @@ export default function TradingTerminal() {
         },
         body: JSON.stringify({ balance: newBalance })
       });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        console.warn(`Erro ao atualizar saldo: ${errorData.error || res.statusText}`);
+      }
     } catch (e) {
       console.error('Failed to update balance:', e);
     }
   };
 
   const handleResetData = async () => {
-    if (!window.confirm('Deseja realmente zerar todo o histórico, ordens e banco do Master com fechamento automático e aguardar 15s para sincronização?')) {
+    if (!window.confirm('Deseja realmente zerar todo o histórico, ordens e banco do Master para $10.000,00 com fechamento automático e aguardar 15s para sincronização?')) {
       return;
     }
 
@@ -193,7 +197,7 @@ export default function TradingTerminal() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('mfp_token') || ''}`
         },
-        body: JSON.stringify({ masterBalance: walletBalance, mirrorBalance: 500 })
+        body: JSON.stringify({ masterBalance: 10000, mirrorBalance: 500 })
       });
 
       if (!res.ok) {

@@ -764,10 +764,53 @@ app.get('/api/trading/mirror/account', requireAuth, (req, res) => {
   res.json(mirrorTrading.getAccountState());
 });
 
+// POST /api/trading/balance — Ajuste manual de saldo Master com persistência no PostgreSQL
+app.post('/api/trading/balance', requireAuth, async (req, res) => {
+  try {
+    const rawBalance = req.body?.balance;
+    const balanceNum = typeof rawBalance === 'number' 
+      ? rawBalance 
+      : parseFloat(String(rawBalance || '').trim().replace(/\./g, '').replace(',', '.'));
+
+    if (isNaN(balanceNum) || balanceNum <= 0) {
+      return res.status(400).json({ success: false, error: 'Saldo inválido. Informe um valor numérico positivo.' });
+    }
+
+    // 1. Atualiza a banca no engine em memória
+    paperTrading.setInitialBalance(balanceNum);
+    const paperState = paperTrading.getAccountState();
+
+    // 2. Persiste imediatamente no PostgreSQL
+    await persistMasterBalance(paperState);
+
+    // 3. Emite broadcast para todas as sessões conectadas em tempo real
+    io.emit('paper_account_update', paperState);
+    io.emit('master_feed_update', { 
+      metrics: paperState, 
+      masterOpenPositions: paperState.openPositions, 
+      masterHistory: paperState.history 
+    });
+
+    console.log(`[TradingBalance] 💰 Saldo Master ajustado e persistido no PostgreSQL: $${balanceNum.toFixed(2)}`);
+
+    return res.json({ 
+      success: true, 
+      balance: paperState.balance, 
+      equity: paperState.equity,
+      message: `Saldo Master atualizado para $${balanceNum.toFixed(2)}.` 
+    });
+  } catch (err: any) {
+    console.error('[TradingBalance] Erro ao atualizar saldo:', err);
+    return res.status(500).json({ success: false, error: 'Falha interna ao persistir saldo.' });
+  }
+});
+
 // POST /api/trading/reset — Reset parametrizado Master + Mirror
 app.post('/api/trading/reset', requireAuth, async (req, res) => {
   try {
-    const { masterBalance = 10000, mirrorBalance = 500 } = req.body || {};
+    const rawMaster = req.body?.masterBalance;
+    const masterBalance = (typeof rawMaster === 'number' && rawMaster > 0) ? rawMaster : 10000;
+    const mirrorBalance = Number(req.body?.mirrorBalance || 500);
 
     // Fechamento automático a mercado de qualquer posição pendente antes do reset
     const masterPositions = paperTrading.getAccountState().openPositions || [];
@@ -959,12 +1002,18 @@ app.post('/api/pairs/:symbol/toggle', requireAuth, (req, res) => {
   res.json({ status: 'ok', symbol, active, dynamicPairs });
 });
 
-app.post('/api/paper-trading/balance', requireAuth, (req, res) => {
-  const { balance } = req.body;
-  if (typeof balance === 'number' && balance > 0) {
-    paperTrading.setInitialBalance(balance);
+app.post('/api/paper-trading/balance', requireAuth, async (req, res) => {
+  const rawBalance = req.body?.balance;
+  const balanceNum = typeof rawBalance === 'number' 
+    ? rawBalance 
+    : parseFloat(String(rawBalance || '').trim().replace(/\./g, '').replace(',', '.'));
+
+  if (!isNaN(balanceNum) && balanceNum > 0) {
+    paperTrading.setInitialBalance(balanceNum);
     const updated = paperTrading.getAccountState();
+    await persistMasterBalance(updated);
     io.emit('paper_account_update', updated);
+    io.emit('master_feed_update', { metrics: updated, masterOpenPositions: updated.openPositions, masterHistory: updated.history });
     return res.json({ success: true, balance: updated.balance });
   }
   res.status(400).json({ error: 'Saldo inválido' });

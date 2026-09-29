@@ -78,7 +78,8 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
 
   const handleSaveBalance = (e: React.FormEvent) => {
     e.preventDefault();
-    const val = parseFloat(customBalanceInput);
+    const cleanStr = String(customBalanceInput).trim().replace(/\./g, '').replace(',', '.');
+    const val = parseFloat(cleanStr);
     if (!isNaN(val) && val > 0) {
       onUpdateBalance(val);
       setIsSettingsOpen(false);
@@ -86,20 +87,18 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
   };
 
   const handleTriggerReset = () => {
-    if (window.confirm('Deseja realmente zerar todas as informações do Master, Shadow Mode e aguardar 15 segundos para sincronização?')) {
-      onResetData();
-      setResetCountdown(15);
-      setIsSettingsOpen(false);
-      const interval = setInterval(() => {
-        setResetCountdown((prev) => {
-          if (prev <= 1) {
-            clearInterval(interval);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
+    onResetData();
+    setResetCountdown(15);
+    setIsSettingsOpen(false);
+    const interval = setInterval(() => {
+      setResetCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
   };
 
   const cashBalance = Number(walletBalance !== undefined ? walletBalance : safeBalance);
