@@ -87,7 +87,7 @@ export class LayaGovernanceService {
   private vetoQuarantineMap: Map<string, { ts: number; reason: string }> = new Map();
 
   constructor(options: LayaServiceOptions = {}) {
-    this.serviceUrl = options.serviceUrl || process.env.LAYA_SERVICE_URL || 'http://nexus-decisor-laya.railway.internal:8080';
+    this.serviceUrl = options.serviceUrl || process.env.LAYA_SERVICE_URL || 'http://nexus-decisor-laya.railway.internal:8000';
     this.timeoutMs = options.timeoutMs ?? (Number(process.env.LAYA_TIMEOUT_MS) || 1500);
     this.mode = options.mode || (process.env.LAYA_MODE as LayaMode) || 'ACTIVE';
     this.fetchFn = options.fetchImpl || fetch;
