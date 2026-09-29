@@ -664,7 +664,11 @@ export class LayaGovernanceService {
           imbalanceRatio: proposal.trace?.imbalanceRatio,
           cvdDelta60s: proposal.trace?.cvdDelta60s,
           spoofScore: proposal.trace?.spoofScore,
-          betaDivergence: proposal.trace?.betaDivergence
+          betaDivergence: proposal.trace?.betaDivergence,
+          signalSource: proposal.signalSource,
+          spreadBps: proposal.trace?.spreadBps,
+          vetoRuleCode: proposal.vetoRuleCode,
+          runMode: this.mode
         });
       }).catch(() => {});
     } catch {}

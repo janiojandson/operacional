@@ -104,6 +104,8 @@ export interface LayaGovernanceResponse {
   governance: LayaGovernanceProposal;
   rationaleCode: LayaRationaleCode;
   trace: LayaTraceData;
+  signalSource?: string;
+  vetoRuleCode?: string;
 }
 
 export interface ConstitutionContext {
