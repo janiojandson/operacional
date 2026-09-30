@@ -487,15 +487,22 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
     return;
   }
   void (async () => {
-    const side = signal.type === 'ABSORPTION_BUY'
-      ? 'SELL'
-      : signal.type === 'ABSORPTION_SELL'
-        ? 'BUY'
-        : signal.message.includes('Vendedores com')
-          ? 'SELL'
-          : signal.message.includes('Compradores com')
-            ? 'BUY'
-            : null;
+    // CORREÇÃO P0: Parse de WHALE_AGGRESSION side (linha ~469-478)
+    let side: 'BUY' | 'SELL' | null = null;
+    
+    if (signal.type === 'ABSORPTION_BUY') {
+      side = 'SELL';
+    } else if (signal.type === 'ABSORPTION_SELL') {
+      side = 'BUY';
+    } else if (signal.type === 'WHALE_AGGRESSION') {
+      // Parse baleia: '🐋 Ordem Baleia Executada: BUY de $1426.4k'
+      if (signal.message?.includes('BUY')) side = 'BUY';
+      else if (signal.message?.includes('SELL')) side = 'SELL';
+    } else if (signal.message.includes('Vendedores com')) {
+      side = 'SELL';
+    } else if (signal.message.includes('Compradores com')) {
+      side = 'BUY';
+    }
     if (!side) {
       console.warn('[IndexFlow][DROP][478_NO_SIDE_DERIVED]', {
         symbol: signal.symbol,
@@ -702,6 +709,10 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       intentSubgroup: 'NEW_OPPORTUNITY',
       side,
       currentPrice: asset.lastPrice,
+      // CORREÇÃO P0.2: Injeção de proposedStopLoss para cálculo correto de delta_stop_bps
+      proposedStopLoss: adaptiveRisk?.stopLoss || (side === 'BUY' 
+        ? asset.lastPrice * (1 - profile.stopLossPct / 100) 
+        : asset.lastPrice * (1 + profile.stopLossPct / 100)),
       requestedAction: 'AUTHORIZE',
       regime: pairConfig?.regime ?? 'TREND',
       trace: {
@@ -1516,6 +1527,9 @@ initDatabase()
       console.log(`🔒 Segurança: JWT + AES-256 + Helmet + Rate Limiting ATIVO`);
       console.log(`🐘 Banco de Dados: PostgreSQL Railway conectado`);
       console.log(`📡 WebSocket Gateway ready on ws://0.0.0.0:${PORT}`);
+      
+      // CORREÇÃO P0: Inicia heartbeat do Macro Sentinel (cura estagnação de 43h)
+      macroSentinelClient.startAutoUpdate();
     });
   })
   .catch((err) => {
