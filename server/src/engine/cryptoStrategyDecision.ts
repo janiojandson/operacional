@@ -43,8 +43,12 @@ export function evaluateCryptoOpportunity(input: CryptoOpportunityInput): Strate
   if (!profile) reasons.push('PAR_SEM_PERFIL');
   if (!Number.isFinite(input.price) || input.price <= 0) reasons.push('PRECO_INVALIDO');
   if (input.source !== 'BINGX' && input.source !== 'BINANCE' && input.source !== 'BYBIT') reasons.push('FONTE_NAO_EXCHANGE');
-  if (!Number.isFinite(input.bookTimestamp) || input.now - input.bookTimestamp > (profile?.maxBookAgeMs ?? 0)) reasons.push('BOOK_DESATUALIZADO');
-  if (!Number.isFinite(input.spreadPct) || input.spreadPct < 0 || input.spreadPct > (profile?.maxSpreadPct ?? 0)) reasons.push('SPREAD_EXCESSIVO');
+  // Sem perfil nao ha limite de idade tolerado: reporta apenas PAR_SEM_PERFIL,
+  // evitando BOOK_DESATUALIZADO espurio (fallback anterior era 0ms).
+  if (profile && (!Number.isFinite(input.bookTimestamp) || input.now - input.bookTimestamp > profile.maxBookAgeMs)) reasons.push('BOOK_DESATUALIZADO');
+  // Sem perfil nao ha limite de spread tolerado: reporta apenas PAR_SEM_PERFIL,
+  // evitando SPREAD_EXCESSIVO espurio (fallback anterior era 0).
+  if (profile && (!Number.isFinite(input.spreadPct) || input.spreadPct > profile.maxSpreadPct)) reasons.push('SPREAD_EXCESSIVO');
   if (input.hasOpenPosition) reasons.push('POSICAO_JA_ABERTA');
   if (input.cooldownActive) reasons.push('COOLDOWN_ATIVO');
   if (!input.orderExecutable) reasons.push('ORDEM_NAO_EXECUTAVEL');

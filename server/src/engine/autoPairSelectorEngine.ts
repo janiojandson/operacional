@@ -1,7 +1,7 @@
 import { AssetSummary, OrderBookData } from '../../../shared/types';
 import { PairPerformance } from './pairPerformanceTracker';
 
-export type RegimeType = 'HIGH_TREND' | 'CHOPPY_RANGING' | 'LOW_LIQUIDITY' | 'EXPANSION_FLOW';
+export type RegimeType = 'HIGH_TREND' | 'CHOPPY_RANGING' | 'LOW_LIQUIDITY' | 'EXPANSION_FLOW' | 'NEUTRAL_RANGING';
 
 export type TemperatureLevel = 
   | 'COLD_DEFENSE'       // 0.0x / 0.5x (Defesa)
@@ -57,6 +57,11 @@ export class AutoPairSelectorEngine {
         regime = 'LOW_LIQUIDITY';
       } else if (Math.abs(asset.change24h) > 3.0) {
         regime = 'HIGH_TREND';
+      } else if (spreadScore === 'TIGHT' && liquidityScore === 'DEEP') {
+        // Book favoravel (spread apertado + book fundo) com variacao 24h moderada:
+        // mercado lateral operable. Antes caia em CHOPPY_RANGING e bloqueava toda
+        // entrada, congelando o motor em consolidacao saudavel.
+        regime = 'NEUTRAL_RANGING';
       } else {
         regime = 'CHOPPY_RANGING';
       }

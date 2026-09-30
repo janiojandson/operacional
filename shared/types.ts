@@ -180,4 +180,5 @@ export type MarketRegime =
   | 'HIGH_TREND'
   | 'CHOPPY_RANGING'
   | 'LOW_LIQUIDITY'
-  | 'EXPANSION_FLOW';
+  | 'EXPANSION_FLOW'
+  | 'NEUTRAL_RANGING';
