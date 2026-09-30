@@ -464,7 +464,13 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
     return;
   }
   const asset = marketManager.getSymbolState(signal.symbol);
-  if (!asset) return;
+  if (!asset) {
+    console.warn('[IndexFlow][DROP][467_SYMBOL_STATE_NOT_FOUND]', {
+      symbol: signal.symbol,
+      type: signal.type
+    });
+    return;
+  }
   void (async () => {
     const side = signal.type === 'ABSORPTION_BUY'
       ? 'SELL'
@@ -475,7 +481,14 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
           : signal.message.includes('Compradores com')
             ? 'BUY'
             : null;
-    if (!side) return;
+    if (!side) {
+      console.warn('[IndexFlow][DROP][478_NO_SIDE_DERIVED]', {
+        symbol: signal.symbol,
+        type: signal.type,
+        message: signal.message
+      });
+      return;
+    }
 
     const pairConfig = AutoPairSelectorEngine.getPairConfig(signal.symbol);
     const book = asset.book;
@@ -548,7 +561,15 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
 
     const profile = getCryptoStrategyProfile(signal.symbol);
     const account = paperTrading.getAccountState();
-    if (!profile || (book?.source !== 'BINGX' && book?.source !== 'BINANCE' && book?.source !== 'BYBIT')) return;
+    if (!profile || (book?.source !== 'BINGX' && book?.source !== 'BINANCE' && book?.source !== 'BYBIT')) {
+      console.warn('[IndexFlow][DROP][551_BOOK_OR_PROFILE_INVALID]', {
+        symbol: signal.symbol,
+        hasProfile: !!profile,
+        bookSource: book?.source,
+        type: signal.type
+      });
+      return;
+    }
     const powerMultiplier = Math.max(paperTrading.getMinTemperature(), pairConfig?.powerMultiplier || 1.5);
     const requestedNotionalUsd = Math.max(100, account.balance * 0.20) * (powerMultiplier / 1.5);
     const existingAggregateRiskUsd = account.openPositions.reduce((sum, position) => {
@@ -599,6 +620,12 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
     // 🛡️ Trava Anti-Perturbação: Se já existe posição aberta neste par, não perturba a Laya pedindo nova entrada
     const hasOpenPosition = paperTrading.getAccountState().openPositions.some(p => p.symbol === signal.symbol);
     if (hasOpenPosition) {
+      console.warn('[IndexFlow][DROP][601_POSITION_ALREADY_OPEN]', {
+        symbol: signal.symbol,
+        type: signal.type,
+        side,
+        openPositionSymbols: paperTrading.getAccountState().openPositions.map(p => p.symbol)
+      });
       return;
     }
 
@@ -647,6 +674,17 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
     }
 
     // Registra oportunidade e executa com os parâmetros (mecânicos ou modulados pela Laya)
+    console.log('[IndexFlow][DISPATCHING_TO_ENGINE]', {
+      symbol: signal.symbol,
+      type: signal.type,
+      side,
+      decisionApproved: decision?.approved,
+      decisionEntrySide: decision?.entrySide,
+      adaptiveRiskApproved: adaptiveRisk?.approved,
+      layaAction: layaDecision?.action,
+      price: asset.lastPrice,
+      bookSource: book?.source
+    });
     publishOpportunity();
     paperTrading.handleSignal(signal, asset.lastPrice, decision, adaptiveRisk, layaDecision);
   })();
