@@ -219,8 +219,19 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
   const safeUpsert = async (trade: any) => {
     try {
       await upsertMasterOrder(trade);
+      console.log('[PaperEngine][PERSIST_OK]', {
+        symbol: trade?.symbol,
+        status: trade?.status,
+        tradeId: trade?.id
+      });
     } catch (err) {
       console.error('[PaperTradingEngine] Falha não-fatal ao persistir ordem no PostgreSQL:', err);
+      console.error('[PaperEngine][PERSISTENCE_ERROR]', {
+        symbol: trade?.symbol,
+        status: trade?.status,
+        tradeId: trade?.id,
+        errorStack: (err as any)?.stack ?? String(err)
+      });
     }
   };
 
@@ -391,9 +402,13 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
             EventStoreService.isLockoutActive().then((locked) => {
               paperTrading.setDailyLockoutActive(locked);
               if (locked) console.warn('[SystemState] ⛔ Lockout Diário ATIVO (-3.0R UTC). Novas entradas bloqueadas no motor.');
-            }).catch(() => {});
+            }).catch((err: any) => {
+              console.error('[EventStore][PERSISTENCE_ERROR] isLockoutActive falhou:', err?.message ?? String(err));
+            });
           }, 1500);
-        }).catch(() => {});
+        }).catch((err: any) => {
+          console.error('[EventStore][IMPORT_ERROR] Falha ao carregar eventStoreService:', err?.stack ?? String(err));
+        });
       } catch (err: any) {
         console.error('[ShadowAuditor] Erro ao registrar desfecho do trade:', err.message);
       }
@@ -555,6 +570,16 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
     };
 
     if (!decision.approved) {
+      console.warn('[IndexFlow][DROP][557_DECISION_NOT_APPROVED]', {
+        symbol: signal.symbol,
+        type: signal.type,
+        side,
+        reasons: decision?.reasons,
+        score: (decision as any)?.score,
+        cooldownActive,
+        bookTimestamp: book?.timestamp ?? 0,
+        bookAgeMs: book?.timestamp ? Date.now() - book.timestamp : null
+      });
       io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
       return;
     }
@@ -594,12 +619,33 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       roundTripFeePct: 0.0011
     });
     if (!adaptiveRisk.approved) {
+      console.warn('[IndexFlow][DROP][596_ADAPTIVE_RISK_REJECTED]', {
+        symbol: signal.symbol,
+        type: signal.type,
+        side,
+        reasons: adaptiveRisk.reasons,
+        stopDistancePct: adaptiveRisk.stopDistancePct,
+        notionalUsd: adaptiveRisk.notionalUsd,
+        riskUsd: adaptiveRisk.riskUsd,
+        spreadPct: book.spread / asset.lastPrice,
+        requestedNotionalUsd,
+        existingAggregateRiskUsd,
+        maxAggregateRiskUsd: account.balance * profile.maxAggregateRiskPct
+      });
       decision.approved = false;
       decision.reasons.push(...adaptiveRisk.reasons);
       io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
       return;
     }
     if ((adaptiveRisk.notionalUsd || 0) / asset.lastPrice < getMinLot(signal.symbol)) {
+      console.warn('[IndexFlow][DROP][602_MIN_LOT_EXCEEDS_RISK]', {
+        symbol: signal.symbol,
+        type: signal.type,
+        notionalUsd: adaptiveRisk.notionalUsd,
+        price: asset.lastPrice,
+        computedQty: (adaptiveRisk.notionalUsd || 0) / asset.lastPrice,
+        minLot: getMinLot(signal.symbol)
+      });
       decision.approved = false;
       decision.reasons.push('LOTE_MINIMO_EXCEDE_RISCO');
       io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
@@ -610,6 +656,13 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       const audit = await runShadowAudit(null, signal.symbol, side, 1.0, paperTrading.getAccountState().openPositions, asset.book);
       const auditDecision = String(audit?.newMode || '').toUpperCase();
       if (auditDecision.indexOf('BLOQUEADO') !== -1) {
+        console.warn('[IndexFlow][DROP][612_SHADOW_FILTER_BLOCKED]', {
+          symbol: signal.symbol,
+          type: signal.type,
+          side,
+          auditDecision,
+          masterShadowFilterActive
+        });
         decision.approved = false;
         decision.reasons.push('BLOQUEADO_SHADOW_FILTER');
         publishOpportunity();

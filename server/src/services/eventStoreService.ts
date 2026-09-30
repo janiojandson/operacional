@@ -154,10 +154,23 @@ export class EventStoreService {
       feesEntry, feesExit, spreadCost, slippage, funding,
       venue, input.entryTs, input.exitTs
     ]).then(async () => {
-      await query('SELECT fn_evaluate_session_lockout()').catch(() => {});
-      await query('SELECT fn_evaluate_safe_halt()').catch(() => {});
+      console.log('[EventStore][TRADE_EVENT_PERSISTED]', {
+        tradeId: tradeUuid, pair: input.symbol, side, exitReason, netPnlUsd: input.netPnlUsd
+      });
+      await query('SELECT fn_evaluate_session_lockout()').catch((err: any) => {
+        console.error('[EventStore][LOCKOUT_EVAL_ERROR]', err?.stack ?? String(err));
+      });
+      await query('SELECT fn_evaluate_safe_halt()').catch((err: any) => {
+        console.error('[EventStore][SAFE_HALT_EVAL_ERROR]', err?.stack ?? String(err));
+      });
     }).catch((err) => {
-      console.warn('[EventStore] Erro ao gravar trade_event v2:', err.message);
+      console.error('[EventStore][PERSISTENCE_ERROR] Erro ao gravar trade_event v2:', {
+        tradeId: tradeUuid,
+        pair: input.symbol,
+        errorMessage: err?.message,
+        errorCode: err?.code,
+        errorStack: err?.stack
+      });
     });
   }
 

@@ -342,6 +342,23 @@ export class PaperTradingEngine {
     newTrade.fee = execution.fee;
     newTrade.netPnl = Number((-execution.fee).toFixed(4));
 
+    console.log('[PaperEngine][POSITION_OPENED_SUCCESS]', {
+      symbol: signal.symbol,
+      side: tradeType,
+      price: currentPrice,
+      qty,
+      notionalUsd: openNotional,
+      stopLoss,
+      takeProfit,
+      stopDistancePct: currentPrice > 0 ? Math.abs(currentPrice - stopLoss) / currentPrice : 0,
+      takeProfitDistancePct: currentPrice > 0 ? Math.abs(takeProfit - currentPrice) / currentPrice : 0,
+      executionMode,
+      marginRequired: execution.marginRequired,
+      fee: execution.fee,
+      layaAction: layaProposal?.action,
+      layaPowerMultiplier: layaProposal?.powerMultiplier
+    });
+
     this.openPositions.set(signal.symbol, newTrade);
     this.broadcastUpdate(newTrade);
   }
