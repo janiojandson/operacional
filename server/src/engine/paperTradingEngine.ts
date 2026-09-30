@@ -132,33 +132,87 @@ export class PaperTradingEngine {
 
   // Executa uma entrada automatizada SEM REPAINT quando um sinal de fluxo qualificado ocorre
   public handleSignal(signal: FlowSignal, currentPrice: number, decision?: StrategyDecision, adaptiveRisk?: AdaptiveRiskResult, layaProposal?: LayaGovernanceResponse) {
+    console.log('[PaperEngine][SignalReceived]', {
+      symbol: signal.symbol,
+      signalType: signal.type,
+      price: currentPrice,
+      approved: decision?.approved,
+      entrySide: decision?.entrySide,
+      decisionStop: decision?.stopLoss,
+      adaptiveStop: adaptiveRisk?.stopLoss,
+      layaAction: layaProposal?.action
+    });
     // 0. Bloqueio imediato se Lockout Diário (-3.0R UTC) estiver ativo
     if (this.dailyLockoutActive) {
+      console.warn('[PaperEngine][DROP][136_LOCKOUT]', {
+        symbol: signal.symbol,
+        signalType: signal.type,
+        realizedPnl: this.realizedPnl,
+        balance: this.balance
+      });
       return;
     }
 
     // 1. Verificar se o par está habilitado pelo usuário
     if (!this.activePairs.has(signal.symbol)) {
+      console.warn('[PaperEngine][DROP][141_INACTIVE_PAIR]', {
+        symbol: signal.symbol,
+        signalType: signal.type,
+        activePairs: Array.from(this.activePairs)
+      });
       return;
     }
 
     // 2. Verificar se o par está ativo para trading de acordo com o Consultor IA
     const pairConfig = AutoPairSelectorEngine.getPairConfig(signal.symbol);
     if (pairConfig && !pairConfig.isActiveForTrading) {
+      console.warn('[PaperEngine][DROP][147_CONFIG_DISABLED]', {
+        symbol: signal.symbol,
+        signalType: signal.type,
+        powerMultiplier: pairConfig.powerMultiplier,
+        temperature: pairConfig.temperature,
+        actionReason: pairConfig.actionReason
+      });
       return;
     }
 
     // 3. Se já tem posição aberta nesse ativo, não faz overtrading
     if (this.openPositions.has(signal.symbol)) {
+      console.warn('[PaperEngine][DROP][152_ALREADY_OPEN]', {
+        symbol: signal.symbol,
+        signalType: signal.type,
+        openPositionSymbols: Array.from(this.openPositions.keys())
+      });
       return;
     }
 
     let tradeType: 'BUY' | 'SELL' | null = null;
 
     if (!decision?.approved || !decision.stopLoss || !decision.takeProfit || !decision.trailingTrigger) {
+      console.warn('[PaperEngine][DROP][158_NO_DECISION_STOP]', {
+        symbol: signal.symbol,
+        signalType: signal.type,
+        approved: decision?.approved,
+        decisionStop: decision?.stopLoss,
+        decisionTakeProfit: decision?.takeProfit,
+        decisionTrailingTrigger: decision?.trailingTrigger,
+        decisionEntrySide: decision?.entrySide,
+        decisionReasons: decision?.reasons
+      });
       return;
     }
     if (adaptiveRisk && (!adaptiveRisk.approved || !adaptiveRisk.stopLoss || !adaptiveRisk.takeProfit || !adaptiveRisk.notionalUsd || !adaptiveRisk.riskUsd)) {
+      console.warn('[PaperEngine][DROP][161_NO_ADAPTIVE_STOP]', {
+        symbol: signal.symbol,
+        signalType: signal.type,
+        adaptiveApproved: adaptiveRisk.approved,
+        adaptiveStop: adaptiveRisk.stopLoss,
+        adaptiveTakeProfit: adaptiveRisk.takeProfit,
+        adaptiveNotionalUsd: adaptiveRisk.notionalUsd,
+        adaptiveRiskUsd: adaptiveRisk.riskUsd,
+        adaptiveStopDistancePct: adaptiveRisk.stopDistancePct,
+        adaptiveReasons: adaptiveRisk.reasons
+      });
       return;
     }
 
@@ -171,7 +225,19 @@ export class PaperTradingEngine {
       else if (signal.message.includes('Vendedores com')) tradeType = 'SELL';
     }
 
-    if (!tradeType || decision.entrySide !== tradeType) return;
+    if (!tradeType || decision.entrySide !== tradeType) {
+      console.warn('[PaperEngine][DROP][174_SIDE_MISMATCH]', {
+        symbol: signal.symbol,
+        signalType: signal.type,
+        tradeType,
+        decisionEntrySide: decision?.entrySide,
+        currentPrice,
+        signalPrice: signal.price,
+        layaAction: layaProposal?.action,
+        layaRationaleCode: layaProposal?.rationaleCode
+      });
+      return;
+    }
 
     // 🛡️ Roteamento Dual: APPROVE_PASSIVE (Maker Post-Only) vs APPROVE_AGGRESSIVE (Taker IOC)
     const executionMode = layaProposal?.governance?.executionMode || 'TAKER_IOC';
@@ -220,7 +286,19 @@ export class PaperTradingEngine {
     const openNotional = adaptiveRisk?.notionalUsd ?? requestedNotional;
     const qty = Number((openNotional / currentPrice).toFixed(8));
     const execution = validateOrderExecution(signal.symbol, currentPrice, qty, masterBalanceAtEntry, 10, false);
-    if (!execution.valid) return;
+    if (!execution.valid) {
+      console.warn('[PaperEngine][DROP][223_EXECUTION_INVALID]', {
+        symbol: signal.symbol,
+        signalType: signal.type,
+        reason: execution.reason,
+        price: currentPrice,
+        qty,
+        balance: masterBalanceAtEntry,
+        notional: openNotional,
+        marginRequired: execution.marginRequired
+      });
+      return;
+    }
     const newTrade: SimulatedTradeWithTrailing = {
       id: `sim-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       symbol: signal.symbol,
