@@ -23,7 +23,7 @@ import { ClientAccountConfig } from '../../shared/clientTypes.js';
 import { GoogleSheetsService } from './services/googleSheetsService.js';
 import { runShadowAudit, recordShadowOutcome, clearShadowAudits, getShadowOpportunities, recordShadowOpportunity, hydrateShadowOpportunities, registerPendingAuditsFromPositions } from './engine/shadowAuditor.js';
 import { RISK_CONFIG } from './config/riskConfig.js';
-import { evaluateCryptoOpportunity } from './engine/cryptoStrategyDecision.js';
+import { calculateProfileStopLoss, evaluateCryptoOpportunity } from './engine/cryptoStrategyDecision.js';
 import { calculateAdaptiveRisk } from './engine/adaptiveRisk.js';
 import { getCryptoStrategyProfile } from './engine/cryptoStrategyProfile.js';
 import { layaGovernanceService } from './services/layaGovernanceService.js';
@@ -706,9 +706,8 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       side,
       currentPrice: asset.lastPrice,
       // CORREÇÃO P0.2: Injeção de proposedStopLoss para cálculo correto de delta_stop_bps
-      proposedStopLoss: adaptiveRisk?.stopLoss || (side === 'BUY' 
-        ? asset.lastPrice * (1 - profile.stopLossPct / 100) 
-        : asset.lastPrice * (1 + profile.stopLossPct / 100)),
+      proposedStopLoss: adaptiveRisk?.stopLoss
+        || calculateProfileStopLoss(asset.lastPrice, side, profile.stopLossPct),
       requestedAction: 'AUTHORIZE',
       regime: pairConfig?.regime ?? 'TREND',
       signalSource: signal.type,

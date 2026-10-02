@@ -35,6 +35,18 @@ function roundPrice(value: number): number {
   return Number(value.toFixed(8));
 }
 
+export function calculateProfileStopLoss(
+  price: number,
+  side: StrategyEntrySide,
+  stopLossFraction: number
+): number {
+  if (!Number.isFinite(price) || price <= 0) throw new Error('PRECO_INVALIDO');
+  if (!Number.isFinite(stopLossFraction) || stopLossFraction <= 0 || stopLossFraction >= 1) {
+    throw new Error('STOP_LOSS_FRACTION_INVALIDA');
+  }
+  return roundPrice(price * (side === 'BUY' ? 1 - stopLossFraction : 1 + stopLossFraction));
+}
+
 export function evaluateCryptoOpportunity(input: CryptoOpportunityInput): StrategyDecision {
   const profile = getCryptoStrategyProfile(input.symbol);
   const reasons: string[] = [];
@@ -67,7 +79,7 @@ export function evaluateCryptoOpportunity(input: CryptoOpportunityInput): Strate
   }
 
   const isBuy = input.signalSide === 'BUY';
-  const stopLoss = roundPrice(input.price * (isBuy ? 1 - profile.stopLossPct : 1 + profile.stopLossPct));
+  const stopLoss = calculateProfileStopLoss(input.price, input.signalSide, profile.stopLossPct);
   const takeProfit = roundPrice(input.price * (isBuy ? 1 + profile.takeProfitPct : 1 - profile.takeProfitPct));
   const trailingTrigger = roundPrice(input.price * (isBuy ? 1 + profile.takeProfitPct * 0.8 : 1 - profile.takeProfitPct * 0.8));
 

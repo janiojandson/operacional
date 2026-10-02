@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
-import { evaluateCryptoOpportunity } from './cryptoStrategyDecision.js';
+import { calculateProfileStopLoss, evaluateCryptoOpportunity } from './cryptoStrategyDecision.js';
 
 const now = 1_700_000_000_000;
+
+// stopLossPct dos perfis é fração: 0.008 = 0,8%, não 0,008%.
+assert.equal(calculateProfileStopLoss(100_000, 'BUY', 0.008), 99_200);
+assert.equal(calculateProfileStopLoss(100_000, 'SELL', 0.008), 100_800);
 
 const validInput = {
   symbol: 'BTC/USDT',
