@@ -3,8 +3,8 @@ import { requireAdmin } from '../auth/authMiddleware.js';
 import { UserDB, ClientConfigDB, TradeHistoryDB, AnnouncementDB, query, queryOne, UserRow, ClientConfigRow } from '../database/db.js';
 import { BybitExecutionEngine } from '../engine/bybitExecutionEngine.js';
 import { sanitizeCsvField, escapeHtml } from '../utils/sanitizer.js';
-import { layaGovernanceService } from '../services/layaGovernanceService.js';
-import type { LayaMode } from '../../../shared/layaGovernanceTypes.js';
+import { marketGovernanceService } from '../services/marketGovernanceService.js';
+import type { MarketGovernanceMode } from '../../../shared/layaGovernanceTypes.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
@@ -529,8 +529,8 @@ adminRouter.delete('/clients/:id', async (req: Request, res: Response) => {
 
 // GET /api/admin/laya/status — Métricas e decisões recentes da governança Laya
 adminRouter.get('/laya/status', (_req: Request, res: Response) => {
-  const mode = layaGovernanceService.getMode();
-  const metrics = layaGovernanceService.getMetrics();
+  const mode = marketGovernanceService.getMode();
+  const metrics = marketGovernanceService.getMetrics();
   res.json({
     mode,
     metrics: {
@@ -548,13 +548,13 @@ adminRouter.get('/laya/status', (_req: Request, res: Response) => {
 // POST /api/admin/laya/mode — Alternar modo operacional (OFF, SHADOW, ACTIVE)
 adminRouter.post('/laya/mode', (req: Request, res: Response) => {
   const { mode } = req.body || {};
-  const validModes: LayaMode[] = ['OFF', 'SHADOW', 'ACTIVE'];
+  const validModes: MarketGovernanceMode[] = ['OFF', 'SHADOW', 'ACTIVE'];
   if (!mode || !validModes.includes(mode)) {
     return res.status(400).json({ error: 'Modo inválido. Valores permitidos: OFF, SHADOW, ACTIVE' });
   }
-  layaGovernanceService.setMode(mode);
-  console.log(`[LAYA ADMIN] Modo operacional alterado para: ${mode}`);
-  res.json({ success: true, mode: layaGovernanceService.getMode() });
+  marketGovernanceService.setMode(mode);
+  console.log(`[MARKET GOVERNANCE] Modo operacional alterado para: ${mode}`);
+  res.json({ success: true, mode: marketGovernanceService.getMode() });
 });
 
 // POST /api/admin/laya/reset-decisions
@@ -568,7 +568,7 @@ adminRouter.post('/laya/reset-decisions', async (_req: Request, res: Response) =
     const cleared = await EventStoreService.clearNoiseDecisions();
 
     // 2. Zera buffers em memória (recentDecisions, latencyBuffer, debounce map)
-    layaGovernanceService.resetSession();
+    marketGovernanceService.resetSession();
 
     console.log(`[Admin] Reset Laya: ${cleared} decisões de ruído removidas do banco.`);
 
@@ -585,13 +585,12 @@ adminRouter.post('/laya/reset-decisions', async (_req: Request, res: Response) =
 // GET /api/admin/laya/test-ports
 // Testa somente a Laya original (upstream) usada em shadow/advisory.
 adminRouter.get('/laya/test-ports', async (_req: Request, res: Response) => {
-  const internalUrl = process.env.MARKET_LAYA_NATIVE_URL
-    || 'http://nexus-decisor-laya.railway.internal:8000';
-  const publicHost = process.env.RAILWAY_SERVICE_NEXUS_DECISOR_LAYA_URL
-    || 'nexus-decisor-laya-production.up.railway.app';
+  const configuredUrl = process.env.MARKET_LAYA_NATIVE_URL;
+  if (!configuredUrl) {
+    return res.status(503).json({ error: 'MARKET_LAYA_NATIVE_URL não configurada' });
+  }
   const tests = [
-    { name: 'Laya Original Interna', url: internalUrl },
-    { name: 'Laya Original Pública', url: `https://${publicHost}` }
+    { name: 'Laya Original Configurada', url: configuredUrl }
   ];
 
   const results: any[] = [];

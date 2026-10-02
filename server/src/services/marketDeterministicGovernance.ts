@@ -1,4 +1,4 @@
-import type { LayaGovernanceRequest } from '../../../shared/layaGovernanceTypes.js';
+import type { MarketGovernanceRequest } from '../../../shared/layaGovernanceTypes.js';
 
 export const MARKET_MAX_SAFE_SPREAD_BPS = 5.0;
 export const MARKET_MIN_DELTA_STOP_BPS = 55.0;
@@ -24,7 +24,7 @@ function decision(
 }
 
 export function evaluateMarketDeterministicGovernance(
-  payload: LayaGovernanceRequest
+  payload: MarketGovernanceRequest
 ): MarketDeterministicDecision {
   const intentGroup = payload.intentGroup || 'PRE_ENTRY';
   const intentSubgroup = payload.intentSubgroup || 'NEW_OPPORTUNITY';

@@ -23,7 +23,7 @@ test('MarketLayaAdapter usa a Laya original apenas como triagem System 1', async
   let seenPayload: any;
   let seenHeaders: any;
   const adapter = new MarketLayaAdapter({
-    baseUrl: 'http://nexus-decisor-laya.railway.internal:8000',
+    baseUrl: 'https://laya.example',
     apiKey: 'test-key',
     fetchImpl: (async (_url: string, init: any) => {
       seenPayload = JSON.parse(init.body);
@@ -32,9 +32,7 @@ test('MarketLayaAdapter usa a Laya original apenas como triagem System 1', async
         ok: true,
         json: async () => ({
           answers: {
-            route: { choice: 'MECHANICAL_PIPELINE', answer_confidence: 0.94 },
-            operational_risk: { score: 0.6, answer_confidence: 0.81 },
-            needs_llm: { noul: 0.2, answer_confidence: 0.8 }
+            route: { choice: 'MECHANICAL_PIPELINE', answer_confidence: 0.94, abstention: 'passed' }
           },
           routing: { model: 'multilingual' }
         })
@@ -48,8 +46,8 @@ test('MarketLayaAdapter usa a Laya original apenas como triagem System 1', async
   assert.strictEqual(seenPayload.state.contractVersion, 'market-laya/v1');
   assert.match(seenPayload.state.body, /nunca autoriza ordem, tamanho, stop, fechamento/);
   assert.strictEqual(seenPayload.questions.route.type, 'choice');
-  assert.strictEqual(seenPayload.questions.operational_risk.type, 'score');
-  assert.strictEqual(seenPayload.questions.needs_llm.type, 'noul');
+  assert.deepStrictEqual(Object.keys(seenPayload.questions), ['route']);
+  assert.strictEqual(seenPayload.min_confidence, 0.85);
   assert.strictEqual(result.route, 'MECHANICAL_PIPELINE');
   assert.strictEqual(result.routeConfidence, 0.94);
   assert.strictEqual(result.routingModel, 'multilingual');
@@ -57,6 +55,7 @@ test('MarketLayaAdapter usa a Laya original apenas como triagem System 1', async
 
 test('MarketLayaAdapter falha fechado com rota/confiança inválidas', async () => {
   const bad = new MarketLayaAdapter({
+    baseUrl: 'https://laya.example',
     apiKey: 'k',
     fetchImpl: (async () => ({
       ok: true,
@@ -73,6 +72,7 @@ test('MarketLayaAdapter não aceita LAYA_API_KEY genérica como credencial do Me
     delete process.env.MARKET_LAYA_API_KEY;
     process.env.LAYA_API_KEY = 'legacy-key';
     const adapter = new MarketLayaAdapter({
+      baseUrl: 'https://laya.example',
       fetchImpl: (async () => {
         throw new Error('fetch não deveria ser chamado sem MARKET_LAYA_API_KEY');
       }) as any

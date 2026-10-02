@@ -13,7 +13,9 @@ export type LayaGovernanceAction =
   | 'HOLD'
   | 'NO_ACTION';
 
-export type LayaMode = 'OFF' | 'SHADOW' | 'ACTIVE';
+export type MarketGovernanceMode = 'OFF' | 'SHADOW' | 'ACTIVE';
+/** @deprecated Use MarketGovernanceMode. */
+export type LayaMode = MarketGovernanceMode;
 
 export type StopLossMoveDirection = 'TIGHTEN' | 'TO_PROFIT' | 'WIDEN';
 
@@ -122,6 +124,10 @@ export interface LayaGovernanceResponse {
   vetoRuleCode?: string;
 }
 
+export type MarketGovernanceAction = LayaGovernanceAction;
+export type MarketGovernanceRequest = LayaGovernanceRequest;
+export type MarketGovernanceResponse = LayaGovernanceResponse;
+
 export interface ConstitutionContext {
   currentR?: number;
   clusterExposureUsdt?: number;
@@ -150,3 +156,5 @@ export interface LayaMetrics {
     rationaleCode: string;
   }>;
 }
+
+export type MarketGovernanceMetrics = LayaMetrics;

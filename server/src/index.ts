@@ -26,7 +26,7 @@ import { RISK_CONFIG } from './config/riskConfig.js';
 import { calculateProfileStopLoss, evaluateCryptoOpportunity } from './engine/cryptoStrategyDecision.js';
 import { calculateAdaptiveRisk } from './engine/adaptiveRisk.js';
 import { getCryptoStrategyProfile } from './engine/cryptoStrategyProfile.js';
-import { layaGovernanceService } from './services/layaGovernanceService.js';
+import { marketGovernanceService } from './services/marketGovernanceService.js';
 import { macroSentinelClient } from './services/macroSentinelService.js';
 // SaaS: Autenticação e Rotas
 import { authRouter } from './auth/authRoutes.js';
@@ -379,7 +379,7 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
             grossPnlUsd: Number(tradeEvent.pnlUsd ?? 0),
             netPnlUsd: Number(tradeEvent.pnlUsd ?? 0),
             venue: (tradeEvent as any).venue ?? 'BingX',
-            governanceMode: layaGovernanceService.getMode()
+            governanceMode: marketGovernanceService.getMode()
           });
           setTimeout(() => {
             EventStoreService.isLockoutActive().then((locked) => {
@@ -501,7 +501,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
     if (cooldownActive) {
       const sweepEvidence = flowEngine.getRecentLiquiditySweepEvidence(signal.symbol, side);
       const rejectionConfirmed = signal.type === 'ABSORPTION_BUY' || signal.type === 'ABSORPTION_SELL';
-      const pardonResult = await layaGovernanceService.requestGovernance({
+      const pardonResult = await marketGovernanceService.requestGovernance({
         stateVersion: 1,
         symbol: signal.symbol,
         intentGroup: 'COOLDOWN_AUDIT',
@@ -698,7 +698,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
     }
 
     let layaDecision: any = undefined;
-    const layaResult = await layaGovernanceService.requestGovernance({
+    const layaResult = await marketGovernanceService.requestGovernance({
       stateVersion: 1,
       symbol: signal.symbol,
       intentGroup: 'PRE_ENTRY',
@@ -729,7 +729,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
 
     layaDecision = layaResult.decision;
 
-    if (layaGovernanceService.getMode() === 'ACTIVE') {
+    if (marketGovernanceService.getMode() === 'ACTIVE') {
       const explicitlyAuthorized = layaResult.executed && layaResult.decision.action === 'AUTHORIZE';
       if (!explicitlyAuthorized) {
         console.warn(`[LAYA FAIL-CLOSED] Entrada bloqueada em ${signal.symbol} | action=${layaResult.decision.action} | reason=${layaResult.decision.rationaleCode} | error=${layaResult.error || layaResult.rejectionReason || 'none'}`);
@@ -772,7 +772,7 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
     // 🧠 Modificação 2 & 3 (Safe-Dev): Governança de Ciclo de Vida da Posição Aberta pela Laya
     const openTrades = paperTrading.getAccountState().openPositions;
     const currentPosition = openTrades.find(p => p.symbol === data.symbol);
-    if (currentPosition && layaGovernanceService.getMode() === 'ACTIVE') {
+    if (currentPosition && marketGovernanceService.getMode() === 'ACTIVE') {
       const now = Date.now();
       const lastCheck = activePositionCheckMap.get(data.symbol) || 0;
       // Throttle de 6 segundos entre avaliações de permanência por símbolo
@@ -794,7 +794,7 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
           if (isContrarianWhale || isRunnerExhaustion) {
             const requestedAction = isContrarianWhale ? 'CLOSE_NOW' : 'EARLY_HARVEST_CLOSE';
             const intentSubgroup = isContrarianWhale ? 'DEFENSE_CONTRARIAN_FLOW' : 'RUNNER_EVALUATION';
-            const gov = await layaGovernanceService.requestGovernance({
+            const gov = await marketGovernanceService.requestGovernance({
               stateVersion: 1,
               symbol: data.symbol,
               intentGroup: 'POSITION_LIFECYCLE',

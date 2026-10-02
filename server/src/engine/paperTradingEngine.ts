@@ -7,8 +7,7 @@ import { calculateMasterMirrorSize } from './masterMirrorSizing.js';
 import type { StrategyDecision } from './cryptoStrategyDecision.js';
 import type { AdaptiveRiskResult } from './adaptiveRisk.js';
 import { evaluateActivePositionRisk } from './flowEngine.js';
-import { layaGovernanceService } from '../services/layaGovernanceService.js';
-import type { LayaGovernanceResponse } from '../../../shared/layaGovernanceTypes.js';
+import type { MarketGovernanceResponse } from '../../../shared/layaGovernanceTypes.js';
 
 export interface SimulatedTradeWithTrailing extends SimulatedTrade {
   trailingActive?: boolean;
@@ -131,7 +130,7 @@ export class PaperTradingEngine {
   }
 
   // Executa uma entrada automatizada SEM REPAINT quando um sinal de fluxo qualificado ocorre
-  public handleSignal(signal: FlowSignal, currentPrice: number, decision?: StrategyDecision, adaptiveRisk?: AdaptiveRiskResult, layaProposal?: LayaGovernanceResponse) {
+  public handleSignal(signal: FlowSignal, currentPrice: number, decision?: StrategyDecision, adaptiveRisk?: AdaptiveRiskResult, marketProposal?: MarketGovernanceResponse) {
     console.log('[PaperEngine][SignalReceived]', {
       symbol: signal.symbol,
       signalType: signal.type,
@@ -140,7 +139,7 @@ export class PaperTradingEngine {
       entrySide: decision?.entrySide,
       decisionStop: decision?.stopLoss,
       adaptiveStop: adaptiveRisk?.stopLoss,
-      layaAction: layaProposal?.action
+      marketGovernanceAction: marketProposal?.action
     });
     // 0. Bloqueio imediato se Lockout Diário (-3.0R UTC) estiver ativo
     if (this.dailyLockoutActive) {
@@ -233,14 +232,14 @@ export class PaperTradingEngine {
         decisionEntrySide: decision?.entrySide,
         currentPrice,
         signalPrice: signal.price,
-        layaAction: layaProposal?.action,
-        layaRationaleCode: layaProposal?.rationaleCode
+        marketGovernanceAction: marketProposal?.action,
+        layaRationaleCode: marketProposal?.rationaleCode
       });
       return;
     }
 
     // 🛡️ Roteamento Dual: APPROVE_PASSIVE (Maker Post-Only) vs APPROVE_AGGRESSIVE (Taker IOC)
-    const executionMode = layaProposal?.governance?.executionMode || 'TAKER_IOC';
+    const executionMode = marketProposal?.governance?.executionMode || 'TAKER_IOC';
 
     if (executionMode === 'MAKER_POST_ONLY') {
       const isFilledPassive = tradeType === 'BUY'
@@ -254,10 +253,10 @@ export class PaperTradingEngine {
       }
     }
 
-    // 🛡️ Alvos e Stops: Se Laya propôs Micro-Stop TIGHTEN válido, usa distância reduzida
+    // 🛡️ Alvos e Stops: ajustes pertencem à governança determinística do Mercado, nunca à Laya.
     let stopLoss = adaptiveRisk?.stopLoss ?? decision.stopLoss;
-    if (layaProposal?.governance?.stopLossMoveDirection === 'TIGHTEN' && layaProposal.governance.stopLossProposalPct) {
-      const tightDistance = currentPrice * (layaProposal.governance.stopLossProposalPct / 100);
+    if (marketProposal?.governance?.stopLossMoveDirection === 'TIGHTEN' && marketProposal.governance.stopLossProposalPct) {
+      const tightDistance = currentPrice * (marketProposal.governance.stopLossProposalPct / 100);
       const tightStop = tradeType === 'BUY' ? currentPrice - tightDistance : currentPrice + tightDistance;
       // Garante que o micro-stop seja mais favorável (mais próximo do preço) do que o SL mecânico
       if (tradeType === 'BUY' && tightStop > stopLoss) {
@@ -329,7 +328,7 @@ export class PaperTradingEngine {
       marginUsd: execution.marginRequired,
       masterExposureRatio: openNotional / masterBalanceAtEntry,
       masterBalanceAtEntry,
-      entryDecisionId: layaProposal?.decisionId,
+      entryDecisionId: marketProposal?.decisionId,
       strategyVersion: decision.profileVersion,
       decisionFactors: [
         ...decision.reasons,
@@ -356,8 +355,8 @@ export class PaperTradingEngine {
       executionMode,
       marginRequired: execution.marginRequired,
       fee: execution.fee,
-      layaAction: layaProposal?.action,
-      layaPowerMultiplier: layaProposal?.powerMultiplier
+      marketGovernanceAction: marketProposal?.action,
+      marketGovernancePowerMultiplier: marketProposal?.powerMultiplier
     });
 
     this.openPositions.set(signal.symbol, newTrade);

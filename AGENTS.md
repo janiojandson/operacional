@@ -2,7 +2,7 @@
 **Módulo:** Mercado Financeiro
 **Versão do Agente:** 2.3.0
 **Porta do Serviço:** 4000 (`operacional-production-57d9.up.railway.app`)
-**Sistema 1 advisory:** Laya upstream ✅ (`http://nexus-decisor-laya.railway.internal:8000/v1/systemone`)
+**Sistema 1 advisory:** Laya upstream ✅ (endpoint obrigatório via `MARKET_LAYA_NATIVE_URL`; sem fallback hardcoded)
 
 ---
 
@@ -76,7 +76,7 @@ Toda a comunicação com a malha interna do Railway opera com sub-20ms e custo z
 | **nexus-membro-memoria** | **3003** | `nexus-membro-memoria.railway.internal:3003` | Interno |
 | **Mercado Financeiro** | **4000** | `operacional.railway.internal:4000` | `operacional-production-57d9.up.railway.app` |
 | **Postgres Principal** | **5432** | `postgres.railway.internal:5432` | Proxy TCP externo 25561 |
-| **nexus-decisor-laya** | **8000** | `nexus-decisor-laya.railway.internal:8000` | `nexus-decisor-laya-production.up.railway.app` |
+| **Laya upstream canônica** | dinâmica | `MARKET_LAYA_NATIVE_URL` | Configurada por ambiente; nunca contém regras do Mercado |
 | **nexus-omniroute** | **8080** | `nexus-omniroute.railway.internal:8080` | `nexus-omniroute-production.up.railway.app` |
 
 ---

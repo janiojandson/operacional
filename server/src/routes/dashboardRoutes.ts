@@ -5,7 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { query } from '../database/db.js';
-import { layaGovernanceService } from '../services/layaGovernanceService.js';
+import { marketGovernanceService } from '../services/marketGovernanceService.js';
 
 export const dashboardRouter = Router();
 
@@ -29,7 +29,7 @@ dashboardRouter.get('/overview', async (_req: Request, res: Response) => {
   }
 
   try {
-    const status = layaGovernanceService.getStatus();
+    const status = marketGovernanceService.getStatus();
     const lastDec = status.recentDecisions[0] || null;
 
     // Resumo de contrafactual no Event Store
@@ -262,14 +262,14 @@ dashboardRouter.get('/blocks', async (_req: Request, res: Response) => {
       {
         id: 9,
         name: 'Integridade Operacional',
-        value: (layaGovernanceService.getStatus().recentDecisions?.length || 0) === 0
+        value: (marketGovernanceService.getStatus().recentDecisions?.length || 0) === 0
           ? 'STANDBY'
-          : `${layaGovernanceService.getStatus().metrics.latencyP50.toFixed(1)}ms`,
-        subtext: (layaGovernanceService.getStatus().recentDecisions?.length || 0) === 0
+          : `${marketGovernanceService.getStatus().metrics.latencyP50.toFixed(1)}ms`,
+        subtext: (marketGovernanceService.getStatus().recentDecisions?.length || 0) === 0
           ? 'Aguardando 1º fluxo'
-          : `p95 ${layaGovernanceService.getStatus().metrics.latencyP95.toFixed(1)}ms / timeout 1500ms`,
-        status: layaGovernanceService.getStatus().metrics.latencyP95 <= 1500 ? 'green' : 'red',
-        sparkline: [layaGovernanceService.getStatus().metrics.latencyP50, layaGovernanceService.getStatus().metrics.latencyP95]
+          : `p95 ${marketGovernanceService.getStatus().metrics.latencyP95.toFixed(1)}ms / timeout 1500ms`,
+        status: marketGovernanceService.getStatus().metrics.latencyP95 <= 1500 ? 'green' : 'red',
+        sparkline: [marketGovernanceService.getStatus().metrics.latencyP50, marketGovernanceService.getStatus().metrics.latencyP95]
       },
       {
         id: 10,
