@@ -34,6 +34,10 @@ export type LayaRationaleCode =
   | 'SPREAD_TOXIC_VETO'
   | 'BETA_DIVERGENCE_VETO'
   | 'SENTINEL_CIRCUIT_BREAKER_VETO'
+  | 'LAYA_TACTICAL_EXIT'
+  | 'LAYA_TACTICAL_WAIT'
+  | 'LAYA_TACTICAL_ABSTAIN'
+  | 'LAYA_TACTICAL_UNAVAILABLE'
   | 'NO_OPPORTUNITY';
 
 export interface LayaGovernanceProposal {
@@ -63,6 +67,7 @@ export type LayaIntentSubgroup =
   | 'LIQUIDITY_SWEEP_REENTRY'
   | 'DEFENSE_CONTRARIAN_FLOW'
   | 'RUNNER_EVALUATION'
+  | 'POSITION_MONITOR'
   | 'SCALE_IN_REQUEST';
 
 export interface LayaGovernanceRequest {

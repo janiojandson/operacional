@@ -18,6 +18,8 @@ export const MAX_SAFE_SPREAD_BPS = 5.0; // 5 basis points = 0.05% de spread máx
 export const VETO_QUARANTINE_MS = 60000; // 60s de quarentena para pares que tomaram VETO
 export const MAX_ALLOWED_RISK_CAP = 2.0; // Teto prudente de potência (PowerMultiplier max 2.0x)
 
+export type MarketLayaTacticalMode = 'OFF' | 'SHADOW' | 'ACTIVE';
+
 export function isSpreadToxicLocal(spreadBps?: number): boolean {
   if (spreadBps === undefined || spreadBps === null || spreadBps <= 0) return false;
   return spreadBps > MAX_SAFE_SPREAD_BPS;
@@ -62,6 +64,7 @@ export interface LayaServiceOptions {
   fetchImpl?: typeof fetch;
   marketLayaAdapter?: MarketLayaAdapter;
   marketLayaShadowEnabled?: boolean;
+  marketLayaTacticalMode?: MarketLayaTacticalMode;
 }
 
 export interface GovernanceExecutionResult {
@@ -78,6 +81,7 @@ export class MarketGovernanceService {
   private fetchFn: typeof fetch;
   private marketLayaAdapter: MarketLayaAdapter;
   private marketLayaShadowEnabled: boolean;
+  private marketLayaTacticalMode: MarketLayaTacticalMode;
   private latencyBuffer: number[] = [];
   private overridesUsedSession: number = 0;
   private pnlAttributedOverrides: number = 0;
@@ -98,6 +102,12 @@ export class MarketGovernanceService {
     this.marketLayaAdapter = options.marketLayaAdapter || new MarketLayaAdapter({ fetchImpl: this.fetchFn });
     this.marketLayaShadowEnabled = options.marketLayaShadowEnabled
       ?? process.env.MARKET_LAYA_SHADOW_ENABLED === 'true';
+    const tacticalRaw = String(
+      options.marketLayaTacticalMode || process.env.MARKET_LAYA_TACTICAL_MODE || 'SHADOW'
+    ).toUpperCase();
+    this.marketLayaTacticalMode = (
+      ['OFF', 'SHADOW', 'ACTIVE'].includes(tacticalRaw) ? tacticalRaw : 'SHADOW'
+    ) as MarketLayaTacticalMode;
   }
 
   public setMode(mode: MarketGovernanceMode): void {
@@ -149,6 +159,7 @@ export class MarketGovernanceService {
     const metrics = this.getMetrics();
     return {
       mode: this.mode,
+      layaTacticalMode: this.marketLayaTacticalMode,
       metrics: {
         latencyP50: metrics.p50LatencyMs,
         latencyP95: metrics.p95LatencyMs,
@@ -239,27 +250,81 @@ export class MarketGovernanceService {
 
     const local = evaluateMarketDeterministicGovernance(effectivePayload);
 
-    // Laya original: somente System 1 advisory/shadow, e apenas após os gates determinísticos.
-    if (this.marketLayaShadowEnabled && local.choice !== 'VETO') {
-      void this.marketLayaAdapter.evaluate({
-        symbol: payload.symbol,
-        side: payload.side,
-        currentPrice: Number(payload.currentPrice || payload.trace?.entryPrice || 0),
-        intentGroup: payload.intentGroup,
-        intentSubgroup: payload.intentSubgroup,
-        spreadBps: Number(payload.trace?.spreadBps || 0),
-        depthImbalanceRatio: Number(
-          payload.trace?.depthImbalanceRatio ?? payload.trace?.imbalanceRatio ?? 1
-        ),
-        cvdDelta60s: Number(payload.trace?.cvdDelta60s || 0),
-        spoofScore: Number(payload.trace?.spoofScore || 0),
-        betaDivergence: Boolean(payload.trace?.betaDivergence),
-        regime: effectivePayload.macro?.regime,
-        circuitBreakerActive: Boolean(effectivePayload.macro?.isCircuitBreakerActive),
-        currentRiskAggregatePct: payload.risk?.currentRiskAggregatePct,
-        proposedRiskPct: payload.risk?.proposedRiskPct,
-        currentR: payload.currentR
-      }).then((shadow) => {
+    const marketFacts = {
+      symbol: payload.symbol,
+      side: payload.side,
+      currentPrice: Number(payload.currentPrice || payload.trace?.entryPrice || 0),
+      intentGroup: payload.intentGroup,
+      intentSubgroup: payload.intentSubgroup,
+      spreadBps: Number(payload.trace?.spreadBps || 0),
+      depthImbalanceRatio: Number(
+        payload.trace?.depthImbalanceRatio ?? payload.trace?.imbalanceRatio ?? 1
+      ),
+      cvdDelta60s: Number(payload.trace?.cvdDelta60s || 0),
+      spoofScore: Number(payload.trace?.spoofScore || 0),
+      betaDivergence: Boolean(payload.trace?.betaDivergence),
+      regime: effectivePayload.macro?.regime,
+      circuitBreakerActive: Boolean(effectivePayload.macro?.isCircuitBreakerActive),
+      currentRiskAggregatePct: payload.risk?.currentRiskAggregatePct,
+      proposedRiskPct: payload.risk?.proposedRiskPct,
+      currentR: payload.currentR,
+      holdingSeconds: Number(payload.trace?.holdingSeconds || 0) || undefined,
+      partialTaken: Boolean(payload.trace?.partialTaken)
+    };
+
+    let tactical: {
+      action: string;
+      confidence: number;
+      abstention?: string;
+      routingModel?: string;
+      latencyMs: number;
+    } | undefined;
+    let tacticalError: string | undefined;
+
+    const isPreEntry = payload.intentGroup === 'PRE_ENTRY';
+    const isPositionLifecycle = payload.intentGroup === 'POSITION_LIFECYCLE';
+    const localProtectionAction =
+      local.choice === 'CLOSE_NOW' || local.choice === 'EARLY_HARVEST_CLOSE';
+
+    if (
+      this.marketLayaTacticalMode !== 'OFF'
+      && local.choice !== 'VETO'
+      && !localProtectionAction
+      && (isPreEntry || isPositionLifecycle)
+    ) {
+      try {
+        const result = isPreEntry
+          ? await this.marketLayaAdapter.evaluateEntry(marketFacts)
+          : await this.marketLayaAdapter.evaluatePosition(marketFacts);
+
+        tactical = {
+          action: result.action,
+          confidence: result.confidence,
+          abstention: result.abstention,
+          routingModel: result.routingModel,
+          latencyMs: result.latencyMs
+        };
+
+        console.log(
+          `[LayaNativeMarket:Tactical:${this.marketLayaTacticalMode}] symbol=${payload.symbol} ` +
+          `stage=${isPreEntry ? 'ENTRY' : 'POSITION'} action=${result.action} ` +
+          `confidence=${result.confidence.toFixed(4)} abstention=${result.abstention ?? 'none'} ` +
+          `model=${result.routingModel ?? 'n/a'} latencyMs=${result.latencyMs}`
+        );
+      } catch (err: any) {
+        tacticalError = err?.message || String(err);
+        console.warn(
+          `[LayaNativeMarket:Tactical:${this.marketLayaTacticalMode}] falha em ${payload.symbol}: ${tacticalError}`
+        );
+      }
+    } else if (
+      this.marketLayaShadowEnabled
+      && this.marketLayaTacticalMode === 'OFF'
+      && local.choice !== 'VETO'
+    ) {
+      // Compatibilidade observacional: roteamento genérico somente quando o modo
+      // tático está explicitamente desligado, evitando inferência duplicada.
+      void this.marketLayaAdapter.evaluate(marketFacts).then((shadow) => {
         console.log(
           `[LayaNativeMarket:SHADOW] symbol=${payload.symbol} route=${shadow.route} ` +
           `confidence=${shadow.routeConfidence.toFixed(4)} abstention=${shadow.abstention ?? 'none'} ` +
@@ -289,7 +354,29 @@ export class MarketGovernanceService {
       && payload.intentSubgroup === 'SCALE_IN_REQUEST'
       && local.verdict === 'AUTHORIZE_SCALE_IN';
 
-    const normalizedAction = isScaleIn ? 'AUTHORIZE_SCALE_IN' : local.choice;
+    let normalizedAction: string = isScaleIn ? 'AUTHORIZE_SCALE_IN' : local.choice;
+    let normalizedRationale = local.rationale;
+
+    if (this.marketLayaTacticalMode === 'ACTIVE' && isPreEntry && local.choice === 'AUTHORIZE') {
+      const expected = payload.side === 'SELL' ? 'ENTER_SHORT' : 'ENTER_LONG';
+      if (!tactical || tactical.action !== expected) {
+        normalizedAction = 'HOLD';
+        normalizedRationale = tacticalError
+          ? 'LAYA_TACTICAL_UNAVAILABLE'
+          : `LAYA_TACTICAL_${tactical?.action || 'ABSTAIN'}`;
+      }
+    }
+
+    if (
+      this.marketLayaTacticalMode === 'ACTIVE'
+      && isPositionLifecycle
+      && local.choice === 'HOLD'
+      && tactical?.action === 'EXIT'
+    ) {
+      normalizedAction = 'CLOSE_NOW';
+      normalizedRationale = 'LAYA_TACTICAL_EXIT';
+    }
+
     const proposal: MarketGovernanceResponse = {
       decisionId,
       stateVersion: payload.stateVersion,
@@ -305,7 +392,7 @@ export class MarketGovernanceService {
         cooldownOverride: local.choice === 'OVERRIDE_COOLDOWN',
         executionMode: local.executionMode
       },
-      rationaleCode: local.rationale as any,
+      rationaleCode: normalizedRationale as any,
       trace: payload.trace,
       signalSource: payload.signalSource || payload.intentSubgroup || 'FLOW_SIGNAL',
       vetoRuleCode: local.choice === 'VETO' ? local.rationale : undefined
@@ -315,19 +402,23 @@ export class MarketGovernanceService {
       intentGroup: payload.intentGroup,
       intentSubgroup: payload.intentSubgroup,
       requestedAction,
-      remoteChoice: undefined,
-      remoteVerdict: undefined,
+      remoteChoice: tactical?.action,
+      remoteVerdict: tactical?.action,
       requestPayload: {
         contractVersion: 'market-deterministic-governance/v1',
         payload: effectivePayload
       },
       responsePayload: {
-        source: 'MARKET_DETERMINISTIC_GOVERNANCE',
+        source: tactical ? 'MARKET_DETERMINISTIC_GOVERNANCE+LAYA_TACTICAL' : 'MARKET_DETERMINISTIC_GOVERNANCE',
         choice: local.choice,
         verdict: local.verdict,
         rationale: local.rationale,
         confidence: local.confidence,
-        layaRole: 'SHADOW_ADVISORY_ONLY'
+        normalizedAction,
+        normalizedRationale,
+        layaRole: this.marketLayaTacticalMode,
+        layaTactical: tactical ?? null,
+        layaError: tacticalError ?? null
       }
     });
 
@@ -457,7 +548,7 @@ export class MarketGovernanceService {
           executionMode: proposal.governance?.executionMode,
           remoteChoice: audit?.remoteChoice,
           remoteVerdict: audit?.remoteVerdict,
-          confidenceScore: Number((audit?.responsePayload as any)?.answers?.action?.confidence || 0) || undefined,
+          confidenceScore: Number((audit?.responsePayload as any)?.layaTactical?.confidence || 0) || undefined,
           requestPayload: audit?.requestPayload,
           responsePayload: audit?.responsePayload,
           runMode: 'PAPER_MASTER'

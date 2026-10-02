@@ -616,7 +616,7 @@ export class PaperTradingEngine {
     symbol: string,
     closePrice: number,
     isMaker = false,
-    reason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST' | 'CIRCUIT_BREAKER_EMERGENCY' | 'MANUAL'
+    reason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST' | 'MARKET_CLOSE_NOW' | 'MARKET_EARLY_HARVEST' | 'TACTICAL_LAYA_EXIT' | 'CIRCUIT_BREAKER_EMERGENCY' | 'MANUAL'
   ): { success: boolean; pnl?: number } {
     const trade = this.openPositions.get(symbol);
     if (!trade) return { success: false };
@@ -923,7 +923,7 @@ export class MirrorTradingEngine {
     symbol: string,
     closePrice: number,
     isMaker = false,
-    reason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST'
+    reason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST' | 'MARKET_CLOSE_NOW' | 'MARKET_EARLY_HARVEST' | 'TACTICAL_LAYA_EXIT'
   ): { success: boolean; pnl?: number } {
     const trade = this.openPositions.get(symbol);
     if (!trade) return { success: false };

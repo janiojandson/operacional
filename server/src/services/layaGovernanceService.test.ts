@@ -44,7 +44,8 @@ function neutralShadow(route = 'DEEP_REVIEW') {
 test('PRE_ENTRY é decidido pelo motor determinístico local, sem depender da Laya', async () => {
   const service = new LayaGovernanceService({
     mode: 'ACTIVE',
-    marketLayaShadowEnabled: false
+    marketLayaShadowEnabled: false,
+    marketLayaTacticalMode: 'OFF'
   });
   const result = await service.requestGovernance(createMockRequest());
 
@@ -61,6 +62,7 @@ test('spread tóxico é vetado pelo Mercado sem chamar Laya', async () => {
   const service = new LayaGovernanceService({
     mode: 'ACTIVE',
     marketLayaShadowEnabled: true,
+    marketLayaTacticalMode: 'OFF',
     marketLayaAdapter: {
       evaluate: async () => {
         shadowCalls++;
@@ -91,6 +93,7 @@ test('Laya shadow adversa não altera autorização determinística do Mercado',
   const service = new LayaGovernanceService({
     mode: 'ACTIVE',
     marketLayaShadowEnabled: true,
+    marketLayaTacticalMode: 'OFF',
     marketLayaAdapter: {
       evaluate: async () => {
         shadowCalls++;
@@ -118,6 +121,7 @@ test('falha da Laya shadow não bloqueia decisão determinística', async () => 
   const service = new LayaGovernanceService({
     mode: 'ACTIVE',
     marketLayaShadowEnabled: true,
+    marketLayaTacticalMode: 'OFF',
     marketLayaAdapter: {
       evaluate: async () => { throw new Error('laya-next offline'); }
     } as any
@@ -134,7 +138,8 @@ test('falha da Laya shadow não bloqueia decisão determinística', async () => 
 test('CLOSE_NOW exige evidência estruturada e prejuízo além de -0.3R', async () => {
   const service = new LayaGovernanceService({
     mode: 'ACTIVE',
-    marketLayaShadowEnabled: false
+    marketLayaShadowEnabled: false,
+    marketLayaTacticalMode: 'OFF'
   });
 
   const noEvidence = await service.requestGovernance(createMockRequest({
@@ -164,7 +169,8 @@ test('CLOSE_NOW exige evidência estruturada e prejuízo além de -0.3R', async 
 test('teto de 3 overrides de cooldown continua no domínio Mercado', async () => {
   const service = new LayaGovernanceService({
     mode: 'ACTIVE',
-    marketLayaShadowEnabled: false
+    marketLayaShadowEnabled: false,
+    marketLayaTacticalMode: 'OFF'
   });
   const request = createMockRequest({
     intentGroup: 'COOLDOWN_AUDIT',
@@ -190,7 +196,8 @@ test('teto de 3 overrides de cooldown continua no domínio Mercado', async () =>
 test('SHADOW calcula decisão local e preserva contrafactual sem executar', async () => {
   const service = new LayaGovernanceService({
     mode: 'SHADOW',
-    marketLayaShadowEnabled: false
+    marketLayaShadowEnabled: false,
+    marketLayaTacticalMode: 'OFF'
   });
 
   const result = await service.requestGovernance(createMockRequest());
@@ -207,7 +214,8 @@ test('SHADOW calcula decisão local e preserva contrafactual sem executar', asyn
 test('OFF não cria nova autorização mas mantém ação explícita de proteção', async () => {
   const service = new LayaGovernanceService({
     mode: 'OFF',
-    marketLayaShadowEnabled: false
+    marketLayaShadowEnabled: false,
+    marketLayaTacticalMode: 'OFF'
   });
 
   const preEntry = await service.requestGovernance(createMockRequest());
@@ -232,11 +240,11 @@ test('MarketGovernanceService é o nome canônico e ignora LAYA_MODE legado', ()
   try {
     delete process.env.MARKET_GOVERNANCE_MODE;
     process.env.LAYA_MODE = 'OFF';
-    const defaultService = new MarketGovernanceService({ marketLayaShadowEnabled: false });
+    const defaultService = new MarketGovernanceService({ marketLayaShadowEnabled: false, marketLayaTacticalMode: 'OFF' });
     assert.strictEqual(defaultService.getMode(), 'ACTIVE');
 
     process.env.MARKET_GOVERNANCE_MODE = 'SHADOW';
-    const marketService = new MarketGovernanceService({ marketLayaShadowEnabled: false });
+    const marketService = new MarketGovernanceService({ marketLayaShadowEnabled: false, marketLayaTacticalMode: 'OFF' });
     assert.strictEqual(marketService.getMode(), 'SHADOW');
   } finally {
     if (previousMarket === undefined) delete process.env.MARKET_GOVERNANCE_MODE;
@@ -244,4 +252,119 @@ test('MarketGovernanceService é o nome canônico e ignora LAYA_MODE legado', ()
     if (previousLegacy === undefined) delete process.env.LAYA_MODE;
     else process.env.LAYA_MODE = previousLegacy;
   }
+});
+
+test('Laya tática ACTIVE confirma entrada somente no lado permitido pelo Mercado', async () => {
+  const service = new MarketGovernanceService({
+    mode: 'ACTIVE',
+    marketLayaShadowEnabled: false,
+    marketLayaTacticalMode: 'ACTIVE',
+    marketLayaAdapter: {
+      evaluateEntry: async () => ({
+        action: 'ENTER_LONG',
+        confidence: 0.94,
+        abstention: 'passed',
+        latencyMs: 1
+      })
+    } as any
+  });
+
+  const result = await service.requestGovernance(createMockRequest({ side: 'BUY' }));
+  assert.equal(result.executed, true);
+  assert.equal(result.decision.action, 'AUTHORIZE');
+  assert.equal(result.decision.rationaleCode, 'V08_IMBALANCE_AGGRESSIVE_APPROVED');
+});
+
+test('Laya tática ACTIVE WAIT bloqueia nova entrada sem alterar hard gates', async () => {
+  const service = new MarketGovernanceService({
+    mode: 'ACTIVE',
+    marketLayaShadowEnabled: false,
+    marketLayaTacticalMode: 'ACTIVE',
+    marketLayaAdapter: {
+      evaluateEntry: async () => ({
+        action: 'WAIT',
+        confidence: 0.92,
+        abstention: 'passed',
+        latencyMs: 1
+      })
+    } as any
+  });
+
+  const result = await service.requestGovernance(createMockRequest());
+  assert.equal(result.executed, false);
+  assert.equal(result.decision.action, 'HOLD');
+  assert.equal(result.decision.rationaleCode, 'LAYA_TACTICAL_WAIT');
+});
+
+test('falha da Laya tática ACTIVE bloqueia entrada de forma fail-closed', async () => {
+  const service = new MarketGovernanceService({
+    mode: 'ACTIVE',
+    marketLayaShadowEnabled: false,
+    marketLayaTacticalMode: 'ACTIVE',
+    marketLayaAdapter: {
+      evaluateEntry: async () => { throw new Error('laya offline'); }
+    } as any
+  });
+
+  const result = await service.requestGovernance(createMockRequest());
+  assert.equal(result.executed, false);
+  assert.equal(result.decision.action, 'HOLD');
+  assert.equal(result.decision.rationaleCode, 'LAYA_TACTICAL_UNAVAILABLE');
+});
+
+test('Laya tática ACTIVE pode antecipar EXIT em POSITION_MONITOR neutro', async () => {
+  const service = new MarketGovernanceService({
+    mode: 'ACTIVE',
+    marketLayaShadowEnabled: false,
+    marketLayaTacticalMode: 'ACTIVE',
+    marketLayaAdapter: {
+      evaluatePosition: async () => ({
+        action: 'EXIT',
+        confidence: 0.91,
+        abstention: 'passed',
+        latencyMs: 1
+      })
+    } as any
+  });
+
+  const result = await service.requestGovernance(createMockRequest({
+    intentGroup: 'POSITION_LIFECYCLE',
+    intentSubgroup: 'POSITION_MONITOR',
+    requestedAction: 'HOLD',
+    proposedStopLoss: undefined,
+    currentR: 0.25
+  }));
+
+  assert.equal(result.executed, true);
+  assert.equal(result.decision.action, 'CLOSE_NOW');
+  assert.equal(result.decision.rationaleCode, 'LAYA_TACTICAL_EXIT');
+});
+
+test('hard exit determinístico permanece soberano e não consulta Laya tática', async () => {
+  let calls = 0;
+  const service = new MarketGovernanceService({
+    mode: 'ACTIVE',
+    marketLayaShadowEnabled: false,
+    marketLayaTacticalMode: 'ACTIVE',
+    marketLayaAdapter: {
+      evaluatePosition: async () => {
+        calls++;
+        return { action: 'HOLD', confidence: 0.99, latencyMs: 1 };
+      }
+    } as any
+  });
+
+  const result = await service.requestGovernance(createMockRequest({
+    intentGroup: 'POSITION_LIFECYCLE',
+    intentSubgroup: 'DEFENSE_CONTRARIAN_FLOW',
+    requestedAction: 'CLOSE_NOW',
+    proposedStopLoss: undefined,
+    currentR: -0.5,
+    evidence: { contrarianFlowConfirmed: true }
+  }));
+
+  assert.equal(calls, 0);
+  assert.equal(result.executed, true);
+  assert.equal(result.decision.action, 'CLOSE_NOW');
+  assert.equal(result.decision.rationaleCode, 'DEFENSE_CONTRARIAN_EXIT');
 });

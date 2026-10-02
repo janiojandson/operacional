@@ -697,8 +697,8 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       _spreadBps = Number((((bestAsk - bestBid) / bestBid) * 10000).toFixed(2));
     }
 
-    let layaDecision: any = undefined;
-    const layaResult = await marketGovernanceService.requestGovernance({
+    let governanceDecision: any = undefined;
+    const governanceResult = await marketGovernanceService.requestGovernance({
       stateVersion: 1,
       symbol: signal.symbol,
       intentGroup: 'PRE_ENTRY',
@@ -727,22 +727,22 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       }
     });
 
-    layaDecision = layaResult.decision;
+    governanceDecision = governanceResult.decision;
 
     if (marketGovernanceService.getMode() === 'ACTIVE') {
-      const explicitlyAuthorized = layaResult.executed && layaResult.decision.action === 'AUTHORIZE';
+      const explicitlyAuthorized = governanceResult.executed && governanceResult.decision.action === 'AUTHORIZE';
       if (!explicitlyAuthorized) {
-        console.warn(`[LAYA FAIL-CLOSED] Entrada bloqueada em ${signal.symbol} | action=${layaResult.decision.action} | reason=${layaResult.decision.rationaleCode} | error=${layaResult.error || layaResult.rejectionReason || 'none'}`);
+        console.warn(`[MARKET GOVERNANCE FAIL-CLOSED] Entrada bloqueada em ${signal.symbol} | action=${governanceResult.decision.action} | reason=${governanceResult.decision.rationaleCode} | error=${governanceResult.error || governanceResult.rejectionReason || 'none'}`);
         decision.approved = false;
-        decision.reasons.push(`LAYA_NOT_EXPLICITLY_AUTHORIZED: ${layaResult.decision.rationaleCode}`);
+        decision.reasons.push(`MARKET_GOVERNANCE_NOT_EXPLICITLY_AUTHORIZED: ${governanceResult.decision.rationaleCode}`);
         publishOpportunity();
         return;
       }
-    } else if (layaResult.decision.action === 'VETO') {
-      console.log(`[LAYA SHADOW/OFF VETO] ${signal.symbol} | Razão: ${layaResult.decision.rationaleCode}`);
+    } else if (governanceResult.decision.action === 'VETO') {
+      console.log(`[MARKET GOVERNANCE SHADOW/OFF VETO] ${signal.symbol} | Razão: ${governanceResult.decision.rationaleCode}`);
     }
 
-    // Registra oportunidade e executa com os parâmetros (mecânicos ou modulados pela Laya)
+    // Registra oportunidade e executa com os parâmetros da governança do Mercado; a Laya atua apenas como decisão tática permitida.
     console.log('[IndexFlow][DISPATCHING_TO_ENGINE]', {
       symbol: signal.symbol,
       type: signal.type,
@@ -750,12 +750,12 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       decisionApproved: decision?.approved,
       decisionEntrySide: decision?.entrySide,
       adaptiveRiskApproved: adaptiveRisk?.approved,
-      layaAction: layaDecision?.action,
+      marketGovernanceAction: governanceDecision?.action,
       price: asset.lastPrice,
       bookSource: book?.source
     });
     publishOpportunity();
-    paperTrading.handleSignal(signal, asset.lastPrice, decision, adaptiveRisk, layaDecision);
+    paperTrading.handleSignal(signal, asset.lastPrice, decision, adaptiveRisk, governanceDecision);
   })();
 });
 
@@ -769,7 +769,7 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
     paperTrading.updatePrice(data.symbol, data.price, symState?.book, recentAggression);
     mirrorTrading.updatePrice(data.symbol, data.price);
 
-    // 🧠 Modificação 2 & 3 (Safe-Dev): Governança de Ciclo de Vida da Posição Aberta pela Laya
+    // Governança de posição: regras determinísticas primeiro; Laya tática só atua sobre HOLD neutro.
     const openTrades = paperTrading.getAccountState().openPositions;
     const currentPosition = openTrades.find(p => p.symbol === data.symbol);
     if (currentPosition && marketGovernanceService.getMode() === 'ACTIVE') {
@@ -790,10 +790,19 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
             (currentPosition.type === 'SELL' && imbalance > 3.0 && recentAggression?.dominantSide === 'buy')
           );
 
-          // Só aciona governança ativa se houver evidência contextual estruturada.
-          if (isContrarianWhale || isRunnerExhaustion) {
-            const requestedAction = isContrarianWhale ? 'CLOSE_NOW' : 'EARLY_HARVEST_CLOSE';
-            const intentSubgroup = isContrarianWhale ? 'DEFENSE_CONTRARIAN_FLOW' : 'RUNNER_EVALUATION';
+          // Toda posição é monitorada. Evidências determinísticas continuam soberanas;
+          // sem evidência de hard exit, POSITION_MONITOR retorna HOLD local e abre espaço para a Laya tática.
+          {
+            const requestedAction = isContrarianWhale
+              ? 'CLOSE_NOW'
+              : isRunnerExhaustion
+                ? 'EARLY_HARVEST_CLOSE'
+                : 'HOLD';
+            const intentSubgroup = isContrarianWhale
+              ? 'DEFENSE_CONTRARIAN_FLOW'
+              : isRunnerExhaustion
+                ? 'RUNNER_EVALUATION'
+                : 'POSITION_MONITOR';
             const gov = await marketGovernanceService.requestGovernance({
               stateVersion: 1,
               symbol: data.symbol,
@@ -813,20 +822,32 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
                 l2DepthTop20: symState?.book?.bids?.reduce((s, b) => s + b.amount, 0) || 0,
                 imbalanceRatio: symState?.book?.imbalanceRatio || 1.0,
                 cvdDelta60s: recentAggression?.whaleCount || 0,
+                spreadBps: (() => {
+                  const bid = Number(symState?.book?.bids?.[0]?.price || 0);
+                  const ask = Number(symState?.book?.asks?.[0]?.price || 0);
+                  return bid > 0 && ask > bid ? ((ask - bid) / bid) * 10000 : 0;
+                })(),
+                holdingSeconds: Math.max(0, Math.floor(Date.now() / 1000) - Number(currentPosition.entryTime || 0)),
+                partialTaken: Boolean((currentPosition as any).partialTaken),
                 spoofScore: 0.0,
                 betaDivergence: isContrarianWhale
               }
             }, { currentR });
 
             if (gov.executed && (gov.decision.action === 'CLOSE_NOW' || gov.decision.action === 'EARLY_HARVEST_CLOSE')) {
-              const closeReason = gov.decision.action === 'CLOSE_NOW' ? 'LAYA_CLOSE_NOW' : 'LAYA_EARLY_HARVEST';
+              const tacticalLayaExit = gov.decision.rationaleCode === 'LAYA_TACTICAL_EXIT';
+              const closeReason = tacticalLayaExit
+                ? 'TACTICAL_LAYA_EXIT'
+                : gov.decision.action === 'CLOSE_NOW'
+                  ? 'MARKET_CLOSE_NOW'
+                  : 'MARKET_EARLY_HARVEST';
               const realClose = await clientCopyTrader.closeRealPositionsBeforeMaster(currentPosition);
               if (!realClose.success) {
-                console.error(`[LAYA CLOSE BLOCKED] Não foi possível confirmar o fechamento real de ${data.symbol}. Master permanecerá aberto.`, realClose.errors);
+                console.error(`[POSITION CLOSE BLOCKED] Não foi possível confirmar o fechamento real de ${data.symbol}. Master permanecerá aberto.`, realClose.errors);
                 return;
               }
               currentPosition.exitDecisionId = gov.decision.decisionId;
-              console.log(`[LAYA GOVERNANCE] Fechamento real confirmado/ausente para ${data.symbol}; atualizando Master. Motivo: ${closeReason}`);
+              console.log(`[POSITION GOVERNANCE] Fechamento real confirmado/ausente para ${data.symbol}; atualizando Master. Motivo: ${closeReason}`);
               paperTrading.closePosition(data.symbol, data.price, false, closeReason);
               mirrorTrading.closePosition(data.symbol, data.price, false, closeReason);
             }

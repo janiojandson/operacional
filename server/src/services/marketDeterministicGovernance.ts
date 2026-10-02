@@ -94,6 +94,10 @@ export function evaluateMarketDeterministicGovernance(
       return decision('HOLD', 'HOLD', 'RUNNER_EXTENDING_NO_CONFIRMED_EXHAUSTION', 0.95);
     }
 
+    if (intentSubgroup === 'POSITION_MONITOR') {
+      return decision('HOLD', 'HOLD', 'POSITION_MONITOR_NO_HARD_EXIT', 0.99);
+    }
+
     if (intentSubgroup === 'SCALE_IN_REQUEST') {
       if (currentR >= 1.2 && (currentRisk + proposedRisk) <= MARKET_MAX_PORTFOLIO_RISK_FRACTION) {
         return decision('AUTHORIZE', 'AUTHORIZE_SCALE_IN', 'SCALE_IN_AUTHORIZED', 0.95);

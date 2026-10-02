@@ -44,7 +44,7 @@ test('MarketLayaAdapter usa a Laya original apenas como triagem System 1', async
   assert.strictEqual(seenHeaders.Authorization, 'Bearer test-key');
   assert.strictEqual(seenPayload.state.domain, 'mercado_financeiro');
   assert.strictEqual(seenPayload.state.contractVersion, 'market-laya/v1');
-  assert.match(seenPayload.state.body, /nunca autoriza ordem, tamanho, stop, fechamento/);
+  assert.match(seenPayload.state.body, /Regras de risco e execução continuam fora da Laya/);
   assert.strictEqual(seenPayload.questions.route.type, 'choice');
   assert.deepStrictEqual(Object.keys(seenPayload.questions), ['route']);
   assert.strictEqual(seenPayload.min_confidence, 0.85);
@@ -62,7 +62,7 @@ test('MarketLayaAdapter falha fechado com rota/confiança inválidas', async () 
       json: async () => ({ answers: { route: { choice: 'BUY', answer_confidence: 0.99 } } })
     } as Response)) as any
   });
-  await assert.rejects(() => bad.evaluate(FACTS), /route inválida/);
+  await assert.rejects(() => bad.evaluate(FACTS), /ação inválida em DOMAIN_TRIAGE/);
 });
 
 test('MarketLayaAdapter não aceita LAYA_API_KEY genérica como credencial do Mercado', async () => {
@@ -84,4 +84,68 @@ test('MarketLayaAdapter não aceita LAYA_API_KEY genérica como credencial do Me
     if (previousGeneric === undefined) delete process.env.LAYA_API_KEY;
     else process.env.LAYA_API_KEY = previousGeneric;
   }
+});
+
+test('MarketLayaAdapter decide entrada no lado já permitido pelo projeto', async () => {
+  let seenPayload: any;
+  const adapter = new MarketLayaAdapter({
+    baseUrl: 'https://laya.example',
+    apiKey: 'k',
+    fetchImpl: (async (_url: string, init: any) => {
+      seenPayload = JSON.parse(init.body);
+      return {
+        ok: true,
+        json: async () => ({
+          answers: {
+            action: { choice: 'ENTER_LONG', answer_confidence: 0.92, abstention: 'passed' }
+          },
+          routing: { model: 'multilingual' }
+        })
+      } as Response;
+    }) as any
+  });
+
+  const result = await adapter.evaluateEntry(FACTS);
+  assert.strictEqual(seenPayload.state.stage, 'ENTRY_DECISION');
+  assert.strictEqual(seenPayload.state.contractVersion, 'market-laya-entry/v1');
+  assert.deepStrictEqual(Object.keys(seenPayload.questions), ['action']);
+  assert.deepStrictEqual(
+    Object.keys(seenPayload.questions.action.criteria),
+    ['ENTER_LONG', 'ENTER_SHORT', 'WAIT', 'ABSTAIN']
+  );
+  assert.strictEqual(seenPayload.min_confidence, 0.85);
+  assert.strictEqual(result.action, 'ENTER_LONG');
+  assert.strictEqual(result.confidence, 0.92);
+});
+
+test('MarketLayaAdapter força ABSTAIN em posição quando o upstream abstém', async () => {
+  const adapter = new MarketLayaAdapter({
+    baseUrl: 'https://laya.example',
+    apiKey: 'k',
+    fetchImpl: (async () => ({
+      ok: true,
+      json: async () => ({
+        answers: {
+          action: {
+            choice: 'EXIT',
+            answer_confidence: 0.41,
+            abstention: 'abstained',
+            low_confidence: true
+          }
+        },
+        routing: { model: 'multilingual' }
+      })
+    } as Response)) as any
+  });
+
+  const result = await adapter.evaluatePosition({
+    ...FACTS,
+    intentGroup: 'POSITION_LIFECYCLE',
+    intentSubgroup: 'POSITION_MONITOR',
+    currentR: 0.4,
+    holdingSeconds: 240
+  });
+
+  assert.strictEqual(result.action, 'ABSTAIN');
+  assert.strictEqual(result.lowConfidence, true);
 });
