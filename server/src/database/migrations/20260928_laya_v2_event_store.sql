@@ -62,15 +62,15 @@ END $$;
 -- 2. MIGRAÇÃO SEGURA DAS TABELAS LEGADAS (PRESERVAÇÃO INTEGRAL DE DADOS)
 DO $$ BEGIN
     IF EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'trade_events' AND column_name = 'session_hour'
-    ) THEN
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'trade_events' AND column_name = 'session_hour'
+    ) AND to_regclass('public.trade_events_legacy') IS NULL THEN
         ALTER TABLE trade_events RENAME TO trade_events_legacy;
     END IF;
     IF EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'decision_events' AND column_name = 'rationale_code'
-    ) THEN
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'decision_events' AND column_name = 'decision_type'
+    ) AND to_regclass('public.decision_events_legacy') IS NULL THEN
         ALTER TABLE decision_events RENAME TO decision_events_legacy;
     END IF;
 END $$;

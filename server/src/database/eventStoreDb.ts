@@ -154,8 +154,10 @@ export async function initEventStoreTables(): Promise<void> {
     const fs = await import('fs');
     const path = await import('path');
     const migrationNames = [
-      '20260928_laya_v2_event_store.sql',
-      '20261001_event_store_forensics.sql'
+      // O patch aditivo roda primeiro para reparar schema drift necessário
+      // às views/índices da migração canônica histórica.
+      '20261001_event_store_forensics.sql',
+      '20260928_laya_v2_event_store.sql'
     ];
     for (const migrationName of migrationNames) {
       const candidatePaths = [
@@ -165,8 +167,12 @@ export async function initEventStoreTables(): Promise<void> {
       const migrationPath = candidatePaths.find(p => fs.existsSync(p));
       if (!migrationPath) continue;
       const sql = fs.readFileSync(migrationPath, 'utf8');
-      await query(sql);
-      console.log('[EventStore] ✅ Migração sincronizada:', migrationName);
+      try {
+        await query(sql);
+        console.log('[EventStore] ✅ Migração sincronizada:', migrationName);
+      } catch (migrationErr: any) {
+        console.warn('[EventStore] ⚠️ Migração isolada falhou:', migrationName, migrationErr.message);
+      }
     }
 
     // Blindagem de versionamento do modelo calibrado (p_theory) e métrica de fee drag

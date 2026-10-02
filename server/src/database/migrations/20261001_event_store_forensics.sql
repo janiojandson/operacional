@@ -30,6 +30,7 @@ SET issued_at = COALESCE(issued_at, created_at),
 WHERE issued_at IS NULL OR expires_at IS NULL;
 
 ALTER TABLE trade_events
+  ADD COLUMN IF NOT EXISTS venue VARCHAR(30) NOT NULL DEFAULT 'BingX',
   ADD COLUMN IF NOT EXISTS entry_decision_id UUID,
   ADD COLUMN IF NOT EXISTS exit_decision_id UUID,
   ADD COLUMN IF NOT EXISTS exit_reason_raw VARCHAR(80),
@@ -38,6 +39,9 @@ ALTER TABLE trade_events
   ADD COLUMN IF NOT EXISTS mae_r NUMERIC(8,4) NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS rv_ol NUMERIC(8,4),
   ADD COLUMN IF NOT EXISTS beta_exposure NUMERIC(8,4) NOT NULL DEFAULT 0;
+
+ALTER TABLE IF EXISTS kpi_weekly_snapshots
+  ADD COLUMN IF NOT EXISTS venue VARCHAR(30) NOT NULL DEFAULT 'ALL';
 
 CREATE INDEX IF NOT EXISTS idx_decision_events_action_created
   ON decision_events(normalized_action, created_at DESC);
