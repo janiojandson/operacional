@@ -54,6 +54,8 @@ export interface MarketLayaAdapterOptions {
   privateProxy?: boolean;
   maxConcurrent?: number;
   busyRetryMs?: number;
+  maxQueueWaitMs?: number;
+  maxQueueDepth?: number;
   fetchImpl?: typeof fetch;
 }
 
@@ -76,8 +78,16 @@ export class MarketLayaAdapter {
   private readonly privateProxy: boolean;
   private readonly maxConcurrent: number;
   private readonly busyRetryMs: number;
+  private readonly maxQueueWaitMs: number;
+  private readonly maxQueueDepth: number;
   private activeRequests = 0;
-  private readonly permitWaiters: Array<() => void> = [];
+  private readonly permitWaiters: Array<{
+    resolve: () => void;
+    reject: (error: Error) => void;
+    active: boolean;
+    timer?: ReturnType<typeof setTimeout>;
+  }> = [];
+  private readonly inFlightChoices = new Map<string, Promise<unknown>>();
   private readonly fetchFn: typeof fetch;
 
   constructor(options: MarketLayaAdapterOptions = {}) {
@@ -100,6 +110,21 @@ export class MarketLayaAdapter {
     this.busyRetryMs = Number.isFinite(configuredBusyRetryMs)
       ? Math.max(0, configuredBusyRetryMs)
       : 1000;
+
+    const configuredQueueWaitMs = Number(
+      options.maxQueueWaitMs ?? process.env.MARKET_LAYA_MAX_QUEUE_WAIT_MS ?? 750
+    );
+    this.maxQueueWaitMs = Number.isFinite(configuredQueueWaitMs)
+      ? Math.max(0, configuredQueueWaitMs)
+      : 750;
+
+    const configuredQueueDepth = Number(
+      options.maxQueueDepth ?? process.env.MARKET_LAYA_MAX_QUEUE_DEPTH ?? 16
+    );
+    this.maxQueueDepth = Number.isFinite(configuredQueueDepth)
+      ? Math.max(1, Math.floor(configuredQueueDepth))
+      : 16;
+
     this.fetchFn = options.fetchImpl || fetch;
   }
 
@@ -113,23 +138,58 @@ export class MarketLayaAdapter {
   }
 
   private async acquirePermit(): Promise<void> {
-    if (this.activeRequests < this.maxConcurrent && this.permitWaiters.length === 0) {
+    const liveWaiters = this.permitWaiters.filter((waiter) => waiter.active).length;
+    if (this.activeRequests < this.maxConcurrent && liveWaiters === 0) {
       this.activeRequests += 1;
       return;
     }
+    if (liveWaiters >= this.maxQueueDepth) {
+      throw new Error('LAYA_CLIENT_QUEUE_FULL');
+    }
 
-    await new Promise<void>((resolve) => this.permitWaiters.push(resolve));
+    await new Promise<void>((resolve, reject) => {
+      const waiter = { resolve, reject, active: true } as {
+        resolve: () => void;
+        reject: (error: Error) => void;
+        active: boolean;
+        timer?: ReturnType<typeof setTimeout>;
+      };
+      waiter.timer = setTimeout(() => {
+        if (!waiter.active) return;
+        waiter.active = false;
+        reject(new Error('LAYA_CLIENT_QUEUE_TIMEOUT'));
+      }, this.maxQueueWaitMs);
+      this.permitWaiters.push(waiter);
+    });
     // O permit é transferido diretamente por releasePermit; não reincrementar aqui.
   }
 
   private releasePermit(): void {
-    const next = this.permitWaiters.shift();
-    if (next) {
+    while (this.permitWaiters.length > 0) {
+      const next = this.permitWaiters.shift()!;
+      if (!next.active) continue;
+      next.active = false;
+      if (next.timer) clearTimeout(next.timer);
       // Mantém activeRequests constante: o slot que terminou passa ao próximo waiter.
-      next();
+      next.resolve();
       return;
     }
     this.activeRequests = Math.max(0, this.activeRequests - 1);
+  }
+
+  private async coalesce<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const existing = this.inFlightChoices.get(key) as Promise<T> | undefined;
+    if (existing) return existing;
+
+    const created = work();
+    this.inFlightChoices.set(key, created);
+    try {
+      return await created;
+    } finally {
+      if (this.inFlightChoices.get(key) === created) {
+        this.inFlightChoices.delete(key);
+      }
+    }
   }
 
   private retryAfterMs(response: Response): number {
@@ -179,6 +239,8 @@ export class MarketLayaAdapter {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              'X-Nexus-Client': 'mercado-financeiro',
+              'X-Nexus-Stage': request.stage,
               ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {})
             },
             body: JSON.stringify(payload),
@@ -297,7 +359,8 @@ export class MarketLayaAdapter {
       'A Laya escolhe apenas entre entrar no lado já permitido, esperar ou abster-se. Ela não define tamanho, stop, margem ou tipo de ordem.'
     ].join(' ');
 
-    return this.askChoice<MarketLayaEntryAction>({
+    const key = `ENTRY_DECISION|${facts.symbol}|${facts.side || 'NA'}`;
+    return this.coalesce(key, () => this.askChoice<MarketLayaEntryAction>({
       facts,
       contractVersion: 'market-laya-entry/v1',
       stage: 'ENTRY_DECISION',
@@ -312,7 +375,7 @@ export class MarketLayaAdapter {
       },
       allowed: ['ENTER_LONG', 'ENTER_SHORT', 'WAIT', 'ABSTAIN'] as const,
       minConfidence: Number(process.env.MARKET_LAYA_MIN_CONFIDENCE || 0.85)
-    });
+    }));
   }
 
   /**
@@ -332,7 +395,8 @@ export class MarketLayaAdapter {
       'HOLD mantém a posição sob as proteções existentes; EXIT antecipa o fechamento total; ABSTAIN não cria ação financeira.'
     ].join(' ');
 
-    return this.askChoice<MarketLayaPositionAction>({
+    const key = `POSITION_MANAGEMENT|${facts.symbol}|${facts.side || 'NA'}`;
+    return this.coalesce(key, () => this.askChoice<MarketLayaPositionAction>({
       facts,
       contractVersion: 'market-laya-position/v1',
       stage: 'POSITION_MANAGEMENT',
@@ -346,6 +410,6 @@ export class MarketLayaAdapter {
       },
       allowed: ['HOLD', 'EXIT', 'ABSTAIN'] as const,
       minConfidence: Number(process.env.MARKET_LAYA_MIN_CONFIDENCE || 0.85)
-    });
+    }));
   }
 }

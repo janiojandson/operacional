@@ -42,6 +42,8 @@ test('MarketLayaAdapter usa a Laya original apenas como triagem System 1', async
 
   const result = await adapter.evaluate(FACTS);
   assert.strictEqual(seenHeaders.Authorization, 'Bearer test-key');
+  assert.strictEqual(seenHeaders['X-Nexus-Client'], 'mercado-financeiro');
+  assert.strictEqual(seenHeaders['X-Nexus-Stage'], 'DOMAIN_TRIAGE');
   assert.strictEqual(seenPayload.state.domain, 'mercado_financeiro');
   assert.strictEqual(seenPayload.state.contractVersion, 'market-laya/v1');
   assert.match(seenPayload.state.body, /Regras de risco e execução continuam fora da Laya/);
@@ -249,4 +251,63 @@ test('MarketLayaAdapter limita rigidamente a duas inferências simultâneas', as
   ]);
 
   assert.strictEqual(maxSeen, 2);
+});
+
+test('MarketLayaAdapter coalesce chamadas simultâneas do mesmo ativo e estágio', async () => {
+  let calls = 0;
+  const adapter = new MarketLayaAdapter({
+    baseUrl: 'https://laya.example',
+    apiKey: 'k',
+    maxConcurrent: 1,
+    fetchImpl: (async () => {
+      calls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => ({
+          answers: { action: { choice: 'ENTER_LONG', answer_confidence: 0.94, abstention: 'passed' } },
+          routing: { model: 'multilingual' }
+        })
+      } as any;
+    }) as any
+  });
+
+  const results = await Promise.all([
+    adapter.evaluateEntry(FACTS),
+    adapter.evaluateEntry(FACTS),
+    adapter.evaluateEntry(FACTS)
+  ]);
+  assert.strictEqual(calls, 1);
+  assert.deepStrictEqual(results.map((r) => r.action), ['ENTER_LONG', 'ENTER_LONG', 'ENTER_LONG']);
+});
+
+test('MarketLayaAdapter expira fila local antes que contexto de mercado fique obsoleto', async () => {
+  const adapter = new MarketLayaAdapter({
+    baseUrl: 'https://laya.example',
+    apiKey: 'k',
+    maxConcurrent: 1,
+    maxQueueWaitMs: 5,
+    maxQueueDepth: 2,
+    fetchImpl: (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => ({
+          answers: { action: { choice: 'ENTER_LONG', answer_confidence: 0.94, abstention: 'passed' } }
+        })
+      } as any;
+    }) as any
+  });
+
+  const first = adapter.evaluateEntry({ ...FACTS, symbol: 'BTC/USDT' });
+  await new Promise((resolve) => setTimeout(resolve, 1));
+  await assert.rejects(
+    () => adapter.evaluateEntry({ ...FACTS, symbol: 'ETH/USDT' }),
+    /LAYA_CLIENT_QUEUE_TIMEOUT/
+  );
+  await first;
 });

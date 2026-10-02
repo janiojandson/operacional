@@ -286,12 +286,29 @@ export class MarketGovernanceService {
     const localProtectionAction =
       local.choice === 'CLOSE_NOW' || local.choice === 'EARLY_HARVEST_CLOSE';
 
-    if (
-      this.marketLayaTacticalMode !== 'OFF'
-      && local.choice !== 'VETO'
+    const tacticalEligible =
+      local.choice !== 'VETO'
       && !localProtectionAction
-      && (isPreEntry || isPositionLifecycle)
-    ) {
+      && (isPreEntry || isPositionLifecycle);
+
+    if (this.marketLayaTacticalMode === 'SHADOW' && tacticalEligible) {
+      // SHADOW é observacional de verdade: nunca adiciona latência ao pipeline financeiro.
+      const shadowPromise = isPreEntry
+        ? this.marketLayaAdapter.evaluateEntry(marketFacts)
+        : this.marketLayaAdapter.evaluatePosition(marketFacts);
+      void shadowPromise.then((result) => {
+        console.log(
+          `[LayaNativeMarket:Tactical:SHADOW] symbol=${payload.symbol} ` +
+          `stage=${isPreEntry ? 'ENTRY' : 'POSITION'} action=${result.action} ` +
+          `confidence=${result.confidence.toFixed(4)} abstention=${result.abstention ?? 'none'} ` +
+          `model=${result.routingModel ?? 'n/a'} latencyMs=${result.latencyMs}`
+        );
+      }).catch((err: any) => {
+        console.warn(
+          `[LayaNativeMarket:Tactical:SHADOW] descartada em ${payload.symbol}: ${err?.message || err}`
+        );
+      });
+    } else if (this.marketLayaTacticalMode === 'ACTIVE' && tacticalEligible) {
       try {
         const result = isPreEntry
           ? await this.marketLayaAdapter.evaluateEntry(marketFacts)
@@ -306,7 +323,7 @@ export class MarketGovernanceService {
         };
 
         console.log(
-          `[LayaNativeMarket:Tactical:${this.marketLayaTacticalMode}] symbol=${payload.symbol} ` +
+          `[LayaNativeMarket:Tactical:ACTIVE] symbol=${payload.symbol} ` +
           `stage=${isPreEntry ? 'ENTRY' : 'POSITION'} action=${result.action} ` +
           `confidence=${result.confidence.toFixed(4)} abstention=${result.abstention ?? 'none'} ` +
           `model=${result.routingModel ?? 'n/a'} latencyMs=${result.latencyMs}`
@@ -314,7 +331,7 @@ export class MarketGovernanceService {
       } catch (err: any) {
         tacticalError = err?.message || String(err);
         console.warn(
-          `[LayaNativeMarket:Tactical:${this.marketLayaTacticalMode}] falha em ${payload.symbol}: ${tacticalError}`
+          `[LayaNativeMarket:Tactical:ACTIVE] falha em ${payload.symbol}: ${tacticalError}`
         );
       }
     } else if (

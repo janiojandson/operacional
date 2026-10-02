@@ -389,3 +389,35 @@ test('Laya tática ACTIVE ABSTAIN devolve decisão para governança determiníst
   assert.equal(result.decision.action, 'AUTHORIZE');
   assert.equal(result.decision.rationaleCode, 'V08_IMBALANCE_AGGRESSIVE_APPROVED');
 });
+
+test('Laya tática SHADOW nunca bloqueia o pipeline financeiro aguardando inferência', async () => {
+  let resolveShadow!: (value: any) => void;
+  const pendingShadow = new Promise<any>((resolve) => {
+    resolveShadow = resolve;
+  });
+  const service = new MarketGovernanceService({
+    mode: 'ACTIVE',
+    marketLayaShadowEnabled: false,
+    marketLayaTacticalMode: 'SHADOW',
+    marketLayaAdapter: {
+      evaluateEntry: async () => pendingShadow
+    } as any
+  });
+
+  const result = await Promise.race([
+    service.requestGovernance(createMockRequest({ side: 'BUY' })),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('SHADOW bloqueou o pipeline')), 800)
+    )
+  ]);
+
+  assert.equal(result.executed, true);
+  assert.equal(result.decision.action, 'AUTHORIZE');
+  resolveShadow({
+    action: 'ABSTAIN',
+    confidence: 0.42,
+    abstention: 'abstained',
+    latencyMs: 1
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+});
