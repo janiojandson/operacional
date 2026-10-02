@@ -359,12 +359,18 @@ export class MarketGovernanceService {
 
     if (this.marketLayaTacticalMode === 'ACTIVE' && isPreEntry && local.choice === 'AUTHORIZE') {
       const expected = payload.side === 'SELL' ? 'ENTER_SHORT' : 'ENTER_LONG';
-      if (!tactical || tactical.action !== expected) {
+      if (tacticalError) {
         normalizedAction = 'HOLD';
-        normalizedRationale = tacticalError
-          ? 'LAYA_TACTICAL_UNAVAILABLE'
-          : `LAYA_TACTICAL_${tactical?.action || 'ABSTAIN'}`;
+        normalizedRationale = 'LAYA_TACTICAL_UNAVAILABLE';
+      } else if (tactical?.action === 'WAIT') {
+        normalizedAction = 'HOLD';
+        normalizedRationale = 'LAYA_TACTICAL_WAIT';
+      } else if (tactical?.action && tactical.action !== 'ABSTAIN' && tactical.action !== expected) {
+        normalizedAction = 'HOLD';
+        normalizedRationale = `LAYA_TACTICAL_${tactical.action}`;
       }
+      // ABSTAIN é uma decisão nativa de baixa confiança: não é veto.
+      // Nesse caso, a decisão volta para a governança determinística já aprovada.
     }
 
     if (

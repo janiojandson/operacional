@@ -368,3 +368,24 @@ test('hard exit determinístico permanece soberano e não consulta Laya tática'
   assert.equal(result.decision.action, 'CLOSE_NOW');
   assert.equal(result.decision.rationaleCode, 'DEFENSE_CONTRARIAN_EXIT');
 });
+
+test('Laya tática ACTIVE ABSTAIN devolve decisão para governança determinística', async () => {
+  const service = new MarketGovernanceService({
+    mode: 'ACTIVE',
+    marketLayaShadowEnabled: false,
+    marketLayaTacticalMode: 'ACTIVE',
+    marketLayaAdapter: {
+      evaluateEntry: async () => ({
+        action: 'ABSTAIN',
+        confidence: 0.42,
+        abstention: 'abstained',
+        latencyMs: 1
+      })
+    } as any
+  });
+
+  const result = await service.requestGovernance(createMockRequest({ side: 'BUY' }));
+  assert.equal(result.executed, true);
+  assert.equal(result.decision.action, 'AUTHORIZE');
+  assert.equal(result.decision.rationaleCode, 'V08_IMBALANCE_AGGRESSIVE_APPROVED');
+});
