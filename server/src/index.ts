@@ -1399,9 +1399,7 @@ app.get('/api/assets/:symbol/state', (req, res) => {
     recentSignals: flowEngine.getRecentSignals().filter(s => s.symbol === symbol),
     paperAccount: paperTrading.getAccountState(),
     pairStats,
-    dynamicPairs,
-    clients: clientCopyTrader.getClients(),
-    clientLogs: clientCopyTrader.getLogs()
+    dynamicPairs
   });
 });
 

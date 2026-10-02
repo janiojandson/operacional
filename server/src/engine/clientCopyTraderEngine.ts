@@ -136,6 +136,17 @@ export class ClientCopyTraderEngine {
 
       const tasks: Promise<any>[] = [];
 
+      if (trade.status === 'OPEN' && realClients.length === 0) {
+        const activePlanClients = allConfigs.filter(validClientBase);
+        console.warn('[CopyTrader][REAL_SKIPPED] Master abriu posição, mas não há cliente REAL elegível.', {
+          totalConfigs: allConfigs.length,
+          activePlanClients: activePlanClients.length,
+          realSyncEnabled: allConfigs.filter(c => Number(c.sync_enabled) === 1).length,
+          realConnected: allConfigs.filter(c => Number((c as any).bybit_real_connected) === 1).length,
+          hasRealKey: allConfigs.filter(c => Boolean((c as any).bybit_real_api_key_enc || (!c.bybit_testnet && c.bybit_api_key_enc))).length
+        });
+      }
+
       if (realClients.length > 0) {
         console.log(`[CopyTrader] 📡 Disparando ordem real para ${realClients.length} cliente(s) ativo(s)...`);
         tasks.push(...realClients.map(async (cfg) => {
