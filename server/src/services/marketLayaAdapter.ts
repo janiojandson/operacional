@@ -74,7 +74,7 @@ export class MarketLayaAdapter {
 
   constructor(options: MarketLayaAdapterOptions = {}) {
     this.baseUrl = options.baseUrl || process.env.MARKET_LAYA_NATIVE_URL || '';
-    this.apiKey = options.apiKey || process.env.MARKET_LAYA_API_KEY;
+    this.apiKey = options.apiKey || process.env.MARKET_LAYA_AUTH_TOKEN || process.env.MARKET_LAYA_API_KEY;
     this.timeoutMs = options.timeoutMs ?? Number(process.env.MARKET_LAYA_TIMEOUT_MS || 4000);
     this.fetchFn = options.fetchImpl || fetch;
   }
