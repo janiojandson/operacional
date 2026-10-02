@@ -65,20 +65,24 @@ test('MarketLayaAdapter falha fechado com rota/confiança inválidas', async () 
   await assert.rejects(() => bad.evaluate(FACTS), /ação inválida em DOMAIN_TRIAGE/);
 });
 
-test('MarketLayaAdapter não aceita LAYA_API_KEY genérica como credencial do Mercado', async () => {
+test('MarketLayaAdapter exige credencial em endpoint público', async () => {
+  const previousAuth = process.env.MARKET_LAYA_AUTH_TOKEN;
   const previousMarket = process.env.MARKET_LAYA_API_KEY;
   const previousGeneric = process.env.LAYA_API_KEY;
   try {
+    delete process.env.MARKET_LAYA_AUTH_TOKEN;
     delete process.env.MARKET_LAYA_API_KEY;
     process.env.LAYA_API_KEY = 'legacy-key';
     const adapter = new MarketLayaAdapter({
       baseUrl: 'https://laya.example',
       fetchImpl: (async () => {
-        throw new Error('fetch não deveria ser chamado sem MARKET_LAYA_API_KEY');
+        throw new Error('fetch não deveria ser chamado sem credencial pública');
       }) as any
     });
-    await assert.rejects(() => adapter.evaluate(FACTS), /MARKET_LAYA_API_KEY ausente/);
+    await assert.rejects(() => adapter.evaluate(FACTS), /Credencial Laya ausente/);
   } finally {
+    if (previousAuth === undefined) delete process.env.MARKET_LAYA_AUTH_TOKEN;
+    else process.env.MARKET_LAYA_AUTH_TOKEN = previousAuth;
     if (previousMarket === undefined) delete process.env.MARKET_LAYA_API_KEY;
     else process.env.MARKET_LAYA_API_KEY = previousMarket;
     if (previousGeneric === undefined) delete process.env.LAYA_API_KEY;
@@ -148,4 +152,31 @@ test('MarketLayaAdapter força ABSTAIN em posição quando o upstream abstém', 
 
   assert.strictEqual(result.action, 'ABSTAIN');
   assert.strictEqual(result.lowConfidence, true);
+});
+
+test('MarketLayaAdapter usa proxy privado sem bearer do cliente', async () => {
+  const oldAuth = process.env.MARKET_LAYA_AUTH_TOKEN;
+  const oldCompat = process.env.MARKET_LAYA_API_KEY;
+  try {
+    delete process.env.MARKET_LAYA_AUTH_TOKEN;
+    delete process.env.MARKET_LAYA_API_KEY;
+    let seenHeaders: any = null;
+    const adapter = new MarketLayaAdapter({
+      baseUrl: 'http://nexus-decisor-laya-next.railway.internal:8001',
+      fetchImpl: (async (_url: string, init: any) => {
+        seenHeaders = init.headers;
+        return { ok: true, json: async () => ({ answers: { route: {
+          choice: 'MECHANICAL_PIPELINE', answer_confidence: 0.91, abstention: 'passed'
+        } } }) } as Response;
+      }) as any
+    });
+    const result = await adapter.evaluate(FACTS);
+    assert.strictEqual(seenHeaders.Authorization, undefined);
+    assert.strictEqual(result.route, 'MECHANICAL_PIPELINE');
+  } finally {
+    if (oldAuth === undefined) delete process.env.MARKET_LAYA_AUTH_TOKEN;
+    else process.env.MARKET_LAYA_AUTH_TOKEN = oldAuth;
+    if (oldCompat === undefined) delete process.env.MARKET_LAYA_API_KEY;
+    else process.env.MARKET_LAYA_API_KEY = oldCompat;
+  }
 });

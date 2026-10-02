@@ -51,6 +51,7 @@ export interface MarketLayaAdapterOptions {
   baseUrl?: string;
   apiKey?: string;
   timeoutMs?: number;
+  privateProxy?: boolean;
   fetchImpl?: typeof fetch;
 }
 
@@ -70,12 +71,16 @@ export class MarketLayaAdapter {
   private readonly baseUrl: string;
   private readonly apiKey?: string;
   private readonly timeoutMs: number;
+  private readonly privateProxy: boolean;
   private readonly fetchFn: typeof fetch;
 
   constructor(options: MarketLayaAdapterOptions = {}) {
     this.baseUrl = options.baseUrl || process.env.MARKET_LAYA_NATIVE_URL || '';
     this.apiKey = options.apiKey || process.env.MARKET_LAYA_AUTH_TOKEN || process.env.MARKET_LAYA_API_KEY;
     this.timeoutMs = options.timeoutMs ?? Number(process.env.MARKET_LAYA_TIMEOUT_MS || 4000);
+    this.privateProxy = options.privateProxy
+      ?? (process.env.MARKET_LAYA_PRIVATE_PROXY === 'true'
+        || this.baseUrl.includes('.railway.internal:8001'));
     this.fetchFn = options.fetchImpl || fetch;
   }
 
@@ -83,8 +88,8 @@ export class MarketLayaAdapter {
     if (!this.baseUrl) {
       throw new Error('MARKET_LAYA_NATIVE_URL ausente para contrato nativo do Mercado');
     }
-    if (!this.apiKey) {
-      throw new Error('MARKET_LAYA_API_KEY ausente para contrato nativo do Mercado');
+    if (!this.privateProxy && !this.apiKey) {
+      throw new Error('Credencial Laya ausente para endpoint público do Mercado');
     }
   }
 
@@ -122,7 +127,7 @@ export class MarketLayaAdapter {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.apiKey}`
+          ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {})
         },
         body: JSON.stringify(payload),
         signal: controller.signal
