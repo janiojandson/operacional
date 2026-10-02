@@ -586,9 +586,9 @@ adminRouter.post('/laya/reset-decisions', async (_req: Request, res: Response) =
 // Testa somente a Laya original (upstream) usada em shadow/advisory.
 adminRouter.get('/laya/test-ports', async (_req: Request, res: Response) => {
   const internalUrl = process.env.MARKET_LAYA_NATIVE_URL
-    || 'http://nexus-decisor-laya-next.railway.internal:8080';
-  const publicHost = process.env.RAILWAY_SERVICE_NEXUS_DECISOR_LAYA_NEXT_URL
-    || 'nexus-decisor-laya-next-production.up.railway.app';
+    || 'http://nexus-decisor-laya.railway.internal:8000';
+  const publicHost = process.env.RAILWAY_SERVICE_NEXUS_DECISOR_LAYA_URL
+    || 'nexus-decisor-laya-production.up.railway.app';
   const tests = [
     { name: 'Laya Original Interna', url: internalUrl },
     { name: 'Laya Original Pública', url: `https://${publicHost}` }

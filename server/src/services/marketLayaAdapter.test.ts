@@ -23,7 +23,7 @@ test('MarketLayaAdapter usa a Laya original apenas como triagem System 1', async
   let seenPayload: any;
   let seenHeaders: any;
   const adapter = new MarketLayaAdapter({
-    baseUrl: 'http://laya-next.internal:8080',
+    baseUrl: 'http://nexus-decisor-laya.railway.internal:8000',
     apiKey: 'test-key',
     fetchImpl: (async (_url: string, init: any) => {
       seenPayload = JSON.parse(init.body);
