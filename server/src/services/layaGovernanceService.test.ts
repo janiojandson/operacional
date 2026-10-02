@@ -26,97 +26,145 @@ function createMockRequest(overrides: Partial<LayaGovernanceRequest> = {}): Laya
   };
 }
 
-function layaResponse(choice: string, verdict: string, rationale: string) {
+function neutralShadow(route = 'DEEP_REVIEW') {
   return {
-    success: true,
-    answers: {
-      action: {
-        choice,
-        verdict,
-        rationale,
-        confidence: 0.98,
-        answer_confidence: 0.98
-      }
-    },
-    verdict,
-    rationale_code: rationale,
-    routing: { model: 'laya-v2-quant-fastpath', latency_ms: 1.2 }
-  };
+    evaluate: async () => ({
+      route,
+      routeConfidence: 0.99,
+      operationalRiskScore: 3,
+      operationalRiskConfidence: 0.9,
+      needsLlm: 1,
+      needsLlmConfidence: 0.99,
+      routingModel: 'multilingual',
+      latencyMs: 1
+    })
+  } as any;
 }
 
-test('timeout em PRE_ENTRY retorna NO_ACTION não executado', async () => {
-  const mockFetch = async () => {
-    await new Promise(resolve => setTimeout(resolve, 60));
-    return new Response(JSON.stringify({}), { status: 200 });
-  };
-  const service = new LayaGovernanceService({ fetchImpl: mockFetch as any, timeoutMs: 25, mode: 'ACTIVE' });
-  const result = await service.requestGovernance(createMockRequest());
-  assert.equal(result.executed, false);
-  assert.equal(result.decision.action, 'NO_ACTION');
-  assert.match(result.error || '', /ETIMEDOUT|TIMEOUT/i);
-});
-
-test('timeout em CLOSE_NOW usa fallback local de proteção', async () => {
-  const mockFetch = async () => await new Promise<Response>(() => {});
-  const service = new LayaGovernanceService({ fetchImpl: mockFetch as any, timeoutMs: 25, mode: 'ACTIVE', debounceMs: 0 });
-  const result = await service.requestGovernance(createMockRequest({
-    intentGroup: 'POSITION_LIFECYCLE',
-    intentSubgroup: 'DEFENSE_CONTRARIAN_FLOW',
-    requestedAction: 'CLOSE_NOW',
-    proposedStopLoss: undefined
-  }));
-  assert.equal(result.executed, true);
-  assert.equal(result.decision.action, 'CLOSE_NOW');
-  assert.equal(result.fallbackLocal, true);
-});
-
-test('APPROVE_PASSIVE é preservado como AUTHORIZE + MAKER_POST_ONLY', async () => {
+test('PRE_ENTRY é decidido pelo motor determinístico local, sem depender da Laya', async () => {
   const service = new LayaGovernanceService({
-    fetchImpl: (async () => new Response(JSON.stringify(
-      layaResponse('AUTHORIZE', 'APPROVE_PASSIVE', 'V08_ABSORPTION_PASSIVE_APPROVED')
-    ), { status: 200 })) as any,
-    mode: 'ACTIVE'
+    mode: 'ACTIVE',
+    marketLayaShadowEnabled: false
   });
   const result = await service.requestGovernance(createMockRequest());
+
   assert.equal(result.executed, true);
   assert.equal(result.decision.action, 'AUTHORIZE');
-  assert.equal(result.decision.governance.executionMode, 'MAKER_POST_ONLY');
-  assert.equal(result.decision.rationaleCode, 'V08_ABSORPTION_PASSIVE_APPROVED');
+  assert.equal(result.decision.governance.executionMode, 'TAKER_IOC');
+  assert.equal(result.decision.rationaleCode, 'V08_IMBALANCE_AGGRESSIVE_APPROVED');
+  assert.equal(result.fallbackLocal, true);
   assert.match(result.decision.decisionId, /^[0-9a-f-]{36}$/i);
 });
 
-test('VETO remoto permanece fail-closed com rationale original', async () => {
+test('spread tóxico é vetado pelo Mercado sem chamar Laya', async () => {
+  let shadowCalls = 0;
   const service = new LayaGovernanceService({
-    fetchImpl: (async () => new Response(JSON.stringify(
-      layaResponse('VETO', 'VETO', 'V05_SPOOFING_SUSPECT')
-    ), { status: 200 })) as any,
-    mode: 'ACTIVE'
-  });
-  const result = await service.requestGovernance(createMockRequest());
-  assert.equal(result.executed, false);
-  assert.equal(result.decision.action, 'VETO');
-  assert.equal(result.decision.rationaleCode, 'V05_SPOOFING_SUSPECT');
-});
-
-test('ação fora do contrato vira VETO em PRE_ENTRY', async () => {
-  const service = new LayaGovernanceService({
-    fetchImpl: (async () => new Response(JSON.stringify(
-      layaResponse('BUY', 'BUY', 'UNEXPECTED_ACTION')
-    ), { status: 200 })) as any,
-    mode: 'ACTIVE'
-  });
-  const result = await service.requestGovernance(createMockRequest());
-  assert.equal(result.executed, false);
-  assert.equal(result.decision.action, 'VETO');
-  assert.equal(result.decision.rationaleCode, 'LAYA_CONTRACT_ACTION_INVALID');
-});
-
-test('teto de 3 overrides de cooldown continua ativo', async () => {
-  const service = new LayaGovernanceService({
-    fetchImpl: (async () => new Response(JSON.stringify(
-      layaResponse('OVERRIDE_COOLDOWN', 'OVERRIDE_COOLDOWN', 'COOLDOWN_PARDON_SWEEP_RECLAIM')
-    ), { status: 200 })) as any,
     mode: 'ACTIVE',
+    marketLayaShadowEnabled: true,
+    marketLayaAdapter: {
+      evaluate: async () => {
+        shadowCalls++;
+        return neutralShadow().evaluate();
+      }
+    } as any
+  });
+
+  const result = await service.requestGovernance(createMockRequest({
+    trace: {
+      l2DepthTop20: 250000,
+      imbalanceRatio: 3.2,
+      cvdDelta60s: 400,
+      spoofScore: 0.02,
+      betaDivergence: false,
+      spreadBps: 8.0
+    }
+  }));
+
+  assert.equal(result.executed, false);
+  assert.equal(result.decision.action, 'VETO');
+  assert.equal(result.decision.rationaleCode, 'V01_TOXIC_SPREAD');
+  assert.equal(shadowCalls, 0);
+});
+
+test('Laya shadow adversa não altera autorização determinística do Mercado', async () => {
+  let shadowCalls = 0;
+  const service = new LayaGovernanceService({
+    mode: 'ACTIVE',
+    marketLayaShadowEnabled: true,
+    marketLayaAdapter: {
+      evaluate: async () => {
+        shadowCalls++;
+        return {
+          route: 'ABSTAIN',
+          routeConfidence: 0.55,
+          operationalRiskScore: 3,
+          needsLlm: 1,
+          latencyMs: 1
+        };
+      }
+    } as any
+  });
+
+  const result = await service.requestGovernance(createMockRequest());
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(shadowCalls, 1);
+  assert.equal(result.executed, true);
+  assert.equal(result.decision.action, 'AUTHORIZE');
+  assert.equal(result.decision.rationaleCode, 'V08_IMBALANCE_AGGRESSIVE_APPROVED');
+});
+
+test('falha da Laya shadow não bloqueia decisão determinística', async () => {
+  const service = new LayaGovernanceService({
+    mode: 'ACTIVE',
+    marketLayaShadowEnabled: true,
+    marketLayaAdapter: {
+      evaluate: async () => { throw new Error('laya-next offline'); }
+    } as any
+  });
+
+  const result = await service.requestGovernance(createMockRequest());
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(result.executed, true);
+  assert.equal(result.decision.action, 'AUTHORIZE');
+  assert.equal(result.decision.rationaleCode, 'V08_IMBALANCE_AGGRESSIVE_APPROVED');
+});
+
+test('CLOSE_NOW exige evidência estruturada e prejuízo além de -0.3R', async () => {
+  const service = new LayaGovernanceService({
+    mode: 'ACTIVE',
+    marketLayaShadowEnabled: false
+  });
+
+  const noEvidence = await service.requestGovernance(createMockRequest({
+    intentGroup: 'POSITION_LIFECYCLE',
+    intentSubgroup: 'DEFENSE_CONTRARIAN_FLOW',
+    requestedAction: 'CLOSE_NOW',
+    proposedStopLoss: undefined,
+    currentR: -0.5,
+    evidence: { contrarianFlowConfirmed: false }
+  }));
+  assert.equal(noEvidence.executed, false);
+  assert.equal(noEvidence.decision.action, 'HOLD');
+
+  const confirmed = await service.requestGovernance(createMockRequest({
+    intentGroup: 'POSITION_LIFECYCLE',
+    intentSubgroup: 'DEFENSE_CONTRARIAN_FLOW',
+    requestedAction: 'CLOSE_NOW',
+    proposedStopLoss: undefined,
+    currentR: -0.5,
+    evidence: { contrarianFlowConfirmed: true }
+  }));
+  assert.equal(confirmed.executed, true);
+  assert.equal(confirmed.decision.action, 'CLOSE_NOW');
+  assert.equal(confirmed.decision.rationaleCode, 'DEFENSE_CONTRARIAN_EXIT');
+});
+
+test('teto de 3 overrides de cooldown continua no domínio Mercado', async () => {
+  const service = new LayaGovernanceService({
+    mode: 'ACTIVE',
+    marketLayaShadowEnabled: false,
     debounceMs: 0
   });
   const request = createMockRequest({
@@ -126,10 +174,12 @@ test('teto de 3 overrides de cooldown continua ativo', async () => {
     proposedStopLoss: undefined,
     evidence: { liquiditySweepConfirmed: true, rejectionConfirmed: true }
   });
+
   const r1 = await service.requestGovernance(request);
   const r2 = await service.requestGovernance(request);
   const r3 = await service.requestGovernance(request);
   const r4 = await service.requestGovernance(request);
+
   assert.equal(r1.executed, true);
   assert.equal(r2.executed, true);
   assert.equal(r3.executed, true);
@@ -138,50 +188,39 @@ test('teto de 3 overrides de cooldown continua ativo', async () => {
   assert.equal(service.getMetrics().overridesUsedSession, 3);
 });
 
-test('SHADOW preserva decisão para contrafactual sem executar', async () => {
+test('SHADOW calcula decisão local e preserva contrafactual sem executar', async () => {
   const service = new LayaGovernanceService({
-    fetchImpl: (async () => new Response(JSON.stringify(
-      layaResponse('AUTHORIZE', 'APPROVE_AGGRESSIVE', 'V08_IMBALANCE_AGGRESSIVE_APPROVED')
-    ), { status: 200 })) as any,
-    mode: 'SHADOW'
+    mode: 'SHADOW',
+    marketLayaShadowEnabled: false
   });
+
   const result = await service.requestGovernance(createMockRequest());
   assert.equal(result.executed, false);
+  assert.equal(result.decision.action, 'AUTHORIZE');
+  assert.equal(result.decision.rationaleCode, 'V08_IMBALANCE_AGGRESSIVE_APPROVED');
+
   service.recordCounterfactual(result.decision.decisionId, 2.3);
   const metrics = service.getMetrics();
   assert.equal(metrics.pnlAttributedOverrides, 2.3);
   assert.equal(metrics.recentDecisions[0].decisionId, result.decision.decisionId);
 });
 
-test('Laya nativa shadow não altera a decisão financeira ativa', async () => {
-  let shadowCalls = 0;
-  const marketLayaAdapter = {
-    evaluate: async () => {
-      shadowCalls++;
-      return {
-        route: 'DEEP_REVIEW',
-        routeConfidence: 0.99,
-        operationalRiskScore: 3,
-        needsLlm: 1,
-        latencyMs: 1
-      };
-    }
-  } as any;
-
+test('OFF não cria nova autorização mas mantém ação explícita de proteção', async () => {
   const service = new LayaGovernanceService({
-    marketLayaAdapter,
-    marketLayaShadowEnabled: true,
-    fetchImpl: (async () => new Response(JSON.stringify(
-      layaResponse('AUTHORIZE', 'APPROVE_PASSIVE', 'V08_ABSORPTION_PASSIVE_APPROVED')
-    ), { status: 200 })) as any,
-    mode: 'ACTIVE'
+    mode: 'OFF',
+    marketLayaShadowEnabled: false
   });
 
-  const result = await service.requestGovernance(createMockRequest());
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(shadowCalls, 1);
-  assert.equal(result.executed, true);
-  assert.equal(result.decision.action, 'AUTHORIZE');
-  assert.equal(result.decision.governance.executionMode, 'MAKER_POST_ONLY');
-  assert.equal(result.decision.rationaleCode, 'V08_ABSORPTION_PASSIVE_APPROVED');
+  const preEntry = await service.requestGovernance(createMockRequest());
+  assert.equal(preEntry.executed, false);
+  assert.equal(preEntry.decision.action, 'NO_ACTION');
+
+  const protection = await service.requestGovernance(createMockRequest({
+    intentGroup: 'POSITION_LIFECYCLE',
+    intentSubgroup: 'DEFENSE_CONTRARIAN_FLOW',
+    requestedAction: 'CLOSE_NOW',
+    proposedStopLoss: undefined
+  }));
+  assert.equal(protection.executed, true);
+  assert.equal(protection.decision.action, 'CLOSE_NOW');
 });
