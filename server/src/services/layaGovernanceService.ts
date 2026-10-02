@@ -86,6 +86,15 @@ export class LayaGovernanceService {
   private debounceMs: number;
   private lastCallTs: Map<string, number> = new Map();
   private vetoQuarantineMap: Map<string, { ts: number; reason: string }> = new Map();
+  private decisionAuditContext: Map<string, {
+    intentGroup?: string;
+    intentSubgroup?: string;
+    requestedAction?: string;
+    remoteChoice?: string;
+    remoteVerdict?: string;
+    requestPayload?: Record<string, any>;
+    responsePayload?: Record<string, any>;
+  }> = new Map();
 
   constructor(options: LayaServiceOptions = {}) {
     this.serviceUrl = options.serviceUrl || process.env.LAYA_SERVICE_URL || 'http://nexus-decisor-laya.railway.internal:8000';
@@ -166,7 +175,7 @@ export class LayaGovernanceService {
   private createDefaultFallbackResponse(req: LayaGovernanceRequest, action: any = 'NO_ACTION'): LayaGovernanceResponse {
     const now = Date.now();
     return {
-      decisionId: `local-fallback-${now}`,
+      decisionId: crypto.randomUUID(),
       stateVersion: req.stateVersion,
       issuedAt: now,
       expiresAt: now + 1000,
@@ -212,12 +221,13 @@ export class LayaGovernanceService {
         if (macroPred?.isCircuitBreakerActive) {
           const now = Date.now();
           const vetoDecision: LayaGovernanceResponse = {
-            decisionId: `sentinel-circuit-breaker-${now}`,
+            decisionId: crypto.randomUUID(),
             stateVersion: payload.stateVersion,
             issuedAt: now,
             expiresAt: now + 3000,
             action: 'VETO',
             symbol: payload.symbol,
+            side: payload.side,
             powerMultiplier: 0.5,
             riskPct: 0.2,
             governance: {},
@@ -238,12 +248,13 @@ export class LayaGovernanceService {
         if (macroPred?.regime === 'BEARISH_DUMP' && payload.side === 'BUY') {
           const now = Date.now();
           const vetoDecision: LayaGovernanceResponse = {
-            decisionId: `sentinel-directional-veto-${now}`,
+            decisionId: crypto.randomUUID(),
             stateVersion: payload.stateVersion,
             issuedAt: now,
             expiresAt: now + 3000,
             action: 'VETO',
             symbol: payload.symbol,
+            side: payload.side,
             powerMultiplier: 0.5,
             riskPct: 0.2,
             governance: {},
@@ -275,18 +286,22 @@ export class LayaGovernanceService {
         const currentSpread = Number(payload.trace?.spreadBps || 0);
         if (currentSpread > MAX_SAFE_SPREAD_BPS) {
           const vetoDecision: LayaGovernanceResponse = {
-            decisionId: `local-veto-quarantine-${now}`,
+            decisionId: crypto.randomUUID(),
             stateVersion: payload.stateVersion,
             issuedAt: now,
             expiresAt: now + 2000,
             action: 'VETO',
             symbol: payload.symbol,
+            side: payload.side,
             powerMultiplier: 1.0,
             riskPct: 0.5,
             governance: {},
             rationaleCode: 'SPREAD_TOXIC_VETO' as any,
-            trace: payload.trace
+            trace: payload.trace,
+            signalSource: payload.signalSource || payload.intentSubgroup || 'FLOW_SIGNAL',
+            vetoRuleCode: 'V03_TOXIC_SPREAD'
           };
+          this.logDecision(vetoDecision, false, 'QUARANTINE_ACTIVE_SPREAD_TOXIC');
           return {
             executed: false,
             decision: vetoDecision,
@@ -316,12 +331,13 @@ export class LayaGovernanceService {
       );
 
       const vetoDecision: LayaGovernanceResponse = {
-        decisionId: `local-spread-veto-${now}`,
+        decisionId: crypto.randomUUID(),
         stateVersion: payload.stateVersion,
         issuedAt: now,
         expiresAt: now + 2000,
         action: 'VETO',
         symbol: payload.symbol,
+        side: payload.side,
         powerMultiplier: 1.0,
         riskPct: 0.5,
         governance: {},
@@ -367,6 +383,7 @@ export class LayaGovernanceService {
     });
 
     let finalServiceUrl = this.serviceUrl;
+    let outboundRequestId: string | undefined;
     const publicUrl = process.env.RAILWAY_SERVICE_NEXUS_DECISOR_LAYA_URL
       ? `https://${process.env.RAILWAY_SERVICE_NEXUS_DECISOR_LAYA_URL}`
       : 'https://nexus-decisor-laya-production.up.railway.app';
@@ -478,6 +495,14 @@ export class LayaGovernanceService {
         }
       };
 
+      outboundRequestId = requestId;
+      this.decisionAuditContext.set(requestId, {
+        intentGroup,
+        intentSubgroup,
+        requestedAction,
+        requestPayload: systemOnePayload
+      });
+
       const doFetch = (url: string) => {
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (this.apiKey) headers['x-laya-key'] = this.apiKey;
@@ -511,6 +536,13 @@ export class LayaGovernanceService {
 
       if (!response.ok) {
         const statusText = await response.text().catch(() => '');
+        const currentAudit = this.decisionAuditContext.get(requestId);
+        if (currentAudit) {
+          this.decisionAuditContext.set(requestId, {
+            ...currentAudit,
+            responsePayload: { httpStatus: response.status, body: statusText.slice(0, 2000) }
+          });
+        }
         console.error(`[LayaGovernance] Erro HTTP ${response.status} da Laya em ${finalServiceUrl}:`, statusText.slice(0, 200));
         throw new Error(`HTTP_${response.status}`);
       }
@@ -586,6 +618,17 @@ export class LayaGovernanceService {
         vetoRuleCode: choice === 'VETO' ? (remoteRationale || rationaleCode) : undefined
       };
 
+      this.decisionAuditContext.set(requestId, {
+        ...(this.decisionAuditContext.get(requestId) || {}),
+        intentGroup,
+        intentSubgroup,
+        requestedAction,
+        remoteChoice: rawChoice,
+        remoteVerdict,
+        requestPayload: systemOnePayload,
+        responsePayload: layaRaw
+      });
+
       // 1. Validação temporal de expiração
       if (isProposalExpired(proposal)) {
         return this.handleRejection(proposal, latencyMs, 'REJECTED: PROPOSAL_EXPIRED_OR_DILATED');
@@ -640,8 +683,23 @@ export class LayaGovernanceService {
         `Code: ${errorCode} | Host: ${this.serviceUrl} | Latencia: ${latencyMs.toFixed(1)}ms | Detalhes: ${errorDetails}`
       );
 
+      if (outboundRequestId) {
+        const currentAudit = this.decisionAuditContext.get(outboundRequestId);
+        if (currentAudit) {
+          this.decisionAuditContext.set(outboundRequestId, {
+            ...currentAudit,
+            responsePayload: currentAudit.responsePayload || {
+              errorCode,
+              errorDetails: String(errorDetails).slice(0, 2000),
+              timeout: isTimeout
+            }
+          });
+        }
+      }
+
       if (isProtection) {
         const fallbackDecision = this.createDefaultFallbackResponse(payload, requestedAction);
+        if (outboundRequestId) fallbackDecision.decisionId = outboundRequestId;
         this.logDecision(fallbackDecision, true, 'FALLBACK_LOCAL_PROTECTION');
         return {
           executed: true,
@@ -653,6 +711,7 @@ export class LayaGovernanceService {
       }
 
       const noActionDecision = this.createDefaultFallbackResponse(payload, 'NO_ACTION');
+      if (outboundRequestId) noActionDecision.decisionId = outboundRequestId;
       this.logDecision(noActionDecision, false, `${errorCode}: ${errorDetails}`);
       return {
         executed: false,
@@ -681,6 +740,7 @@ export class LayaGovernanceService {
   }
 
   private logDecision(proposal: LayaGovernanceResponse, executed: boolean, rejectionReason?: string) {
+    const audit = this.decisionAuditContext.get(proposal.decisionId);
     this.recentDecisions.unshift({
       decisionId: proposal.decisionId,
       timestamp: Date.now(),
@@ -701,13 +761,15 @@ export class LayaGovernanceService {
           decisionId: proposal.decisionId,
           decisionType: proposal.action,
           symbol: proposal.symbol,
+          side: proposal.side,
           direction: proposal.side === 'SELL' ? 'SHORT' : proposal.side === 'BUY' ? 'LONG' : null,
           issuedAt: new Date(proposal.issuedAt || Date.now()),
           expiresAt: new Date(proposal.expiresAt || (Date.now() + 3000)),
           latencyMs: this.latencyBuffer[this.latencyBuffer.length - 1] ?? 0,
           action: proposal.action,
+          normalizedAction: proposal.action,
           executed,
-          constitutionRejected: Boolean(rejectionReason),
+          constitutionRejected: Boolean(rejectionReason?.startsWith('REJECTED_BY_CONSTITUTION')),
           rejectionReason,
           powerMultiplier: proposal.powerMultiplier,
           riskPct: proposal.riskPct,
@@ -724,11 +786,24 @@ export class LayaGovernanceService {
           betaDivergence: proposal.trace?.betaDivergence,
           signalSource: proposal.signalSource,
           spreadBps: proposal.trace?.spreadBps,
+          deltaStopBps: Number((audit?.requestPayload as any)?.state?.delta_stop_bps || 0),
+          wallPersistenceMs: Number(proposal.trace?.wallPersistenceMs || 0),
           vetoRuleCode: proposal.vetoRuleCode,
-          runMode: this.mode
+          intentGroup: audit?.intentGroup,
+          intentSubgroup: audit?.intentSubgroup,
+          requestedAction: audit?.requestedAction,
+          governanceMode: this.mode,
+          executionMode: proposal.governance?.executionMode,
+          remoteChoice: audit?.remoteChoice,
+          remoteVerdict: audit?.remoteVerdict,
+          confidenceScore: Number((audit?.responsePayload as any)?.answers?.action?.confidence || 0) || undefined,
+          requestPayload: audit?.requestPayload,
+          responsePayload: audit?.responsePayload,
+          runMode: 'PAPER_MASTER'
         });
       }).catch(() => {});
     } catch {}
+    this.decisionAuditContext.delete(proposal.decisionId);
   }
 }
 

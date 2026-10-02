@@ -329,6 +329,7 @@ export class PaperTradingEngine {
       marginUsd: execution.marginRequired,
       masterExposureRatio: openNotional / masterBalanceAtEntry,
       masterBalanceAtEntry,
+      entryDecisionId: layaProposal?.decisionId,
       strategyVersion: decision.profileVersion,
       decisionFactors: [
         ...decision.reasons,

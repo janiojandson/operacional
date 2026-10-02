@@ -80,6 +80,12 @@ export interface LayaGovernanceRequest {
     rejectionConfirmed?: boolean;
     contrarianFlowConfirmed?: boolean;
     exhaustionConfirmed?: boolean;
+    sweepDirection?: 'DOWN' | 'UP';
+    sweepReferencePrice?: number;
+    sweepExtremePrice?: number;
+    sweepReclaimPrice?: number;
+    sweepBreachBps?: number;
+    sweepConfirmedAt?: number;
   };
   trace: LayaTraceData;
   proposedStopLoss?: number;

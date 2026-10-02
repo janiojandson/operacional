@@ -1,9 +1,30 @@
 import { Trade, OrderBookData, FlowSignal } from '../../../shared/types';
 
+export interface LiquiditySweepEvidence {
+  direction: 'DOWN' | 'UP';
+  referencePrice: number;
+  extremePrice: number;
+  reclaimPrice: number;
+  breachBps: number;
+  detectedAt: number;
+  confirmedAt: number;
+  expiresAt: number;
+}
+
+interface PendingLiquiditySweep {
+  direction: 'DOWN' | 'UP';
+  referencePrice: number;
+  extremePrice: number;
+  breachBps: number;
+  detectedAt: number;
+}
+
 export class FlowEngine {
   private recentTrades: Map<string, Trade[]> = new Map();
   private lastSignals: FlowSignal[] = [];
   private onSignalCallback?: (signal: FlowSignal) => void;
+  private pendingLiquiditySweeps: Map<string, PendingLiquiditySweep> = new Map();
+  private confirmedLiquiditySweeps: Map<string, LiquiditySweepEvidence> = new Map();
 
   constructor(onSignal?: (signal: FlowSignal) => void) {
     this.onSignalCallback = onSignal;
@@ -23,6 +44,9 @@ export class FlowEngine {
     while (trades.length > 0 && trades[0].timestamp < cutoff) {
       trades.shift();
     }
+
+    // Detecta sweep estrutural antes de qualquer retorno antecipado por whale/absorção.
+    this.trackLiquiditySweep(trade, currentBook);
 
     // Check for Whale Aggression (e.g. trade cost > $50,000 for crypto or major forex equivalent)
     if (trade.cost >= 50000) {
@@ -127,6 +151,94 @@ export class FlowEngine {
       return signal;
     }
     return null;
+  }
+
+  private trackLiquiditySweep(trade: Trade, currentBook?: OrderBookData): void {
+    const symbol = trade.symbol;
+    const now = trade.timestamp;
+    const pending = this.pendingLiquiditySweeps.get(symbol);
+    const bestBid = currentBook?.bids?.[0]?.price || 0;
+    const bestAsk = currentBook?.asks?.[0]?.price || 0;
+
+    if (pending) {
+      const ageMs = now - pending.detectedAt;
+      if (ageMs > 3000 || ageMs < 0) {
+        this.pendingLiquiditySweeps.delete(symbol);
+      } else if (ageMs >= 50) {
+        const reclaimedDown = pending.direction === 'DOWN' &&
+          trade.price >= pending.referencePrice &&
+          (!bestBid || bestBid >= pending.referencePrice * 0.9998);
+        const reclaimedUp = pending.direction === 'UP' &&
+          trade.price <= pending.referencePrice &&
+          (!bestAsk || bestAsk <= pending.referencePrice * 1.0002);
+
+        if (reclaimedDown || reclaimedUp) {
+          this.confirmedLiquiditySweeps.set(symbol, {
+            direction: pending.direction,
+            referencePrice: pending.referencePrice,
+            extremePrice: pending.extremePrice,
+            reclaimPrice: trade.price,
+            breachBps: pending.breachBps,
+            detectedAt: pending.detectedAt,
+            confirmedAt: now,
+            expiresAt: now + 8000
+          });
+          this.pendingLiquiditySweeps.delete(symbol);
+          return;
+        }
+      }
+    }
+
+    const trades = this.recentTrades.get(symbol) || [];
+    const priorTrades = trades.slice(0, -1).filter(t => {
+      const age = now - t.timestamp;
+      return age >= 250 && age <= 8000;
+    });
+    if (priorTrades.length < 6 || !Number.isFinite(trade.price) || trade.price <= 0) return;
+
+    const referenceLow = Math.min(...priorTrades.map(t => t.price));
+    const referenceHigh = Math.max(...priorTrades.map(t => t.price));
+    if (!(referenceLow > 0) || !(referenceHigh > 0)) return;
+
+    const spreadBps = bestBid > 0 && bestAsk > bestBid
+      ? ((bestAsk - bestBid) / bestBid) * 10000
+      : 0;
+    const thresholdBps = Math.max(2, Math.min(8, spreadBps > 0 ? spreadBps * 1.5 : 2));
+
+    const downBreachBps = ((referenceLow - trade.price) / referenceLow) * 10000;
+    if (trade.side === 'sell' && downBreachBps >= thresholdBps) {
+      this.pendingLiquiditySweeps.set(symbol, {
+        direction: 'DOWN',
+        referencePrice: referenceLow,
+        extremePrice: trade.price,
+        breachBps: Number(downBreachBps.toFixed(2)),
+        detectedAt: now
+      });
+      return;
+    }
+
+    const upBreachBps = ((trade.price - referenceHigh) / referenceHigh) * 10000;
+    if (trade.side === 'buy' && upBreachBps >= thresholdBps) {
+      this.pendingLiquiditySweeps.set(symbol, {
+        direction: 'UP',
+        referencePrice: referenceHigh,
+        extremePrice: trade.price,
+        breachBps: Number(upBreachBps.toFixed(2)),
+        detectedAt: now
+      });
+    }
+  }
+
+  public getRecentLiquiditySweepEvidence(symbol: string, side?: 'BUY' | 'SELL'): LiquiditySweepEvidence | null {
+    const evidence = this.confirmedLiquiditySweeps.get(symbol);
+    if (!evidence) return null;
+    if (Date.now() > evidence.expiresAt) {
+      this.confirmedLiquiditySweeps.delete(symbol);
+      return null;
+    }
+    if (side === 'BUY' && evidence.direction !== 'DOWN') return null;
+    if (side === 'SELL' && evidence.direction !== 'UP') return null;
+    return { ...evidence };
   }
 
   private emitSignal(signal: FlowSignal) {

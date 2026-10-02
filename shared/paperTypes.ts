@@ -44,6 +44,8 @@ export interface SimulatedTrade {
   isNetPositive?: boolean;
   strategyVersion?: string;
   closeReason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST' | 'CIRCUIT_BREAKER_EMERGENCY' | 'MANUAL';
+  entryDecisionId?: string;
+  exitDecisionId?: string;
   realizedR?: number;
   decisionFactors?: string[];
   isRunner?: boolean;

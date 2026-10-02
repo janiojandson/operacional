@@ -153,15 +153,20 @@ export async function initEventStoreTables(): Promise<void> {
   try {
     const fs = await import('fs');
     const path = await import('path');
-    const candidatePaths = [
-      path.resolve(process.cwd(), 'server/src/database/migrations/20260928_laya_v2_event_store.sql'),
-      path.resolve(process.cwd(), 'src/database/migrations/20260928_laya_v2_event_store.sql'),
+    const migrationNames = [
+      '20260928_laya_v2_event_store.sql',
+      '20261001_event_store_forensics.sql'
     ];
-    const migrationPath = candidatePaths.find(p => fs.existsSync(p));
-    if (migrationPath) {
+    for (const migrationName of migrationNames) {
+      const candidatePaths = [
+        path.resolve(process.cwd(), 'server/src/database/migrations', migrationName),
+        path.resolve(process.cwd(), 'src/database/migrations', migrationName),
+      ];
+      const migrationPath = candidatePaths.find(p => fs.existsSync(p));
+      if (!migrationPath) continue;
       const sql = fs.readFileSync(migrationPath, 'utf8');
       await query(sql);
-      console.log('[EventStore] ✅ Laya Governança v2.0 & Views Looker Studio sincronizadas de:', migrationPath);
+      console.log('[EventStore] ✅ Migração sincronizada:', migrationName);
     }
 
     // Blindagem de versionamento do modelo calibrado (p_theory) e métrica de fee drag

@@ -51,6 +51,9 @@ export interface MasterOrderRow {
   qty?: number;
   notional_usd?: number;
   margin_usd?: number;
+  close_reason?: string | null;
+  entry_decision_id?: string | null;
+  exit_decision_id?: string | null;
 }
 
 // ─── Mirror Account Types ────────────────────────────────────────────────────
@@ -191,7 +194,7 @@ export async function initPaperTables(): Promise<void> {
       session TEXT NOT NULL DEFAULT 'NY',
       day_of_week TEXT NOT NULL DEFAULT 'Seg',
       market_regime TEXT NOT NULL DEFAULT 'TREND',
-      status TEXT NOT NULL DEFAULT 'OPEN' CHECK(status IN ('OPEN', 'CLOSED_TP', 'CLOSED_SL')),
+      status TEXT NOT NULL DEFAULT 'OPEN' CHECK(status IN ('OPEN', 'CLOSED_TP', 'CLOSED_SL', 'CLOSED_PARTIAL_TP')),
       entry_time BIGINT NOT NULL,
       close_time BIGINT,
       signal_reason TEXT,
@@ -212,6 +215,11 @@ export async function initPaperTables(): Promise<void> {
   await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS partial_pnl_usd NUMERIC NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS total_net_pnl NUMERIC NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS is_net_positive INTEGER NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS close_reason TEXT`);
+  await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS entry_decision_id TEXT`);
+  await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS exit_decision_id TEXT`);
+  await query(`ALTER TABLE paper_master_orders DROP CONSTRAINT IF EXISTS paper_master_orders_status_check`);
+  await query(`ALTER TABLE paper_master_orders ADD CONSTRAINT paper_master_orders_status_check CHECK(status IN ('OPEN', 'CLOSED_TP', 'CLOSED_SL', 'CLOSED_PARTIAL_TP'))`);
 
   // ─── Mirror Account Tables ────────────────────────────────────────────────
   await query(`
@@ -248,7 +256,7 @@ export async function initPaperTables(): Promise<void> {
       session TEXT NOT NULL DEFAULT 'NY',
       day_of_week TEXT NOT NULL DEFAULT 'Seg',
       market_regime TEXT NOT NULL DEFAULT 'TREND',
-      status TEXT NOT NULL DEFAULT 'OPEN' CHECK(status IN ('OPEN', 'CLOSED_TP', 'CLOSED_SL')),
+      status TEXT NOT NULL DEFAULT 'OPEN' CHECK(status IN ('OPEN', 'CLOSED_TP', 'CLOSED_SL', 'CLOSED_PARTIAL_TP')),
       entry_time BIGINT NOT NULL,
       close_time BIGINT,
       signal_reason TEXT,
@@ -261,6 +269,8 @@ export async function initPaperTables(): Promise<void> {
   await query(`ALTER TABLE paper_mirror_orders ADD COLUMN IF NOT EXISTS updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000`);
   await query(`ALTER TABLE paper_mirror_orders ADD COLUMN IF NOT EXISTS fee NUMERIC NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE paper_mirror_orders ADD COLUMN IF NOT EXISTS net_pnl NUMERIC NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE paper_mirror_orders DROP CONSTRAINT IF EXISTS paper_mirror_orders_status_check`);
+  await query(`ALTER TABLE paper_mirror_orders ADD CONSTRAINT paper_mirror_orders_status_check CHECK(status IN ('OPEN', 'CLOSED_TP', 'CLOSED_SL', 'CLOSED_PARTIAL_TP'))`);
 
   await query(`CREATE INDEX IF NOT EXISTS idx_paper_master_orders_symbol ON paper_master_orders(symbol)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_paper_master_orders_status ON paper_master_orders(status)`);
@@ -353,7 +363,10 @@ export async function hydrateMasterAccount(): Promise<PaperAccount> {
       : (((Number(row.partial_pnl_usd || 0)) + Number(row.net_pnl || row.pnl_usd || 0)) > 0),
     qty: Number(row.qty || (Number(row.entry_price) > 0 ? (Number(row.notional_usd || 2000) / Number(row.entry_price)) : 0)),
     notionalUsd: Number(row.notional_usd || (Number(row.entry_price) * Number(row.qty || 0)) || 2000),
-    marginUsd: Number(row.margin_usd || ((Number(row.notional_usd || (Number(row.entry_price) * Number(row.qty || 0)) || 2000)) / 10))
+    marginUsd: Number(row.margin_usd || ((Number(row.notional_usd || (Number(row.entry_price) * Number(row.qty || 0)) || 2000)) / 10)),
+    closeReason: row.close_reason ? row.close_reason as any : undefined,
+    entryDecisionId: row.entry_decision_id || undefined,
+    exitDecisionId: row.exit_decision_id || undefined
   });
 
   return {
@@ -401,8 +414,9 @@ export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Prom
        day_of_week, market_regime, status, entry_time, close_time, signal_reason,
        trailing_active, trailing_trigger_price, trailing_stop_price,
        fee, net_pnl, qty, notional_usd, margin_usd, updated_at,
-       partial_taken, partial_pnl_usd, total_net_pnl, is_net_positive
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
+       partial_taken, partial_pnl_usd, total_net_pnl, is_net_positive,
+       close_reason, entry_decision_id, exit_decision_id
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)
      ON CONFLICT (id) DO UPDATE SET
        current_price = EXCLUDED.current_price,
        pnl_usd = EXCLUDED.pnl_usd,
@@ -421,6 +435,9 @@ export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Prom
        partial_pnl_usd = EXCLUDED.partial_pnl_usd,
        total_net_pnl = EXCLUDED.total_net_pnl,
        is_net_positive = EXCLUDED.is_net_positive,
+       close_reason = EXCLUDED.close_reason,
+       entry_decision_id = COALESCE(EXCLUDED.entry_decision_id, paper_master_orders.entry_decision_id),
+       exit_decision_id = COALESCE(EXCLUDED.exit_decision_id, paper_master_orders.exit_decision_id),
        updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
    `,
     [
@@ -455,7 +472,10 @@ export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Prom
       trade.partialTaken ? 1 : 0,
       trade.partialPnlUsd || 0,
       trade.totalNetPnl !== undefined ? trade.totalNetPnl : (trade.netPnl || trade.pnlUsd || 0),
-      trade.isNetPositive ? 1 : ((trade.totalNetPnl ?? trade.netPnl ?? trade.pnlUsd) > 0 ? 1 : 0)
+      trade.isNetPositive ? 1 : ((trade.totalNetPnl ?? trade.netPnl ?? trade.pnlUsd) > 0 ? 1 : 0),
+      trade.closeReason || null,
+      trade.entryDecisionId || null,
+      trade.exitDecisionId || null
     ]
   );
 }

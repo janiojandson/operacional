@@ -205,7 +205,7 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
       let pnlPct = 0;
       let rMultiple = 0;
 
-      if (tradeEvent.status === 'CLOSED_TP') {
+      if (tradeEvent.status === 'CLOSED_TP' || tradeEvent.status === 'CLOSED_PARTIAL_TP') {
         const isRunnerExit = tradeEvent.closeReason === 'RUNNER_TRAILING_EXIT';
         const isTrailingExit = tradeEvent.closeReason === 'TRAILING' || isRunnerExit;
         statusStr = isRunnerExit ? 'MASTER_RUNNER_TRAILING' : (isTrailingExit ? 'MASTER_TRAILING' : 'MASTER_WIN (+2.5R)');
@@ -291,7 +291,7 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
       }).catch(auditErr => {
         console.error('[ShadowAuditor] Erro no shadow mode do Master:', auditErr.message);
       });
-} else if (tradeEvent.status === 'CLOSED_TP' || tradeEvent.status === 'CLOSED_SL') {
+} else if (tradeEvent.status === 'CLOSED_TP' || tradeEvent.status === 'CLOSED_SL' || tradeEvent.status === 'CLOSED_PARTIAL_TP') {
       try {
         const outcome = recordShadowOutcome(
           tradeEvent.symbol,
@@ -305,28 +305,59 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
         }
 
         // Persistência imutável no Event Store v2.0 (PostgreSQL)
-        const exitReason = tradeEvent.closeReason === 'ACTIVE_FLOW_INVALIDATION'
-          ? 'ACTIVE_INVALIDATION'
-          : (tradeEvent.closeReason === 'CIRCUIT_BREAKER_EMERGENCY' ? 'CIRCUIT_BREAKER_EMERGENCY' : (tradeEvent.status === 'CLOSED_SL' ? 'STOP_LOSS_FULL' : (tradeEvent.closeReason === 'RUNNER_TRAILING_EXIT' ? 'RUNNER_TRAILING' : 'WAVE_HARVEST_BREAKEVEN')));
+        const rawCloseReason = tradeEvent.closeReason;
+        const exitReason = rawCloseReason === 'LAYA_CLOSE_NOW'
+          ? 'LAYA_CLOSE_NOW'
+          : rawCloseReason === 'LAYA_EARLY_HARVEST'
+            ? 'LAYA_EARLY_HARVEST'
+            : rawCloseReason === 'ACTIVE_FLOW_INVALIDATION'
+              ? 'ACTIVE_INVALIDATION'
+              : rawCloseReason === 'CIRCUIT_BREAKER_EMERGENCY'
+                ? 'CIRCUIT_BREAKER_EMERGENCY'
+                : tradeEvent.status === 'CLOSED_SL'
+                  ? 'STOP_LOSS_FULL'
+                  : rawCloseReason === 'RUNNER_TRAILING_EXIT'
+                    ? 'RUNNER_TRAILING'
+                    : 'WAVE_HARVEST_BREAKEVEN';
         const rGross = Number(tradeEvent.rMultiple ?? 0);
         const isPostHarvest = Boolean((tradeEvent as any).waveHarvestReached || tradeEvent.partialTaken);
-        const branchClassification = isPostHarvest
-          ? (rGross >= 2.05 ? 'B5_RUNNER_EXTREME' : (rGross >= 1.30 ? 'B4_TARGET_RUNNER' : 'B3_BE_POST_HARVEST'))
-          : (exitReason === 'ACTIVE_INVALIDATION' ? 'B2_INVALIDATION' :
-             exitReason === 'CIRCUIT_BREAKER_EMERGENCY' ? 'B6_MACRO_EMERGENCY' :
-             'B1_STOP_FULL');
+        const branchClassification = exitReason === 'LAYA_CLOSE_NOW'
+          ? 'B7_LAYA_DEFENSE_EXIT'
+          : exitReason === 'LAYA_EARLY_HARVEST'
+            ? 'B8_LAYA_EARLY_HARVEST'
+            : isPostHarvest
+              ? (rGross >= 2.05 ? 'B5_RUNNER_EXTREME' : (rGross >= 1.30 ? 'B4_TARGET_RUNNER' : 'B3_BE_POST_HARVEST'))
+              : (exitReason === 'ACTIVE_INVALIDATION' ? 'B2_INVALIDATION' :
+                 exitReason === 'CIRCUIT_BREAKER_EMERGENCY' ? 'B6_MACRO_EMERGENCY' :
+                 'B1_STOP_FULL');
         const deltaStopBps = tradeEvent.entryPrice && tradeEvent.stopLoss
           ? Math.round((Math.abs(tradeEvent.entryPrice - tradeEvent.stopLoss) / tradeEvent.entryPrice) * 10000)
           : 55;
+        const entryEpoch = Number(tradeEvent.entryTime || 0);
+        const exitEpoch = Number(tradeEvent.closeTime || 0);
+        const entryTs = entryEpoch > 0
+          ? new Date(entryEpoch < 1e12 ? entryEpoch * 1000 : entryEpoch)
+          : new Date(Date.now() - 60000);
+        const exitTs = exitEpoch > 0
+          ? new Date(exitEpoch < 1e12 ? exitEpoch * 1000 : exitEpoch)
+          : new Date();
 
         import('./services/eventStoreService.js').then(({ EventStoreService }) => {
           EventStoreService.recordTradeEvent({
             tradeId: tradeEvent.id,
             symbol: tradeEvent.symbol,
             direction: (tradeEvent.type === 'BUY' || (tradeEvent.type as any) === 'LONG') ? 'LONG' : 'SHORT',
-            entryTs: new Date(tradeEvent.entryTime || (Date.now() - 60000)),
-            exitTs: new Date(tradeEvent.closeTime || Date.now()),
-            exitType: exitReason === 'STOP_LOSS_FULL' ? 'STOP_FULL' : (exitReason === 'ACTIVE_INVALIDATION' ? 'STOP_EARLY' : 'RUNNER'),
+            entryDecisionId: tradeEvent.entryDecisionId,
+            exitDecisionId: tradeEvent.exitDecisionId,
+            entryTs,
+            exitTs,
+            exitType: exitReason === 'STOP_LOSS_FULL'
+              ? 'STOP_FULL'
+              : (exitReason === 'ACTIVE_INVALIDATION' || exitReason === 'LAYA_CLOSE_NOW')
+                ? 'STOP_EARLY'
+                : exitReason === 'LAYA_EARLY_HARVEST'
+                  ? 'EARLY_HARVEST'
+                  : 'RUNNER',
             riskPlannedR: 1.0,
             rGross,
             rNet: rGross,
@@ -375,7 +406,7 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
       } else {
         console.log(`[Mirror] ✅ Replicado ${tradeEvent.type} ${tradeEvent.symbol} @ ${tradeEvent.entryPrice}`);
       }
-    } else if (tradeEvent.status === 'CLOSED_TP' || tradeEvent.status === 'CLOSED_SL') {
+    } else if (tradeEvent.status === 'CLOSED_TP' || tradeEvent.status === 'CLOSED_SL' || tradeEvent.status === 'CLOSED_PARTIAL_TP') {
       const result = mirrorTrading.closePosition(tradeEvent.symbol, tradeEvent.currentPrice, false);
       if (result.success) {
         console.log(`[Mirror] ✅ Fechado ${tradeEvent.symbol} PnL líquido: $${result.pnl?.toFixed(2)}`);
@@ -468,6 +499,8 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
     const book = asset.book;
     let cooldownActive = paperTrading.isCooldownActive(signal.symbol);
     if (cooldownActive) {
+      const sweepEvidence = flowEngine.getRecentLiquiditySweepEvidence(signal.symbol, side);
+      const rejectionConfirmed = signal.type === 'ABSORPTION_BUY' || signal.type === 'ABSORPTION_SELL';
       const pardonResult = await layaGovernanceService.requestGovernance({
         stateVersion: 1,
         symbol: signal.symbol,
@@ -480,10 +513,14 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
         regime: pairConfig?.regime ?? 'TREND',
         signalSource: signal.type,
         evidence: {
-          // O FlowEngine atual detecta absorção/rejeição, mas não possui detector explícito de liquidity sweep.
-          // Portanto o perdão permanece fail-closed até existir evidência real de sweep.
-          liquiditySweepConfirmed: /\bsweep\b/i.test(signal.message || ''),
-          rejectionConfirmed: signal.type === 'ABSORPTION_BUY' || signal.type === 'ABSORPTION_SELL'
+          liquiditySweepConfirmed: Boolean(sweepEvidence),
+          rejectionConfirmed,
+          sweepDirection: sweepEvidence?.direction,
+          sweepReferencePrice: sweepEvidence?.referencePrice,
+          sweepExtremePrice: sweepEvidence?.extremePrice,
+          sweepReclaimPrice: sweepEvidence?.reclaimPrice,
+          sweepBreachBps: sweepEvidence?.breachBps,
+          sweepConfirmedAt: sweepEvidence?.confirmedAt
         },
         trace: {
           l2DepthTop20: book?.bids?.reduce((s, b) => s + b.amount, 0) || 0,
@@ -789,6 +826,7 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
                 console.error(`[LAYA CLOSE BLOCKED] Não foi possível confirmar o fechamento real de ${data.symbol}. Master permanecerá aberto.`, realClose.errors);
                 return;
               }
+              currentPosition.exitDecisionId = gov.decision.decisionId;
               console.log(`[LAYA GOVERNANCE] Fechamento real confirmado/ausente para ${data.symbol}; atualizando Master. Motivo: ${closeReason}`);
               paperTrading.closePosition(data.symbol, data.price, false, closeReason);
               mirrorTrading.closePosition(data.symbol, data.price, false, closeReason);

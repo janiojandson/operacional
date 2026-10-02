@@ -307,13 +307,13 @@ export async function runShadowAudit(
  */
 export function recordShadowOutcome(
   symbol: string,
-  status: 'CLOSED_TP' | 'CLOSED_SL',
+  status: 'CLOSED_TP' | 'CLOSED_SL' | 'CLOSED_PARTIAL_TP',
   pnlUsd: number,
   rMultiple: number,
   pnlPct: number = 0
 ): { outcome: string; verdict: string; savedCapital: boolean; pnlUsd: number; pnlPct: number | null; rMultiple: number } | null {
   const pending = pendingAudits.get(symbol);
-  const isGreen = status === 'CLOSED_TP';
+  const isGreen = status === 'CLOSED_TP' || status === 'CLOSED_PARTIAL_TP';
   const finalPnlPct = normalizeShadowPnlPct(pnlPct);
   const outcomeText = isGreen ? 'GREEN 🟢' : 'RED 🔴';
 
