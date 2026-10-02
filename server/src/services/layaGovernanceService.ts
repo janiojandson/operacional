@@ -9,6 +9,7 @@ import type {
 } from '../../../shared/layaGovernanceTypes.js';
 import { macroSentinelClient } from './macroSentinelService.js';
 import { MarketLayaAdapter } from './marketLayaAdapter.js';
+import { evaluateMarketDeterministicGovernance } from './marketDeterministicGovernance.js';
 
 export const MAX_FINANCIAL_RISK_PCT = 1.5;
 export const MAX_VALIDITY_SPAN_MS = 3000;
@@ -589,6 +590,19 @@ export class LayaGovernanceService {
       const rawChoice = String(layaRaw?.answers?.action?.choice || 'NO_ACTION').toUpperCase();
       const remoteVerdict = String(layaRaw?.answers?.action?.verdict || layaRaw?.verdict || '').toUpperCase();
       const remoteRationale = String(layaRaw?.answers?.action?.rationale || layaRaw?.rationale_code || '');
+
+      if (process.env.MARKET_DETERMINISTIC_GOVERNANCE_SHADOW_ENABLED === 'true') {
+        const local = evaluateMarketDeterministicGovernance(payload);
+        const agrees = local.choice === rawChoice
+          && (!remoteVerdict || local.verdict === remoteVerdict)
+          && (!remoteRationale || local.rationale === remoteRationale);
+        console.log(
+          `[MarketGovernance:SHADOW_COMPARE] symbol=${payload.symbol} agrees=${agrees} ` +
+          `local=${local.choice}/${local.verdict}/${local.rationale} ` +
+          `legacy=${rawChoice}/${remoteVerdict || 'n/a'}/${remoteRationale || 'n/a'}`
+        );
+      }
+
       const now = Date.now();
 
       const allowedActions = intentGroup === 'PRE_ENTRY'
