@@ -760,6 +760,8 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
 });
 
 const activePositionCheckMap = new Map<string, number>();
+/** Evita avaliações/fechamentos táticos concorrentes para o mesmo símbolo. */
+const activePositionGovernanceInFlight = new Set<string>();
 
 const marketManager = new MarketDataManager(flowEngine, (event, data) => {
   broadcast(event, data);
@@ -775,11 +777,14 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
     if (currentPosition && marketGovernanceService.getMode() === 'ACTIVE') {
       const now = Date.now();
       const lastCheck = activePositionCheckMap.get(data.symbol) || 0;
-      // Throttle de 6 segundos entre avaliações de permanência por símbolo
-      if (now - lastCheck > 6000) {
+      // Throttle de 6 segundos entre avaliações de permanência por símbolo.
+      // O lock impede que uma avaliação lenta concorra com outra para o mesmo ativo.
+      if (now - lastCheck > 6000 && !activePositionGovernanceInFlight.has(data.symbol)) {
         activePositionCheckMap.set(data.symbol, now);
+        activePositionGovernanceInFlight.add(data.symbol);
         void (async () => {
-          const isContrarianWhale = recentAggression && recentAggression.whaleCount > 0 &&
+          try {
+            const isContrarianWhale = recentAggression && recentAggression.whaleCount > 0 &&
             ((currentPosition.type === 'BUY' && recentAggression.dominantSide === 'sell') ||
              (currentPosition.type === 'SELL' && recentAggression.dominantSide === 'buy'));
 
@@ -841,16 +846,30 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
                 : gov.decision.action === 'CLOSE_NOW'
                   ? 'MARKET_CLOSE_NOW'
                   : 'MARKET_EARLY_HARVEST';
-              const realClose = await clientCopyTrader.closeRealPositionsBeforeMaster(currentPosition);
+
+              // Revalida imediatamente antes de qualquer fechamento tático.
+              // Um hard stop pode ter encerrado a posição enquanto a Laya estava inferindo.
+              const livePosition = paperTrading.getAccountState().openPositions.find(
+                p => p.symbol === data.symbol
+              );
+              if (!livePosition) {
+                console.log(`[POSITION GOVERNANCE] ${data.symbol} já foi encerrada por proteção determinística; decisão tática descartada.`);
+                return;
+              }
+
+              const realClose = await clientCopyTrader.closeRealPositionsBeforeMaster(livePosition);
               if (!realClose.success) {
                 console.error(`[POSITION CLOSE BLOCKED] Não foi possível confirmar o fechamento real de ${data.symbol}. Master permanecerá aberto.`, realClose.errors);
                 return;
               }
-              currentPosition.exitDecisionId = gov.decision.decisionId;
+              livePosition.exitDecisionId = gov.decision.decisionId;
               console.log(`[POSITION GOVERNANCE] Fechamento real confirmado/ausente para ${data.symbol}; atualizando Master. Motivo: ${closeReason}`);
               paperTrading.closePosition(data.symbol, data.price, false, closeReason);
               mirrorTrading.closePosition(data.symbol, data.price, false, closeReason);
             }
+          }
+          } finally {
+            activePositionGovernanceInFlight.delete(data.symbol);
           }
         })();
       }
