@@ -176,7 +176,9 @@ export class EventStoreService {
         $21, $22,
         $23, $24, $25, $26, $27,
         $28, $29, $30,
-        $31, $32, $33, $34,
+        (SELECT decision_id FROM decision_events WHERE decision_id = $31::uuid),
+        (SELECT decision_id FROM decision_events WHERE decision_id = $32::uuid),
+        $33, $34,
         $35, $36, $37, $38
       )
       ON CONFLICT (trade_id) DO NOTHING
@@ -206,12 +208,31 @@ export class EventStoreService {
 
       const linkedDecisionIds = [entryDecisionId, exitDecisionId].filter((id): id is string => Boolean(id));
       if (linkedDecisionIds.length > 0) {
-        await query(
-          'UPDATE decision_events SET trade_id = $1 WHERE decision_id = ANY($2::uuid[]) AND trade_id IS NULL',
-          [tradeUuid, linkedDecisionIds]
-        ).catch((err: any) => {
+        const reconcileDecisionLinks = async () => {
+          await query(`
+            UPDATE trade_events
+            SET entry_decision_id = CASE
+                  WHEN entry_decision_id IS NULL AND $2::uuid IS NOT NULL
+                   AND EXISTS (SELECT 1 FROM decision_events WHERE decision_id = $2::uuid)
+                  THEN $2::uuid ELSE entry_decision_id END,
+                exit_decision_id = CASE
+                  WHEN exit_decision_id IS NULL AND $3::uuid IS NOT NULL
+                   AND EXISTS (SELECT 1 FROM decision_events WHERE decision_id = $3::uuid)
+                  THEN $3::uuid ELSE exit_decision_id END
+            WHERE trade_id = $1
+          `, [tradeUuid, entryDecisionId, exitDecisionId]);
+          await query(
+            'UPDATE decision_events SET trade_id = $1 WHERE decision_id = ANY($2::uuid[]) AND trade_id IS NULL',
+            [tradeUuid, linkedDecisionIds]
+          );
+        };
+
+        await reconcileDecisionLinks().catch((err: any) => {
           console.error('[EventStore][DECISION_LINK_ERROR]', err?.stack ?? String(err));
         });
+        setTimeout(() => void reconcileDecisionLinks().catch((err: any) => {
+          console.warn('[EventStore][DECISION_LINK_RETRY_WARN]', err?.message || String(err));
+        }), 1000);
       }
 
       await query('SELECT fn_evaluate_session_lockout()').catch((err: any) => {
