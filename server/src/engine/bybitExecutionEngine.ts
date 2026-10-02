@@ -814,6 +814,77 @@ export class BybitExecutionEngine {
     }
   }
 
+  static async closeCopyPosition(
+    clientId: string,
+    symbol: string,
+    targetEnv?: 'REAL' | 'TESTNET'
+  ): Promise<{ success: boolean; orderId?: string; closedQty?: number; sizing?: SizingResult; error?: string }> {
+    const config = await ClientConfigDB.findByClientId(clientId);
+    if (!config || Number(config.is_active) === 0) {
+      return { success: false, error: 'Cliente inativo ou não encontrado.' };
+    }
+
+    let apiKeyEnc = config.bybit_api_key_enc;
+    let apiSecretEnc = config.bybit_api_secret_enc;
+    let testnet = config.bybit_testnet === 1;
+    if (targetEnv === 'TESTNET') {
+      apiKeyEnc = config.bybit_test_api_key_enc || config.bybit_api_key_enc;
+      apiSecretEnc = config.bybit_test_api_secret_enc || config.bybit_api_secret_enc;
+      testnet = true;
+    } else if (targetEnv === 'REAL') {
+      apiKeyEnc = config.bybit_real_api_key_enc || config.bybit_api_key_enc;
+      apiSecretEnc = config.bybit_real_api_secret_enc || config.bybit_api_secret_enc;
+      testnet = false;
+    }
+    if (!apiKeyEnc || !apiSecretEnc) {
+      return { success: false, error: 'Chaves de API não configuradas para este ambiente.' };
+    }
+
+    try {
+      const exchange = createBybitClient(decrypt(apiKeyEnc), decrypt(apiSecretEnc), testnet);
+      const ccxtSymbol = toBybitLinear(symbol);
+      await exchange.loadMarkets();
+      const positions = await exchange.fetchPositions([ccxtSymbol]);
+      const active = (positions as any[]).filter((p: any) =>
+        Number(p?.contracts || p?.info?.size || 0) > 0 &&
+        String(p?.symbol || '') === ccxtSymbol
+      );
+      if (active.length === 0) {
+        return { success: true, closedQty: 0 };
+      }
+
+      let lastOrderId: string | undefined;
+      let totalClosed = 0;
+      for (const pos of active) {
+        const contracts = Number(pos.contracts || pos.info?.size || 0);
+        if (!(contracts > 0)) continue;
+        const isLong = pos.side?.toLowerCase() === 'long' || pos.info?.side?.toLowerCase() === 'buy';
+        const closeSide = isLong ? 'sell' : 'buy';
+        const positionSide = isLong ? 'LONG' : 'SHORT';
+        const order = await exchange.createOrder(ccxtSymbol, 'market', closeSide, contracts, undefined, {
+          reduceOnly: true,
+          positionSide
+        });
+        const state = classifyBybitOrderState(order);
+        if (state === 'REJEITADA' || state === 'CANCELADA') {
+          return { success: false, orderId: order?.id, closedQty: totalClosed, error: `Fechamento retornou estado ${state}` };
+        }
+        lastOrderId = order?.id;
+        totalClosed += contracts;
+      }
+
+      const remainingPositions = await exchange.fetchPositions([ccxtSymbol]).catch(() => []);
+      const remaining = (remainingPositions as any[]).reduce((sum: number, p: any) =>
+        sum + Number(p?.contracts || p?.info?.size || 0), 0);
+      if (remaining > 0) {
+        return { success: false, orderId: lastOrderId, closedQty: totalClosed, error: `Posição ainda aberta após reduceOnly: ${remaining}` };
+      }
+      return { success: true, orderId: lastOrderId, closedQty: totalClosed };
+    } catch (err: any) {
+      return { success: false, error: err?.message || String(err) };
+    }
+  }
+
   static async panicCloseAll(clientId: string, targetEnv?: 'REAL' | 'TESTNET'): Promise<{ success: boolean; closedCount: number; cancelledCount: number; errors: string[] }> {
     const config = await ClientConfigDB.findByClientId(clientId);
     if (!config) {

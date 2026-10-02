@@ -75,6 +75,7 @@ export interface GovernanceExecutionResult {
 
 export class LayaGovernanceService {
   private serviceUrl: string;
+  private apiKey: string;
   private timeoutMs: number;
   private mode: LayaMode;
   private fetchFn: typeof fetch;
@@ -88,6 +89,7 @@ export class LayaGovernanceService {
 
   constructor(options: LayaServiceOptions = {}) {
     this.serviceUrl = options.serviceUrl || process.env.LAYA_SERVICE_URL || 'http://nexus-decisor-laya.railway.internal:8000';
+    this.apiKey = process.env.LAYA_API_KEY || '';
     this.timeoutMs = options.timeoutMs ?? (Number(process.env.LAYA_TIMEOUT_MS) || 1500);
     this.mode = options.mode || (process.env.LAYA_MODE as LayaMode) || 'ACTIVE';
     this.fetchFn = options.fetchImpl || fetch;
@@ -170,6 +172,7 @@ export class LayaGovernanceService {
       expiresAt: now + 1000,
       action,
       symbol: req.symbol,
+      side: req.side,
       powerMultiplier: 1.0,
       riskPct: 0.5,
       governance: {},
@@ -424,12 +427,13 @@ export class LayaGovernanceService {
         ? Number(((Math.abs(currentPrice - proposedStop) / currentPrice) * 10000).toFixed(2))
         : 0;
 
+      const requestId = crypto.randomUUID();
       const systemOnePayload = {
         state: {
           origem: 'mercado_financeiro',
           body: contextDescription,
           stateVersion: '2.0',
-          requestId: crypto.randomUUID(),
+          requestId,
           timestamp: Date.now(),
           symbol: payload.symbol,
           side: payload.side,
@@ -437,22 +441,26 @@ export class LayaGovernanceService {
           proposedStopLoss: proposedStop,
           proposedTakeProfit: Number(payload.proposedTakeProfit || 0),
           delta_stop_bps: deltaStopBps,
-          signalSource: payload.signalSource || 'ABSORPTION_BUY',
+          intentGroup,
+          intentSubgroup,
+          currentR: Number(payload.currentR || 0),
+          evidence: payload.evidence || {},
+          signalSource: payload.signalSource || payload.intentSubgroup || 'FLOW_SIGNAL',
           microstructure: {
             bestBid: Number(payload.trace?.bestBid || 0),
             bestAsk: Number(payload.trace?.bestAsk || 0),
             spreadBps: Number(payload.trace?.spreadBps || 0),
-            depthImbalanceRatio: Number(payload.trace?.depthImbalanceRatio || 1.0),
+            depthImbalanceRatio: Number(payload.trace?.depthImbalanceRatio ?? payload.trace?.imbalanceRatio ?? 1.0),
             whaleWallDetected: Boolean(payload.trace?.whaleWallDetected),
             whaleWallDistancePct: Number(payload.trace?.whaleWallDistancePct || 0),
             whaleWallVolumeUsd: Number(payload.trace?.whaleWallVolumeUsd || 0),
             wall_persistence_ms: Number(payload.trace?.wallPersistenceMs || 0)
           },
           macro: {
-            regime: payload.macro?.regime || 'NEUTRAL',
-            circuitBreakerActive: Boolean(payload.macro?.isCircuitBreakerActive),
-            powerMultiplier: Number(payload.macro?.powerMultiplier || 1.0),
-            btcFundingRate: Number(payload.macro?.btcFundingRate || 0.0001)
+            regime: payload.macro?.regime || macroPred?.regime || 'NEUTRAL',
+            circuitBreakerActive: Boolean(payload.macro?.isCircuitBreakerActive ?? macroPred?.isCircuitBreakerActive ?? false),
+            powerMultiplier: Number(payload.macro?.powerMultiplier ?? macroPred?.powerMultiplier ?? 1.0),
+            btcFundingRate: Number(payload.macro?.btcFundingRate ?? macroPred?.btcFundingRate ?? 0.0001)
           },
           risk: {
             accountEquity: Number(payload.risk?.accountEquity || 10000),
@@ -470,12 +478,16 @@ export class LayaGovernanceService {
         }
       };
 
-      const doFetch = (url: string) => this.fetchFn(`${url}/v1/systemone`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(systemOnePayload),
-        signal: controller.signal
-      });
+      const doFetch = (url: string) => {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (this.apiKey) headers['x-laya-key'] = this.apiKey;
+        return this.fetchFn(`${url}/v1/systemone`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(systemOnePayload),
+          signal: controller.signal
+        });
+      };
 
       let response: Response;
       try {
@@ -504,18 +516,33 @@ export class LayaGovernanceService {
       }
 
       const layaRaw = (await response.json()) as any;
-      const choice = layaRaw?.answers?.action?.choice || 'NO_ACTION';
+      const rawChoice = String(layaRaw?.answers?.action?.choice || 'NO_ACTION').toUpperCase();
+      const remoteVerdict = String(layaRaw?.answers?.action?.verdict || layaRaw?.verdict || '').toUpperCase();
+      const remoteRationale = String(layaRaw?.answers?.action?.rationale || layaRaw?.rationale_code || '');
       const now = Date.now();
 
-      // Desacoplamento constitucional: allowScaleIn só é TRUE se for explicitamente SCALE_IN_REQUEST
+      const allowedActions = intentGroup === 'PRE_ENTRY'
+        ? new Set(['AUTHORIZE', 'VETO'])
+        : intentGroup === 'COOLDOWN_AUDIT'
+          ? new Set(['OVERRIDE_COOLDOWN', 'VETO'])
+          : intentSubgroup === 'DEFENSE_CONTRARIAN_FLOW'
+            ? new Set(['CLOSE_NOW', 'HOLD'])
+            : intentSubgroup === 'RUNNER_EVALUATION'
+              ? new Set(['EARLY_HARVEST_CLOSE', 'CONVERT_TO_SUPER_RUNNER', 'HOLD'])
+              : new Set(['AUTHORIZE', 'VETO']);
+
+      const contractActionValid = allowedActions.has(rawChoice);
+      const safeFallbackAction = intentGroup === 'POSITION_LIFECYCLE' ? 'HOLD' : 'VETO';
+      const choice = contractActionValid ? rawChoice : safeFallbackAction;
+
+      // Desacoplamento constitucional: allowScaleIn só é TRUE se for explicitamente SCALE_IN_REQUEST.
       const isScaleInIntent = intentGroup === 'POSITION_LIFECYCLE' && intentSubgroup === 'SCALE_IN_REQUEST';
-      const allowScaleIn = isScaleInIntent && (choice === 'AUTHORIZE' || choice === 'AUTHORIZE_SCALE_IN');
+      const allowScaleIn = isScaleInIntent && choice === 'AUTHORIZE' && remoteVerdict === 'AUTHORIZE_SCALE_IN';
 
       let baseMultiplier = choice === 'AUTHORIZE' ? 1.5 : 1.0;
-      const layaRationale = layaRaw?.answers?.action?.rationale || '';
-      let rationaleCode = choice === 'AUTHORIZE'
-        ? 'DYNAMIC_POWER_AGGRESSION'
-        : (choice === 'VETO' ? 'LAYA_REMOTE_VETO' : 'NO_OPPORTUNITY');
+      let rationaleCode = contractActionValid
+        ? (remoteRationale || (choice === 'AUTHORIZE' ? 'DYNAMIC_POWER_AGGRESSION' : choice === 'VETO' ? 'LAYA_REMOTE_VETO' : 'NO_OPPORTUNITY'))
+        : 'LAYA_CONTRACT_ACTION_INVALID';
 
       // 🚀 Modulação Ofensiva pelo Sentinel (se score e confiança forem altos)
       if (choice === 'AUTHORIZE' && macroPred && macroPred.confidencePct >= 70) {
@@ -529,24 +556,34 @@ export class LayaGovernanceService {
       }
 
       const finalMultiplier = Math.min(Math.max(baseMultiplier, 0.5), MAX_ALLOWED_RISK_CAP);
+      const normalizedAction = isScaleInIntent && choice === 'AUTHORIZE' && remoteVerdict === 'AUTHORIZE_SCALE_IN'
+        ? 'AUTHORIZE_SCALE_IN'
+        : choice;
+      const executionMode = remoteVerdict === 'APPROVE_PASSIVE'
+        ? 'MAKER_POST_ONLY'
+        : remoteVerdict === 'APPROVE_AGGRESSIVE'
+          ? 'TAKER_IOC'
+          : undefined;
 
       const proposal: LayaGovernanceResponse = {
-        decisionId: `laya-${layaRaw?.model || 'rl'}-${now}`,
+        decisionId: requestId,
         stateVersion: payload.stateVersion,
         issuedAt: now,
         expiresAt: now + 3000,
-        action: choice as any,
+        action: normalizedAction as any,
         symbol: payload.symbol,
+        side: payload.side,
         powerMultiplier: finalMultiplier,
         riskPct: choice === 'AUTHORIZE' ? 1.0 : 0.5,
         governance: {
           allowScaleIn,
-          cooldownOverride: choice === 'OVERRIDE_COOLDOWN'
+          cooldownOverride: choice === 'OVERRIDE_COOLDOWN',
+          executionMode
         },
         rationaleCode: rationaleCode as any,
         trace: payload.trace,
         signalSource: payload.signalSource || payload.intentSubgroup || 'FLOW_SIGNAL',
-        vetoRuleCode: choice === 'VETO' ? (layaRationale || rationaleCode) : undefined
+        vetoRuleCode: choice === 'VETO' ? (remoteRationale || rationaleCode) : undefined
       };
 
       // 1. Validação temporal de expiração
@@ -664,6 +701,7 @@ export class LayaGovernanceService {
           decisionId: proposal.decisionId,
           decisionType: proposal.action,
           symbol: proposal.symbol,
+          direction: proposal.side === 'SELL' ? 'SHORT' : proposal.side === 'BUY' ? 'LONG' : null,
           issuedAt: new Date(proposal.issuedAt || Date.now()),
           expiresAt: new Date(proposal.expiresAt || (Date.now() + 3000)),
           latencyMs: this.latencyBuffer[this.latencyBuffer.length - 1] ?? 0,

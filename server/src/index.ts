@@ -384,7 +384,7 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
             deltaStopBps,
             entryType: (tradeEvent as any).orderType === 'LIMIT' ? 'MAKER_POST_ONLY' : 'TAKER_IOC',
             entryFillStatus: (tradeEvent as any).orderType === 'LIMIT' ? 'FILLED_MAKER' : 'FILLED_TAKER_AGGRESSIVE',
-            runMode: 'SHADOW',
+            runMode: 'PAPER_MASTER',
             waveHarvestReached: Boolean((tradeEvent as any).waveHarvestReached),
             waveHarvestPrice: (tradeEvent as any).waveHarvestPrice,
             whFillType: Boolean((tradeEvent as any).waveHarvestReached) ? 'MAKER_LIMIT' : 'NOT_APPLICABLE',
@@ -526,6 +526,13 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
         requestedAction: 'OVERRIDE_COOLDOWN',
         lastExitMsAgo: Date.now() - (paperTrading.getLastExitTimestamp(signal.symbol) || 0),
         regime: pairConfig?.regime ?? 'TREND',
+        signalSource: signal.type,
+        evidence: {
+          // O FlowEngine atual detecta absorção/rejeição, mas não possui detector explícito de liquidity sweep.
+          // Portanto o perdão permanece fail-closed até existir evidência real de sweep.
+          liquiditySweepConfirmed: /\bsweep\b/i.test(signal.message || ''),
+          rejectionConfirmed: signal.type === 'ABSORPTION_BUY' || signal.type === 'ABSORPTION_SELL'
+        },
         trace: {
           l2DepthTop20: book?.bids?.reduce((s, b) => s + b.amount, 0) || 0,
           imbalanceRatio: book?.imbalanceRatio || 1.0,
@@ -715,6 +722,13 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
         : asset.lastPrice * (1 + profile.stopLossPct / 100)),
       requestedAction: 'AUTHORIZE',
       regime: pairConfig?.regime ?? 'TREND',
+      signalSource: signal.type,
+      risk: {
+        accountEquity: account.balance,
+        currentRiskAggregatePct: account.balance > 0 ? existingAggregateRiskUsd / account.balance : 0,
+        proposedRiskPct: account.balance > 0 ? Number(adaptiveRisk.riskUsd || 0) / account.balance : 0,
+        atr14: 0
+      },
       trace: {
         l2DepthTop20: book?.bids?.reduce((s, b) => s + b.amount, 0) || 0,
         imbalanceRatio: _imbalance,
@@ -727,14 +741,17 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
 
     layaDecision = layaResult.decision;
 
-    if (layaResult.decision.action === 'VETO') {
-      console.log(`[LAYA VETO] Entrada vetada em ${signal.symbol} | Razão: ${layaResult.decision.rationaleCode}`);
-      if (layaGovernanceService.getMode() === 'ACTIVE') {
+    if (layaGovernanceService.getMode() === 'ACTIVE') {
+      const explicitlyAuthorized = layaResult.executed && layaResult.decision.action === 'AUTHORIZE';
+      if (!explicitlyAuthorized) {
+        console.warn(`[LAYA FAIL-CLOSED] Entrada bloqueada em ${signal.symbol} | action=${layaResult.decision.action} | reason=${layaResult.decision.rationaleCode} | error=${layaResult.error || layaResult.rejectionReason || 'none'}`);
         decision.approved = false;
-        decision.reasons.push(`LAYA_VETO: ${layaResult.decision.rationaleCode}`);
+        decision.reasons.push(`LAYA_NOT_EXPLICITLY_AUTHORIZED: ${layaResult.decision.rationaleCode}`);
         publishOpportunity();
         return;
       }
+    } else if (layaResult.decision.action === 'VETO') {
+      console.log(`[LAYA SHADOW/OFF VETO] ${signal.symbol} | Razão: ${layaResult.decision.rationaleCode}`);
     }
 
     // Registra oportunidade e executa com os parâmetros (mecânicos ou modulados pela Laya)
@@ -779,10 +796,14 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
              (currentPosition.type === 'SELL' && recentAggression.dominantSide === 'buy'));
 
           const currentR = currentPosition.rMultiple ?? (currentPosition.pnlPct / 1.0);
-          const isRunnerTarget = currentR >= 1.2;
+          const imbalance = symState?.book?.imbalanceRatio ?? 1.0;
+          const isRunnerExhaustion = currentR >= 1.2 && (
+            (currentPosition.type === 'BUY' && imbalance < 0.30 && recentAggression?.dominantSide === 'sell') ||
+            (currentPosition.type === 'SELL' && imbalance > 3.0 && recentAggression?.dominantSide === 'buy')
+          );
 
-          // Só aciona governança ativa se houver evento contextual crítico
-          if (isContrarianWhale || isRunnerTarget) {
+          // Só aciona governança ativa se houver evidência contextual estruturada.
+          if (isContrarianWhale || isRunnerExhaustion) {
             const requestedAction = isContrarianWhale ? 'CLOSE_NOW' : 'EARLY_HARVEST_CLOSE';
             const intentSubgroup = isContrarianWhale ? 'DEFENSE_CONTRARIAN_FLOW' : 'RUNNER_EVALUATION';
             const gov = await layaGovernanceService.requestGovernance({
@@ -793,7 +814,13 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
               side: currentPosition.type,
               currentPrice: data.price,
               currentR,
+              proposedStopLoss: currentPosition.stopLoss,
               requestedAction,
+              signalSource: intentSubgroup,
+              evidence: {
+                contrarianFlowConfirmed: Boolean(isContrarianWhale),
+                exhaustionConfirmed: Boolean(isRunnerExhaustion)
+              },
               trace: {
                 l2DepthTop20: symState?.book?.bids?.reduce((s, b) => s + b.amount, 0) || 0,
                 imbalanceRatio: symState?.book?.imbalanceRatio || 1.0,
@@ -805,7 +832,12 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
 
             if (gov.executed && (gov.decision.action === 'CLOSE_NOW' || gov.decision.action === 'EARLY_HARVEST_CLOSE')) {
               const closeReason = gov.decision.action === 'CLOSE_NOW' ? 'LAYA_CLOSE_NOW' : 'LAYA_EARLY_HARVEST';
-              console.log(`[LAYA GOVERNANCE] Posição em ${data.symbol} encerrada antecipadamente pela Laya. Motivo: ${closeReason}`);
+              const realClose = await clientCopyTrader.closeRealPositionsBeforeMaster(currentPosition);
+              if (!realClose.success) {
+                console.error(`[LAYA CLOSE BLOCKED] Não foi possível confirmar o fechamento real de ${data.symbol}. Master permanecerá aberto.`, realClose.errors);
+                return;
+              }
+              console.log(`[LAYA GOVERNANCE] Fechamento real confirmado/ausente para ${data.symbol}; atualizando Master. Motivo: ${closeReason}`);
               paperTrading.closePosition(data.symbol, data.price, false, closeReason);
               mirrorTrading.closePosition(data.symbol, data.price, false, closeReason);
             }

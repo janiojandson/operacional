@@ -10,6 +10,7 @@ export type LayaGovernanceAction =
   | 'CONVERT_TO_SUPER_RUNNER'
   | 'AUTHORIZE_SCALE_IN'
   | 'OVERRIDE_COOLDOWN'
+  | 'HOLD'
   | 'NO_ACTION';
 
 export type LayaMode = 'OFF' | 'SHADOW' | 'ACTIVE';
@@ -74,6 +75,12 @@ export interface LayaGovernanceRequest {
   regime?: string;
   currentR?: number;
   clusterExposureUsdt?: number;
+  evidence?: {
+    liquiditySweepConfirmed?: boolean;
+    rejectionConfirmed?: boolean;
+    contrarianFlowConfirmed?: boolean;
+    exhaustionConfirmed?: boolean;
+  };
   trace: LayaTraceData;
   proposedStopLoss?: number;
   proposedTakeProfit?: number;
@@ -99,6 +106,7 @@ export interface LayaGovernanceResponse {
   expiresAt: number;
   action: LayaGovernanceAction;
   symbol: string;
+  side?: 'BUY' | 'SELL';
   powerMultiplier: number;
   riskPct: number;
   governance: LayaGovernanceProposal;

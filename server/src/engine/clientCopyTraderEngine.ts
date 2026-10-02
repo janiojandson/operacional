@@ -140,16 +140,18 @@ export class ClientCopyTraderEngine {
         console.log(`[CopyTrader] 📡 Disparando ordem real para ${realClients.length} cliente(s) ativo(s)...`);
         tasks.push(...realClients.map(async (cfg) => {
           try {
-            const execRes = await BybitExecutionEngine.executeCopyTrade(cfg.client_id, {
-              symbol: trade.symbol,
-              side: trade.type === 'BUY' ? 'BUY' : 'SELL',
-              entryPrice: trade.entryPrice,
-              stopLoss: trade.stopLoss,
-              takeProfit: trade.takeProfit,
-              signalReason: trade.signalReason,
-              powerMultiplier: powerMultiplier || trade.powerMultiplier || 1.5,
-              masterExposureRatio: trade.masterExposureRatio
-            }, 'REAL');
+            const execRes = trade.status === 'OPEN'
+              ? await BybitExecutionEngine.executeCopyTrade(cfg.client_id, {
+                  symbol: trade.symbol,
+                  side: trade.type === 'BUY' ? 'BUY' : 'SELL',
+                  entryPrice: trade.entryPrice,
+                  stopLoss: trade.stopLoss,
+                  takeProfit: trade.takeProfit,
+                  signalReason: trade.signalReason,
+                  powerMultiplier: powerMultiplier || trade.powerMultiplier || 1.5,
+                  masterExposureRatio: trade.masterExposureRatio
+                }, 'REAL')
+              : await BybitExecutionEngine.closeCopyPosition(cfg.client_id, trade.symbol, 'REAL');
 
             if (execRes.success) {
               this.emitLog({
@@ -193,16 +195,18 @@ export class ClientCopyTraderEngine {
         console.log(`[CopyTrader] 🧪 Disparando ordem demo/testnet para ${testClients.length} cliente(s)...`);
         tasks.push(...testClients.map(async (cfg) => {
           try {
-            const execRes = await BybitExecutionEngine.executeCopyTrade(cfg.client_id, {
-              symbol: trade.symbol,
-              side: trade.type === 'BUY' ? 'BUY' : 'SELL',
-              entryPrice: trade.entryPrice,
-              stopLoss: trade.stopLoss,
-              takeProfit: trade.takeProfit,
-              signalReason: trade.signalReason,
-              powerMultiplier: powerMultiplier || trade.powerMultiplier || 1.5,
-              masterExposureRatio: trade.masterExposureRatio
-            }, 'TESTNET');
+            const execRes = trade.status === 'OPEN'
+              ? await BybitExecutionEngine.executeCopyTrade(cfg.client_id, {
+                  symbol: trade.symbol,
+                  side: trade.type === 'BUY' ? 'BUY' : 'SELL',
+                  entryPrice: trade.entryPrice,
+                  stopLoss: trade.stopLoss,
+                  takeProfit: trade.takeProfit,
+                  signalReason: trade.signalReason,
+                  powerMultiplier: powerMultiplier || trade.powerMultiplier || 1.5,
+                  masterExposureRatio: trade.masterExposureRatio
+                }, 'TESTNET')
+              : await BybitExecutionEngine.closeCopyPosition(cfg.client_id, trade.symbol, 'TESTNET');
 
             if (execRes.success) {
               this.emitLog({
@@ -242,6 +246,37 @@ export class ClientCopyTraderEngine {
       }
     } catch (dbErr: any) {
       console.error('[CopyTrader] Erro ao buscar clientes reais do banco:', dbErr.message);
+    }
+  }
+
+  public async closeRealPositionsBeforeMaster(trade: SimulatedTrade): Promise<{ success: boolean; errors: string[] }> {
+    try {
+      const allConfigs = await ClientConfigDB.listAll();
+      const now = Date.now();
+      const realClients = allConfigs.filter((c: any) => {
+        const isExp = c.plan_expires_at ? Number(c.plan_expires_at) < now : false;
+        const isVitrine = c.plan_type === 'VITRINE';
+        const hasRealKey = Boolean(c.bybit_real_api_key_enc || (!c.bybit_testnet && c.bybit_api_key_enc));
+        const realConn = c.bybit_real_connected !== undefined ? Number(c.bybit_real_connected) === 1 : Number(c.api_connected) === 1;
+        return Number(c.is_active) === 1 &&
+          Number(c.plan_active) === 1 &&
+          !isExp &&
+          !isVitrine &&
+          Number(c.sync_enabled) === 1 &&
+          realConn &&
+          hasRealKey;
+      });
+
+      const errors: string[] = [];
+      for (const cfg of realClients) {
+        const result = await BybitExecutionEngine.closeCopyPosition(cfg.client_id, trade.symbol, 'REAL');
+        if (!result.success) {
+          errors.push(`${cfg.client_id}: ${result.error || 'falha de fechamento'}`);
+        }
+      }
+      return { success: errors.length === 0, errors };
+    } catch (err: any) {
+      return { success: false, errors: [err?.message || String(err)] };
     }
   }
 
