@@ -8,6 +8,7 @@ import type {
   LayaMetrics
 } from '../../../shared/layaGovernanceTypes.js';
 import { macroSentinelClient } from './macroSentinelService.js';
+import { MarketLayaAdapter } from './marketLayaAdapter.js';
 
 export const MAX_FINANCIAL_RISK_PCT = 1.5;
 export const MAX_VALIDITY_SPAN_MS = 3000;
@@ -60,8 +61,10 @@ export interface LayaServiceOptions {
   timeoutMs?: number;
   mode?: LayaMode;
   fetchImpl?: typeof fetch;
-  /** Janela de supressão de chamadas repetidas por símbolo em ms (0 = desativado). Configurável via LAYA_DEBOUNCE_MS */
+  /** Janela de supressão de chamadas repetidas por símbolo em ms (0 = desativado). */
   debounceMs?: number;
+  nativeLayaAdapter?: MarketLayaAdapter;
+  nativeShadowEnabled?: boolean;
 }
 
 export interface GovernanceExecutionResult {
@@ -84,6 +87,8 @@ export class LayaGovernanceService {
   private pnlAttributedOverrides: number = 0;
   private recentDecisions: LayaMetrics['recentDecisions'] = [];
   private debounceMs: number;
+  private nativeLayaAdapter: MarketLayaAdapter;
+  private nativeShadowEnabled: boolean;
   private lastCallTs: Map<string, number> = new Map();
   private vetoQuarantineMap: Map<string, { ts: number; reason: string }> = new Map();
   private decisionAuditContext: Map<string, {
@@ -103,6 +108,9 @@ export class LayaGovernanceService {
     this.mode = options.mode || (process.env.LAYA_MODE as LayaMode) || 'ACTIVE';
     this.fetchFn = options.fetchImpl || fetch;
     this.debounceMs = options.debounceMs ?? (Number(process.env.LAYA_DEBOUNCE_MS) || 0);
+    this.nativeLayaAdapter = options.nativeLayaAdapter || new MarketLayaAdapter();
+    this.nativeShadowEnabled = options.nativeShadowEnabled
+      ?? process.env.MARKET_LAYA_SHADOW_ENABLED === 'true';
   }
 
   public setMode(mode: LayaMode): void {
@@ -502,6 +510,23 @@ export class LayaGovernanceService {
         requestedAction,
         requestPayload: systemOnePayload
       });
+
+      if (this.nativeShadowEnabled) {
+        void this.nativeLayaAdapter.evaluate(payload)
+          .then((shadow) => {
+            console.log(
+              `[MarketLayaNative:SHADOW] symbol=${payload.symbol} intent=${intentGroup}/${intentSubgroup} ` +
+              `action=${shadow.action} confidence=${shadow.actionConfidence.toFixed(4)} ` +
+              `risk=${shadow.residualRiskScore ?? 'n/a'} review=${shadow.needsReview ?? 'n/a'} ` +
+              `model=${shadow.routingModel ?? 'n/a'} latencyMs=${shadow.latencyMs.toFixed(1)}`
+            );
+          })
+          .catch((shadowErr: any) => {
+            console.warn(
+              `[MarketLayaNative:SHADOW] falha sem impacto operacional: ${shadowErr?.message || shadowErr}`
+            );
+          });
+      }
 
       const doFetch = (url: string) => {
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
