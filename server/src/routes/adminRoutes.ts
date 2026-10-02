@@ -583,12 +583,15 @@ adminRouter.post('/laya/reset-decisions', async (_req: Request, res: Response) =
   });
 
 // GET /api/admin/laya/test-ports
-// Testa conectividade e latência direta nas portas 8000, 8080 e pública
+// Testa somente a Laya original (upstream) usada em shadow/advisory.
 adminRouter.get('/laya/test-ports', async (_req: Request, res: Response) => {
+  const internalUrl = process.env.MARKET_LAYA_NATIVE_URL
+    || 'http://nexus-decisor-laya-next.railway.internal:8080';
+  const publicHost = process.env.RAILWAY_SERVICE_NEXUS_DECISOR_LAYA_NEXT_URL
+    || 'nexus-decisor-laya-next-production.up.railway.app';
   const tests = [
-    { name: 'Interna 8000', url: 'http://nexus-decisor-laya.railway.internal:8000' },
-    { name: 'Interna 8080', url: 'http://nexus-decisor-laya.railway.internal:8080' },
-    { name: 'Publica', url: 'https://nexus-decisor-laya-production.up.railway.app' }
+    { name: 'Laya Original Interna', url: internalUrl },
+    { name: 'Laya Original Pública', url: `https://${publicHost}` }
   ];
 
   const results: any[] = [];
@@ -599,13 +602,14 @@ adminRouter.get('/laya/test-ports', async (_req: Request, res: Response) => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 2000);
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (process.env.LAYA_API_KEY) headers['x-laya-key'] = process.env.LAYA_API_KEY;
+      const apiKey = process.env.MARKET_LAYA_API_KEY || process.env.LAYA_API_KEY;
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
       const resp = await fetch(`${t.url}/v1/systemone`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
           state: { origem: 'teste_diagnostico', body: 'ping teste de portas' },
-          questions: { action: { type: 'choice', instructions: 'teste', criteria: { OK: 'ok' } } }
+          questions: { action: { type: 'choice', instructions: 'Escolha a opção mais adequada para um ping de diagnóstico.', criteria: { OK: 'diagnóstico saudável', REVIEW: 'diagnóstico inconclusivo' } } }
         }),
         signal: controller.signal
       });

@@ -58,8 +58,6 @@ export function validateConstitutionRules(
 }
 
 export interface LayaServiceOptions {
-  serviceUrl?: string;
-  timeoutMs?: number;
   mode?: LayaMode;
   fetchImpl?: typeof fetch;
   marketLayaAdapter?: MarketLayaAdapter;
@@ -78,9 +76,6 @@ export interface GovernanceExecutionResult {
 }
 
 export class LayaGovernanceService {
-  private serviceUrl: string;
-  private apiKey: string;
-  private timeoutMs: number;
   private mode: LayaMode;
   private fetchFn: typeof fetch;
   private marketLayaAdapter: MarketLayaAdapter;
@@ -103,9 +98,6 @@ export class LayaGovernanceService {
   }> = new Map();
 
   constructor(options: LayaServiceOptions = {}) {
-    this.serviceUrl = options.serviceUrl || process.env.LAYA_SERVICE_URL || 'http://nexus-decisor-laya.railway.internal:8000';
-    this.apiKey = process.env.LAYA_API_KEY || '';
-    this.timeoutMs = options.timeoutMs ?? (Number(process.env.LAYA_TIMEOUT_MS) || 1500);
     this.mode = options.mode || (process.env.MARKET_GOVERNANCE_MODE as LayaMode) || (process.env.LAYA_MODE as LayaMode) || 'ACTIVE';
     this.fetchFn = options.fetchImpl || fetch;
     this.marketLayaAdapter = options.marketLayaAdapter || new MarketLayaAdapter({ fetchImpl: this.fetchFn });
