@@ -760,6 +760,12 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
 });
 
 const activePositionCheckMap = new Map<string, number>();
+const configuredLayaPositionIntervalMs = Number(
+  process.env.MARKET_LAYA_POSITION_INTERVAL_MS || 10000
+);
+const MARKET_LAYA_POSITION_INTERVAL_MS = Number.isFinite(configuredLayaPositionIntervalMs)
+  ? Math.max(6000, configuredLayaPositionIntervalMs)
+  : 10000;
 /** Evita avaliações/fechamentos táticos concorrentes para o mesmo símbolo. */
 const activePositionGovernanceInFlight = new Set<string>();
 
@@ -777,9 +783,9 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
     if (currentPosition && marketGovernanceService.getMode() === 'ACTIVE') {
       const now = Date.now();
       const lastCheck = activePositionCheckMap.get(data.symbol) || 0;
-      // Throttle de 6 segundos entre avaliações de permanência por símbolo.
+      // A Laya tática opera em cadência própria; hard stops continuam no loop normal do mercado.
       // O lock impede que uma avaliação lenta concorra com outra para o mesmo ativo.
-      if (now - lastCheck > 6000 && !activePositionGovernanceInFlight.has(data.symbol)) {
+      if (now - lastCheck > MARKET_LAYA_POSITION_INTERVAL_MS && !activePositionGovernanceInFlight.has(data.symbol)) {
         activePositionCheckMap.set(data.symbol, now);
         activePositionGovernanceInFlight.add(data.symbol);
         void (async () => {

@@ -180,3 +180,73 @@ test('MarketLayaAdapter usa proxy privado sem bearer do cliente', async () => {
     else process.env.MARKET_LAYA_API_KEY = oldCompat;
   }
 });
+
+test('MarketLayaAdapter respeita 503 server busy e faz somente um retry', async () => {
+  let calls = 0;
+  const adapter = new MarketLayaAdapter({
+    baseUrl: 'https://laya.example',
+    apiKey: 'k',
+    busyRetryMs: 0,
+    fetchImpl: (async () => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          ok: false,
+          status: 503,
+          headers: { get: () => '0' }
+        } as any;
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => ({
+          answers: {
+            action: { choice: 'WAIT', answer_confidence: 0.91, abstention: 'passed' }
+          },
+          routing: { model: 'multilingual' }
+        })
+      } as any;
+    }) as any
+  });
+
+  const result = await adapter.evaluateEntry(FACTS);
+  assert.strictEqual(calls, 2);
+  assert.strictEqual(result.action, 'WAIT');
+});
+
+test('MarketLayaAdapter limita rigidamente a duas inferências simultâneas', async () => {
+  let active = 0;
+  let maxSeen = 0;
+  const adapter = new MarketLayaAdapter({
+    baseUrl: 'https://laya.example',
+    apiKey: 'k',
+    maxConcurrent: 2,
+    fetchImpl: (async () => {
+      active += 1;
+      maxSeen = Math.max(maxSeen, active);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      active -= 1;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => ({
+          answers: {
+            action: { choice: 'ABSTAIN', answer_confidence: 0.4, abstention: 'abstained' }
+          },
+          routing: { model: 'multilingual' }
+        })
+      } as any;
+    }) as any
+  });
+
+  await Promise.all([
+    adapter.evaluateEntry({ ...FACTS, symbol: 'BTC/USDT' }),
+    adapter.evaluateEntry({ ...FACTS, symbol: 'ETH/USDT' }),
+    adapter.evaluateEntry({ ...FACTS, symbol: 'SOL/USDT' }),
+    adapter.evaluateEntry({ ...FACTS, symbol: 'XRP/USDT' })
+  ]);
+
+  assert.strictEqual(maxSeen, 2);
+});

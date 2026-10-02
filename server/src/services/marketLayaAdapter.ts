@@ -52,6 +52,8 @@ export interface MarketLayaAdapterOptions {
   apiKey?: string;
   timeoutMs?: number;
   privateProxy?: boolean;
+  maxConcurrent?: number;
+  busyRetryMs?: number;
   fetchImpl?: typeof fetch;
 }
 
@@ -72,6 +74,10 @@ export class MarketLayaAdapter {
   private readonly apiKey?: string;
   private readonly timeoutMs: number;
   private readonly privateProxy: boolean;
+  private readonly maxConcurrent: number;
+  private readonly busyRetryMs: number;
+  private activeRequests = 0;
+  private readonly permitWaiters: Array<() => void> = [];
   private readonly fetchFn: typeof fetch;
 
   constructor(options: MarketLayaAdapterOptions = {}) {
@@ -81,6 +87,19 @@ export class MarketLayaAdapter {
     this.privateProxy = options.privateProxy
       ?? (process.env.MARKET_LAYA_PRIVATE_PROXY === 'true'
         || this.baseUrl.includes('.railway.internal:8001'));
+    const configuredMaxConcurrent = Number(
+      options.maxConcurrent ?? process.env.MARKET_LAYA_MAX_CONCURRENT_CLIENT ?? 2
+    );
+    this.maxConcurrent = Number.isFinite(configuredMaxConcurrent)
+      ? Math.max(1, Math.floor(configuredMaxConcurrent))
+      : 2;
+
+    const configuredBusyRetryMs = Number(
+      options.busyRetryMs ?? process.env.MARKET_LAYA_BUSY_RETRY_MS ?? 1000
+    );
+    this.busyRetryMs = Number.isFinite(configuredBusyRetryMs)
+      ? Math.max(0, configuredBusyRetryMs)
+      : 1000;
     this.fetchFn = options.fetchImpl || fetch;
   }
 
@@ -91,6 +110,35 @@ export class MarketLayaAdapter {
     if (!this.privateProxy && !this.apiKey) {
       throw new Error('Credencial Laya ausente para endpoint público do Mercado');
     }
+  }
+
+  private async acquirePermit(): Promise<void> {
+    if (this.activeRequests < this.maxConcurrent && this.permitWaiters.length === 0) {
+      this.activeRequests += 1;
+      return;
+    }
+
+    await new Promise<void>((resolve) => this.permitWaiters.push(resolve));
+    // O permit é transferido diretamente por releasePermit; não reincrementar aqui.
+  }
+
+  private releasePermit(): void {
+    const next = this.permitWaiters.shift();
+    if (next) {
+      // Mantém activeRequests constante: o slot que terminou passa ao próximo waiter.
+      next();
+      return;
+    }
+    this.activeRequests = Math.max(0, this.activeRequests - 1);
+  }
+
+  private retryAfterMs(response: Response): number {
+    const raw = response.headers?.get?.('retry-after');
+    const seconds = raw ? Number(raw) : NaN;
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.min(Math.max(seconds * 1000, this.busyRetryMs), 2500);
+    }
+    return Math.min(this.busyRetryMs, 2500);
   }
 
   private async askChoice<TAction extends string>(
@@ -119,58 +167,73 @@ export class MarketLayaAdapter {
     };
 
     const started = Date.now();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    await this.acquirePermit();
 
     try {
-      const response = await this.fetchFn(`${this.baseUrl.replace(/\/$/, '')}/v1/systemone`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {})
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
-      if (!response.ok) {
-        throw new Error(`Laya nativa respondeu HTTP ${response.status}`);
+        try {
+          const response = await this.fetchFn(`${this.baseUrl.replace(/\/$/, '')}/v1/systemone`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {})
+            },
+            body: JSON.stringify(payload),
+            signal: controller.signal
+          });
+
+          if (response.status === 503 && attempt === 0) {
+            await new Promise((resolve) => setTimeout(resolve, this.retryAfterMs(response)));
+            continue;
+          }
+
+          if (!response.ok) {
+            throw new Error(`Laya nativa respondeu HTTP ${response.status}`);
+          }
+
+          const data: any = await response.json();
+          const answer = data.answers?.[request.questionName];
+          const rawAction = String(answer?.choice || '').trim().toUpperCase() as TAction;
+
+          if (!request.allowed.includes(rawAction)) {
+            throw new Error(
+              `Laya nativa retornou ação inválida em ${request.stage}: ${rawAction || 'ausente'}`
+            );
+          }
+
+          const confidence = Number(answer?.answer_confidence);
+          if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+            throw new Error('Laya nativa retornou answer_confidence inválida');
+          }
+
+          const abstention = typeof answer?.abstention === 'string' ? answer.abstention : undefined;
+          const lowConfidence = answer?.low_confidence === true || abstention === 'abstained';
+          const effectiveAction = (
+            lowConfidence && request.allowed.includes('ABSTAIN' as TAction)
+              ? ('ABSTAIN' as TAction)
+              : rawAction
+          );
+
+          return {
+            action: effectiveAction,
+            confidence,
+            abstention,
+            lowConfidence,
+            routingModel: typeof data.routing?.model === 'string' ? data.routing.model : undefined,
+            latencyMs: Date.now() - started,
+            raw: data
+          };
+        } finally {
+          clearTimeout(timer);
+        }
       }
 
-      const data: any = await response.json();
-      const answer = data.answers?.[request.questionName];
-      const rawAction = String(answer?.choice || '').trim().toUpperCase() as TAction;
-
-      if (!request.allowed.includes(rawAction)) {
-        throw new Error(
-          `Laya nativa retornou ação inválida em ${request.stage}: ${rawAction || 'ausente'}`
-        );
-      }
-
-      const confidence = Number(answer?.answer_confidence);
-      if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
-        throw new Error('Laya nativa retornou answer_confidence inválida');
-      }
-
-      const abstention = typeof answer?.abstention === 'string' ? answer.abstention : undefined;
-      const lowConfidence = answer?.low_confidence === true || abstention === 'abstained';
-      const effectiveAction = (
-        lowConfidence && request.allowed.includes('ABSTAIN' as TAction)
-          ? ('ABSTAIN' as TAction)
-          : rawAction
-      );
-
-      return {
-        action: effectiveAction,
-        confidence,
-        abstention,
-        lowConfidence,
-        routingModel: typeof data.routing?.model === 'string' ? data.routing.model : undefined,
-        latencyMs: Date.now() - started,
-        raw: data
-      };
+      throw new Error('Laya nativa respondeu HTTP 503 após retry');
     } finally {
-      clearTimeout(timer);
+      this.releasePermit();
     }
   }
 
