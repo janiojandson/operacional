@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { LayaGovernanceService } from './layaGovernanceService.js';
+import { LayaGovernanceService, MarketGovernanceService } from './layaGovernanceService.js';
 import type { LayaGovernanceRequest } from '../../../shared/layaGovernanceTypes.js';
 
 function createMockRequest(overrides: Partial<LayaGovernanceRequest> = {}): LayaGovernanceRequest {
@@ -164,8 +164,7 @@ test('CLOSE_NOW exige evidência estruturada e prejuízo além de -0.3R', async 
 test('teto de 3 overrides de cooldown continua no domínio Mercado', async () => {
   const service = new LayaGovernanceService({
     mode: 'ACTIVE',
-    marketLayaShadowEnabled: false,
-    debounceMs: 0
+    marketLayaShadowEnabled: false
   });
   const request = createMockRequest({
     intentGroup: 'COOLDOWN_AUDIT',
@@ -223,4 +222,26 @@ test('OFF não cria nova autorização mas mantém ação explícita de proteç�
   }));
   assert.equal(protection.executed, true);
   assert.equal(protection.decision.action, 'CLOSE_NOW');
+});
+
+test('MarketGovernanceService é o nome canônico e ignora LAYA_MODE legado', () => {
+  assert.strictEqual(LayaGovernanceService, MarketGovernanceService);
+
+  const previousMarket = process.env.MARKET_GOVERNANCE_MODE;
+  const previousLegacy = process.env.LAYA_MODE;
+  try {
+    delete process.env.MARKET_GOVERNANCE_MODE;
+    process.env.LAYA_MODE = 'OFF';
+    const defaultService = new MarketGovernanceService({ marketLayaShadowEnabled: false });
+    assert.strictEqual(defaultService.getMode(), 'ACTIVE');
+
+    process.env.MARKET_GOVERNANCE_MODE = 'SHADOW';
+    const marketService = new MarketGovernanceService({ marketLayaShadowEnabled: false });
+    assert.strictEqual(marketService.getMode(), 'SHADOW');
+  } finally {
+    if (previousMarket === undefined) delete process.env.MARKET_GOVERNANCE_MODE;
+    else process.env.MARKET_GOVERNANCE_MODE = previousMarket;
+    if (previousLegacy === undefined) delete process.env.LAYA_MODE;
+    else process.env.LAYA_MODE = previousLegacy;
+  }
 });

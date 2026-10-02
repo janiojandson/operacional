@@ -65,3 +65,23 @@ test('MarketLayaAdapter falha fechado com rota/confiança inválidas', async () 
   });
   await assert.rejects(() => bad.evaluate(FACTS), /route inválida/);
 });
+
+test('MarketLayaAdapter não aceita LAYA_API_KEY genérica como credencial do Mercado', async () => {
+  const previousMarket = process.env.MARKET_LAYA_API_KEY;
+  const previousGeneric = process.env.LAYA_API_KEY;
+  try {
+    delete process.env.MARKET_LAYA_API_KEY;
+    process.env.LAYA_API_KEY = 'legacy-key';
+    const adapter = new MarketLayaAdapter({
+      fetchImpl: (async () => {
+        throw new Error('fetch não deveria ser chamado sem MARKET_LAYA_API_KEY');
+      }) as any
+    });
+    await assert.rejects(() => adapter.evaluate(FACTS), /MARKET_LAYA_API_KEY ausente/);
+  } finally {
+    if (previousMarket === undefined) delete process.env.MARKET_LAYA_API_KEY;
+    else process.env.MARKET_LAYA_API_KEY = previousMarket;
+    if (previousGeneric === undefined) delete process.env.LAYA_API_KEY;
+    else process.env.LAYA_API_KEY = previousGeneric;
+  }
+});

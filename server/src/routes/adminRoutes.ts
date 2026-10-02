@@ -602,7 +602,7 @@ adminRouter.get('/laya/test-ports', async (_req: Request, res: Response) => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 2000);
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const apiKey = process.env.MARKET_LAYA_API_KEY || process.env.LAYA_API_KEY;
+      const apiKey = process.env.MARKET_LAYA_API_KEY;
       if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
       const resp = await fetch(`${t.url}/v1/systemone`, {
         method: 'POST',

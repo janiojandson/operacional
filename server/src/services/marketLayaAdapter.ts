@@ -47,14 +47,14 @@ export class MarketLayaAdapter {
     this.baseUrl = options.baseUrl
       || process.env.MARKET_LAYA_NATIVE_URL
       || 'http://nexus-decisor-laya.railway.internal:8000';
-    this.apiKey = options.apiKey || process.env.MARKET_LAYA_API_KEY || process.env.LAYA_API_KEY;
+    this.apiKey = options.apiKey || process.env.MARKET_LAYA_API_KEY;
     this.timeoutMs = options.timeoutMs ?? Number(process.env.MARKET_LAYA_TIMEOUT_MS || 4000);
     this.fetchFn = options.fetchImpl || fetch;
   }
 
   public async evaluate(facts: MarketLayaFacts): Promise<MarketLayaDecision> {
     if (!this.apiKey) {
-      throw new Error('MARKET_LAYA_API_KEY/LAYA_API_KEY ausente para contrato nativo do Mercado');
+      throw new Error('MARKET_LAYA_API_KEY ausente para contrato nativo do Mercado');
     }
     const body = [
       'Contexto do projeto Mercado Financeiro já processado pelos filtros determinísticos do domínio.',

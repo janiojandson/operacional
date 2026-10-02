@@ -62,8 +62,6 @@ export interface LayaServiceOptions {
   fetchImpl?: typeof fetch;
   marketLayaAdapter?: MarketLayaAdapter;
   marketLayaShadowEnabled?: boolean;
-  /** Janela de supressão de chamadas repetidas por símbolo em ms (0 = desativado). Configurável via LAYA_DEBOUNCE_MS */
-  debounceMs?: number;
 }
 
 export interface GovernanceExecutionResult {
@@ -75,7 +73,7 @@ export interface GovernanceExecutionResult {
   latencyMs: number;
 }
 
-export class LayaGovernanceService {
+export class MarketGovernanceService {
   private mode: LayaMode;
   private fetchFn: typeof fetch;
   private marketLayaAdapter: MarketLayaAdapter;
@@ -84,9 +82,6 @@ export class LayaGovernanceService {
   private overridesUsedSession: number = 0;
   private pnlAttributedOverrides: number = 0;
   private recentDecisions: LayaMetrics['recentDecisions'] = [];
-  private debounceMs: number;
-  private lastCallTs: Map<string, number> = new Map();
-  private vetoQuarantineMap: Map<string, { ts: number; reason: string }> = new Map();
   private decisionAuditContext: Map<string, {
     intentGroup?: string;
     intentSubgroup?: string;
@@ -98,12 +93,11 @@ export class LayaGovernanceService {
   }> = new Map();
 
   constructor(options: LayaServiceOptions = {}) {
-    this.mode = options.mode || (process.env.MARKET_GOVERNANCE_MODE as LayaMode) || (process.env.LAYA_MODE as LayaMode) || 'ACTIVE';
+    this.mode = options.mode || (process.env.MARKET_GOVERNANCE_MODE as LayaMode) || 'ACTIVE';
     this.fetchFn = options.fetchImpl || fetch;
     this.marketLayaAdapter = options.marketLayaAdapter || new MarketLayaAdapter({ fetchImpl: this.fetchFn });
     this.marketLayaShadowEnabled = options.marketLayaShadowEnabled
       ?? process.env.MARKET_LAYA_SHADOW_ENABLED === 'true';
-    this.debounceMs = options.debounceMs ?? (Number(process.env.LAYA_DEBOUNCE_MS) || 0);
   }
 
   public setMode(mode: LayaMode): void {
@@ -116,7 +110,7 @@ export class LayaGovernanceService {
 
   /**
    * Zera o estado de sessão: buffer de decisões em memória,
-   * contadores de override, buffer de latência e mapa de debounce.
+   * contadores de override e buffer de latência.
    * Chamado pelo endpoint POST /api/admin/laya/reset-decisions.
    */
   public resetSession(): void {
@@ -124,9 +118,7 @@ export class LayaGovernanceService {
     this.overridesUsedSession = 0;
     this.pnlAttributedOverrides = 0;
     this.latencyBuffer = [];
-    this.lastCallTs.clear();
-    this.vetoQuarantineMap.clear();
-    console.log('[LayaGovernance] Sessão zerada: buffers limpos.');
+    console.log('[MarketGovernance] Sessão zerada: buffers limpos.');
   }
 
   public recordCounterfactual(decisionId: string, resultR: number): void {
@@ -477,5 +469,8 @@ export class LayaGovernanceService {
   }
 }
 
-// Export singleton instance default
-export const layaGovernanceService = new LayaGovernanceService();
+// Nome canônico do domínio Mercado; aliases antigos preservados temporariamente por compatibilidade.
+export { MarketGovernanceService as LayaGovernanceService };
+export type MarketGovernanceServiceOptions = LayaServiceOptions;
+export const marketGovernanceService = new MarketGovernanceService();
+export const layaGovernanceService = marketGovernanceService;
