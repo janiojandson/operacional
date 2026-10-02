@@ -152,3 +152,36 @@ test('SHADOW preserva decisão para contrafactual sem executar', async () => {
   assert.equal(metrics.pnlAttributedOverrides, 2.3);
   assert.equal(metrics.recentDecisions[0].decisionId, result.decision.decisionId);
 });
+
+test('Laya nativa shadow não altera a decisão financeira ativa', async () => {
+  let shadowCalls = 0;
+  const marketLayaAdapter = {
+    evaluate: async () => {
+      shadowCalls++;
+      return {
+        route: 'DEEP_REVIEW',
+        routeConfidence: 0.99,
+        operationalRiskScore: 3,
+        needsLlm: 1,
+        latencyMs: 1
+      };
+    }
+  } as any;
+
+  const service = new LayaGovernanceService({
+    marketLayaAdapter,
+    marketLayaShadowEnabled: true,
+    fetchImpl: (async () => new Response(JSON.stringify(
+      layaResponse('AUTHORIZE', 'APPROVE_PASSIVE', 'V08_ABSORPTION_PASSIVE_APPROVED')
+    ), { status: 200 })) as any,
+    mode: 'ACTIVE'
+  });
+
+  const result = await service.requestGovernance(createMockRequest());
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(shadowCalls, 1);
+  assert.equal(result.executed, true);
+  assert.equal(result.decision.action, 'AUTHORIZE');
+  assert.equal(result.decision.governance.executionMode, 'MAKER_POST_ONLY');
+  assert.equal(result.decision.rationaleCode, 'V08_ABSORPTION_PASSIVE_APPROVED');
+});

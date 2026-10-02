@@ -8,6 +8,7 @@ import type {
   LayaMetrics
 } from '../../../shared/layaGovernanceTypes.js';
 import { macroSentinelClient } from './macroSentinelService.js';
+import { MarketLayaAdapter } from './marketLayaAdapter.js';
 
 export const MAX_FINANCIAL_RISK_PCT = 1.5;
 export const MAX_VALIDITY_SPAN_MS = 3000;
@@ -60,6 +61,8 @@ export interface LayaServiceOptions {
   timeoutMs?: number;
   mode?: LayaMode;
   fetchImpl?: typeof fetch;
+  marketLayaAdapter?: MarketLayaAdapter;
+  marketLayaShadowEnabled?: boolean;
   /** Janela de supressão de chamadas repetidas por símbolo em ms (0 = desativado). Configurável via LAYA_DEBOUNCE_MS */
   debounceMs?: number;
 }
@@ -79,6 +82,8 @@ export class LayaGovernanceService {
   private timeoutMs: number;
   private mode: LayaMode;
   private fetchFn: typeof fetch;
+  private marketLayaAdapter: MarketLayaAdapter;
+  private marketLayaShadowEnabled: boolean;
   private latencyBuffer: number[] = [];
   private overridesUsedSession: number = 0;
   private pnlAttributedOverrides: number = 0;
@@ -102,6 +107,9 @@ export class LayaGovernanceService {
     this.timeoutMs = options.timeoutMs ?? (Number(process.env.LAYA_TIMEOUT_MS) || 1500);
     this.mode = options.mode || (process.env.LAYA_MODE as LayaMode) || 'ACTIVE';
     this.fetchFn = options.fetchImpl || fetch;
+    this.marketLayaAdapter = options.marketLayaAdapter || new MarketLayaAdapter({ fetchImpl: this.fetchFn });
+    this.marketLayaShadowEnabled = options.marketLayaShadowEnabled
+      ?? process.env.MARKET_LAYA_SHADOW_ENABLED === 'true';
     this.debounceMs = options.debounceMs ?? (Number(process.env.LAYA_DEBOUNCE_MS) || 0);
   }
 
@@ -392,6 +400,36 @@ export class LayaGovernanceService {
       // 🧠 Mapeamento Dinâmico por Grupo e Subgrupo de Intenção (3 Grupos da Laya)
       const intentGroup = payload.intentGroup || 'PRE_ENTRY';
       const intentSubgroup = payload.intentSubgroup || 'NEW_OPPORTUNITY';
+
+      // Laya upstream em SHADOW: apenas triagem System 1, sem poder financeiro.
+      if (this.marketLayaShadowEnabled) {
+        void this.marketLayaAdapter.evaluate({
+          symbol: payload.symbol,
+          side: payload.side,
+          currentPrice: Number(payload.currentPrice || payload.trace?.entryPrice || 0),
+          intentGroup,
+          intentSubgroup,
+          spreadBps: Number(payload.trace?.spreadBps || 0),
+          depthImbalanceRatio: Number(payload.trace?.depthImbalanceRatio ?? payload.trace?.imbalanceRatio ?? 1),
+          cvdDelta60s: Number(payload.trace?.cvdDelta60s || 0),
+          spoofScore: Number(payload.trace?.spoofScore || 0),
+          betaDivergence: Boolean(payload.trace?.betaDivergence),
+          regime: payload.regime || payload.macro?.regime,
+          circuitBreakerActive: Boolean(payload.macro?.isCircuitBreakerActive),
+          currentRiskAggregatePct: payload.risk?.currentRiskAggregatePct,
+          proposedRiskPct: payload.risk?.proposedRiskPct,
+          currentR: payload.currentR
+        }).then((shadow) => {
+          console.log(
+            `[LayaNativeMarket:SHADOW] symbol=${payload.symbol} route=${shadow.route} ` +
+            `confidence=${shadow.routeConfidence.toFixed(4)} risk=${shadow.operationalRiskScore ?? 'n/a'} ` +
+            `needsLlm=${shadow.needsLlm ?? 'n/a'} model=${shadow.routingModel ?? 'n/a'} ` +
+            `latencyMs=${shadow.latencyMs}`
+          );
+        }).catch((err: any) => {
+          console.warn(`[LayaNativeMarket:SHADOW] falha sem impacto financeiro: ${err?.message || err}`);
+        });
+      }
 
       let contextDescription = `Contexto: ${intentGroup} | Subgrupo: ${intentSubgroup}. Symbol: ${payload.symbol}, Side: ${payload.side || 'BUY'}, Price: ${payload.currentPrice}`;
       let questionInstructions = 'Qual ação de governança tomar?';
