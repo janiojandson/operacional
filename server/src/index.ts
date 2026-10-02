@@ -119,55 +119,7 @@ app.use('/api/admin', adminRouter);
 app.use('/api/client', clientRouter);
 app.use('/api/dashboard', dashboardRouter);
 
-// ─── Diagnóstico de Portas da Laya (Interna 8000 vs Interna 8080 vs Pública) ──
-app.get('/api/diag/laya-ports', async (_req, res) => {
-  const tests = [
-    { name: 'Interna 8000', url: 'http://nexus-decisor-laya.railway.internal:8000' },
-    { name: 'Interna 8080', url: 'http://nexus-decisor-laya.railway.internal:8080' },
-    { name: 'Publica', url: 'https://nexus-decisor-laya-production.up.railway.app' }
-  ];
-
-  const results: any[] = [];
-  for (const t of tests) {
-    const start = performance.now();
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 2000);
-      const resp = await fetch(`${t.url}/v1/systemone`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          state: { origem: 'teste_diagnostico', body: 'ping teste de portas' },
-          questions: { action: { type: 'choice', instructions: 'teste', criteria: { OK: 'ok' } } }
-        }),
-        signal: controller.signal
-      });
-      clearTimeout(timer);
-      const elapsed = performance.now() - start;
-      results.push({
-        alvo: t.name,
-        url: t.url,
-        sucesso: resp.ok,
-        statusHttp: resp.status,
-        latenciaMs: Number(elapsed.toFixed(2))
-      });
-    } catch (err: any) {
-      const elapsed = performance.now() - start;
-      results.push({
-        alvo: t.name,
-        url: t.url,
-        sucesso: false,
-        erro: err.message,
-        latenciaMs: Number(elapsed.toFixed(2))
-      });
-    }
-  }
-
-  res.json({
-    timestamp: new Date().toISOString(),
-    diagnostico: results
-  });
-});
+// Diagnóstico da Laya permanece exclusivamente em /api/admin/laya/*, protegido por requireAdmin.
 
 
 // --- SERVIÇO DE ARQUIVOS ESTÁTICOS (VITE BUILD) ---

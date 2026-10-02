@@ -598,9 +598,11 @@ adminRouter.get('/laya/test-ports', async (_req: Request, res: Response) => {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 2000);
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (process.env.LAYA_API_KEY) headers['x-laya-key'] = process.env.LAYA_API_KEY;
       const resp = await fetch(`${t.url}/v1/systemone`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           state: { origem: 'teste_diagnostico', body: 'ping teste de portas' },
           questions: { action: { type: 'choice', instructions: 'teste', criteria: { OK: 'ok' } } }
