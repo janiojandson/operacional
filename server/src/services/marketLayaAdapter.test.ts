@@ -162,7 +162,7 @@ test('MarketLayaAdapter usa proxy privado sem bearer do cliente', async () => {
     delete process.env.MARKET_LAYA_API_KEY;
     let seenHeaders: any = null;
     const adapter = new MarketLayaAdapter({
-      baseUrl: 'http://nexus-decisor-laya-next.railway.internal:8001',
+      baseUrl: 'http://nexus-decisor-laya.railway.internal:8001',
       fetchImpl: (async (_url: string, init: any) => {
         seenHeaders = init.headers;
         return { ok: true, json: async () => ({ answers: { route: {
