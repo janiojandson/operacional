@@ -95,6 +95,8 @@ export class PaperTradingEngine {
     this.realizedPnl = 0;
     this.openPositions.clear();
     this.history = [];
+    this.lastExitTimestamp.clear();
+    this.dailyLockoutActive = false;
     this.broadcastUpdate();
   }
 

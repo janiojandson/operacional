@@ -120,6 +120,14 @@ assert.ok(fixedTpEngine.getLastExitTimestamp('BTC/USDT') !== undefined, 'closing
 assert.equal(fixedTpEngine.isCooldownActive('BTC/USDT', 15 * 60 * 1000), true, '15-min cooldown must be active right after close');
 assert.equal(fixedTpEngine.isCooldownActive('ETH/USDT', 15 * 60 * 1000), false, 'untraded pair must not be in cooldown');
 
+// Reset administrativo deve iniciar uma sessão realmente limpa.
+fixedTpEngine.setDailyLockoutActive(true);
+fixedTpEngine.resetData(10_000);
+assert.equal(fixedTpEngine.isDailyLockoutActive(), false, 'resetData must clear the in-memory daily lockout');
+assert.equal(fixedTpEngine.isCooldownActive('BTC/USDT', 15 * 60 * 1000), false, 'resetData must clear per-symbol cooldowns');
+assert.equal(fixedTpEngine.getAccountState().history.length, 0, 'resetData must clear session history');
+assert.equal(fixedTpEngine.getAccountState().balance, 10_000, 'resetData must restore requested balance');
+
 // Teste de Micro-Stop sugerido pela Laya
 const microStopEngine = new PaperTradingEngine();
 microStopEngine.handleSignal(signal, 100_000, decision, {

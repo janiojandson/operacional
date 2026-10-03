@@ -276,6 +276,86 @@ export class EventStoreService {
   }
 
   /**
+   * Reinicia a sessão operacional do Master de forma explícita.
+   * Limpa o histórico canônico que alimenta lockout/SAFE_HALT, redefine HWM
+   * para a nova banca e mantém um evento de auditoria SESSION_RESET.
+   */
+  static async resetOperationalSession(startingBalanceUsd = 10000): Promise<{
+    deletedTrades: number;
+    deletedDecisions: number;
+    startingBalanceUsd: number;
+  }> {
+    const balance = Number(startingBalanceUsd);
+    if (!Number.isFinite(balance) || balance <= 0) {
+      throw new Error('RESET_STARTING_BALANCE_INVALID');
+    }
+
+    const deletedDecisions = await query<{ decision_id: string }>(
+      'DELETE FROM decision_events RETURNING decision_id'
+    );
+    const deletedTrades = await query<{ trade_id: string }>(
+      'DELETE FROM trade_events RETURNING trade_id'
+    );
+
+    await query(
+      `INSERT INTO account_state (id, starting_balance_usd, created_at)
+       VALUES (1, $1, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         starting_balance_usd = EXCLUDED.starting_balance_usd,
+         created_at = NOW()`,
+      [balance]
+    );
+
+    await query(
+      `INSERT INTO system_state (
+         id, daily_lockout_active, lockout_session_date, lockout_r_at_trigger,
+         lockout_triggered_at, safe_halt_active, safe_halt_reason,
+         safe_halt_triggered_at, hwm_usd, hwm_reached_at
+       )
+       VALUES (1, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, $1, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         daily_lockout_active = FALSE,
+         lockout_session_date = NULL,
+         lockout_r_at_trigger = NULL,
+         lockout_triggered_at = NULL,
+         safe_halt_active = FALSE,
+         safe_halt_reason = NULL,
+         safe_halt_triggered_at = NULL,
+         hwm_usd = EXCLUDED.hwm_usd,
+         hwm_reached_at = NOW(),
+         updated_at = NOW()`,
+      [balance]
+    );
+
+    await query(
+      `INSERT INTO system_state_events (event_type, r_at_event, detail)
+       VALUES (
+         'SESSION_RESET',
+         0,
+         jsonb_build_object(
+           'source', 'ADMIN_TRADING_RESET',
+           'startingBalanceUsd', $1::numeric,
+           'deletedTrades', $2::int,
+           'deletedDecisions', $3::int
+         )
+       )`,
+      [balance, deletedTrades.length, deletedDecisions.length]
+    );
+
+    console.log('[EventStore] ♻️ Sessão operacional reiniciada.', {
+      startingBalanceUsd: balance,
+      deletedTrades: deletedTrades.length,
+      deletedDecisions: deletedDecisions.length
+    });
+
+    return {
+      deletedTrades: deletedTrades.length,
+      deletedDecisions: deletedDecisions.length,
+      startingBalanceUsd: balance
+    };
+  }
+
+  /**
    * Grava uma proposta da Laya no banco (Append-only)
    */
   static recordDecisionEvent(input: RecordDecisionEventInput): void {

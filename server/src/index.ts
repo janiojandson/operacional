@@ -28,6 +28,7 @@ import { calculateAdaptiveRisk } from './engine/adaptiveRisk.js';
 import { getCryptoStrategyProfile } from './engine/cryptoStrategyProfile.js';
 import { marketGovernanceService } from './services/marketGovernanceService.js';
 import { macroSentinelClient } from './services/macroSentinelService.js';
+import { EventStoreService } from './services/eventStoreService.js';
 // SaaS: Autenticação e Rotas
 import { authRouter } from './auth/authRoutes.js';
 import { adminRouter, bindMasterControlHandler } from './routes/adminRoutes.js';
@@ -154,6 +155,10 @@ const clientCopyTrader = new ClientCopyTraderEngine((log) => {
 
 let lastMasterTickEmit = 0;
 let masterShadowFilterActive = false;
+let masterResetCooldownUntil = 0;
+let masterResetGeneration = 0;
+let masterResetInProgress = false;
+let masterResetCloseTasks: Promise<unknown>[] = [];
 const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
   if (!tradeEvent) {
     const nowTs = Date.now();
@@ -164,8 +169,11 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
     return;
   }
 
+  const isResetClosure = masterResetInProgress && tradeEvent.closeReason === 'MANUAL';
   io.emit('paper_account_update', account);
-  await persistMasterBalance(account);
+  if (!isResetClosure) {
+    await persistMasterBalance(account);
+  }
 
   // Callback protegido para nunca derrubar o processo em caso de falha de I/O
   const safeUpsert = async (trade: any) => {
@@ -187,16 +195,27 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
     }
   };
 
-  await safeUpsert(tradeEvent);
+  if (!isResetClosure) {
+    await safeUpsert(tradeEvent);
+  } else {
+    console.log('[TradingReset] Fechamento MANUAL de reset: persistência histórica ignorada para evitar recriação pós-limpeza.', {
+      symbol: tradeEvent.symbol,
+      tradeId: tradeEvent.id
+    });
+  }
   if (tradeEvent) {
     io.emit('simulated_trade_event', tradeEvent);
     const pairConfig = AutoPairSelectorEngine.getPairConfig(tradeEvent.symbol);
     const power = tradeEvent.powerMultiplier || pairConfig?.powerMultiplier || 1.5;
-    clientCopyTrader.replicateTrade(tradeEvent, power).catch((err) => {
+    const copyTask = clientCopyTrader.replicateTrade(tradeEvent, power).catch((err) => {
       console.error('[PaperTradingEngine] Erro ao replicar trade nos clientes:', err.message);
     });
+    if (isResetClosure) {
+      masterResetCloseTasks.push(copyTask);
+    }
 
     // 📊 Registra as operações do Master Quant na Planilha Google em tempo real
+    if (!isResetClosure) {
     try {
       let statusStr = 'MASTER_ABERTO';
       let outcomeLabel = 'EM ANDAMENTO ⏳';
@@ -269,9 +288,10 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
     } catch (sheetErr: any) {
       console.error('[GoogleSheets] Erro ao enviar trade do Master:', sheetErr.message);
     }
+    }
 
     // 🛡️ SHADOW AUDIT (MODO FANTASMA): Avaliação silenciosa em segundo plano no Master
-    if (tradeEvent.status === 'OPEN') {
+    if (!isResetClosure && tradeEvent.status === 'OPEN') {
       const bookState = marketManager.getSymbolState(tradeEvent.symbol)?.book;
       runShadowAudit(
         null,
@@ -291,7 +311,7 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
       }).catch(auditErr => {
         console.error('[ShadowAuditor] Erro no shadow mode do Master:', auditErr.message);
       });
-} else if (tradeEvent.status === 'CLOSED_TP' || tradeEvent.status === 'CLOSED_SL' || tradeEvent.status === 'CLOSED_PARTIAL_TP') {
+    } else if (!isResetClosure && (tradeEvent.status === 'CLOSED_TP' || tradeEvent.status === 'CLOSED_SL' || tradeEvent.status === 'CLOSED_PARTIAL_TP')) {
       try {
         const outcome = recordShadowOutcome(
           tradeEvent.symbol,
@@ -451,16 +471,15 @@ bindMasterControlHandler({
   setShadowFilterActive: (active) => { masterShadowFilterActive = active; }
 });
 
-let masterResetCooldownUntil = 0;
-
 const flowEngine = new FlowEngine((signal: FlowSignal) => {
   console.log('[Flow] sinal emitido:', signal.type, signal.symbol);
   io.emit('flow_signal', signal);
-  if (Date.now() < masterResetCooldownUntil) {
-    const remainingSec = Math.ceil((masterResetCooldownUntil - Date.now()) / 1000);
+  if (Date.now() < masterResetCooldownUntil || masterResetInProgress) {
+    const remainingSec = Math.max(0, Math.ceil((masterResetCooldownUntil - Date.now()) / 1000));
     console.log(`[Flow] ⏳ Reset recente: aguardando sincronização (${remainingSec}s restantes)...`);
     return;
   }
+  const signalResetGeneration = masterResetGeneration;
   const asset = marketManager.getSymbolState(signal.symbol);
   if (!asset) {
     console.warn('[IndexFlow][DROP][467_SYMBOL_STATE_NOT_FOUND]', {
@@ -742,6 +761,22 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       console.log(`[MARKET GOVERNANCE SHADOW/OFF VETO] ${signal.symbol} | Razão: ${governanceResult.decision.rationaleCode}`);
     }
 
+    // Um reset pode começar enquanto a governança/Laya está aguardando resposta.
+    // Nesse caso, invalida o sinal antigo para ele não reabrir posição após a limpeza.
+    if (
+      signalResetGeneration !== masterResetGeneration ||
+      masterResetInProgress ||
+      Date.now() < masterResetCooldownUntil
+    ) {
+      console.warn('[IndexFlow][DROP][RESET_GENERATION_CHANGED]', {
+        symbol: signal.symbol,
+        type: signal.type,
+        signalResetGeneration,
+        currentResetGeneration: masterResetGeneration
+      });
+      return;
+    }
+
     // Registra oportunidade e executa com os parâmetros da governança do Mercado; a Laya atua apenas como decisão tática permitida.
     console.log('[IndexFlow][DISPATCHING_TO_ENGINE]', {
       symbol: signal.symbol,
@@ -976,6 +1011,19 @@ app.post('/api/trading/balance', requireAuth, async (req, res) => {
 
 // POST /api/trading/reset — Reset parametrizado Master + Mirror
 app.post('/api/trading/reset', requireAuth, async (req, res) => {
+  if (masterResetInProgress) {
+    return res.status(409).json({
+      success: false,
+      error: 'RESET_ALREADY_IN_PROGRESS',
+      message: 'Já existe um reset operacional em andamento.'
+    });
+  }
+
+  masterResetInProgress = true;
+  masterResetGeneration += 1;
+  masterResetCooldownUntil = Date.now() + 60000;
+  masterResetCloseTasks = [];
+
   try {
     const rawMaster = req.body?.masterBalance;
     const masterBalance = (typeof rawMaster === 'number' && rawMaster > 0) ? rawMaster : 10000;
@@ -991,7 +1039,21 @@ app.post('/api/trading/reset', requireAuth, async (req, res) => {
       mirrorTrading.closePosition(pos.symbol, pos.currentPrice || pos.entryPrice, false);
     }
 
+    // Aguarda os fechamentos replicados (REAL/TESTNET) disparados pelo fechamento MANUAL do Master.
+    if (masterResetCloseTasks.length > 0) {
+      const closeResults = await Promise.allSettled([...masterResetCloseTasks]);
+      const rejected = closeResults.filter(result => result.status === 'rejected').length;
+      if (rejected > 0) {
+        console.warn('[TradingReset] Alguns fechamentos replicados terminaram com rejeição.', { rejected });
+      }
+    }
+
+    marketGovernanceService.resetSession();
+    activePositionCheckMap.clear();
+    activePositionGovernanceInFlight.clear();
+
     const result = await resetTradingAccounts(Number(masterBalance), Number(mirrorBalance));
+    const eventStoreReset = await EventStoreService.resetOperationalSession(result.masterBalance);
     
     // Reset em memória
     paperTrading.resetData(result.masterBalance);
@@ -999,7 +1061,7 @@ app.post('/api/trading/reset', requireAuth, async (req, res) => {
     
     // Zera o Shadow Mode Auditor e histórico de oportunidades
     clearShadowAudits();
-    void query('DELETE FROM shadow_opportunities').catch(() => {});
+    await query('DELETE FROM shadow_opportunities');
     io.emit('shadow_audit_reset');
 
     // Zera logs do Copy Trader
@@ -1020,18 +1082,28 @@ app.post('/api/trading/reset', requireAuth, async (req, res) => {
     io.emit('paper_account_update', paperState);
     io.emit('mirror_account_update', mirrorState);
     io.emit('master_feed_update', { metrics: paperState, masterOpenPositions: [], masterHistory: [] });
-    io.emit('trading_reset', { ...result, cooldownSeconds: 15, cooldownUntil: masterResetCooldownUntil });
+    io.emit('trading_reset', {
+      ...result,
+      eventStoreReset,
+      cooldownSeconds: 15,
+      cooldownUntil: masterResetCooldownUntil
+    });
     
     res.json({ 
       success: true, 
-      ...result, 
+      ...result,
+      eventStoreReset,
       cooldownSeconds: 15,
       cooldownUntil: masterResetCooldownUntil,
-      message: 'Bancas Master e Mirror resetadas. Aguardando 15s para sincronização total do mercado e clientes.' 
+      message: 'Sessão Master reiniciada por completo: posições fechadas, históricos limpos, lockout/SAFE_HALT removidos e bancas sincronizadas.'
     });
   } catch (err: any) {
+    masterResetCooldownUntil = Date.now() + 15000;
     console.error('[TradingReset] Erro:', err.message);
     res.status(500).json({ success: false, error: err.message });
+  } finally {
+    masterResetInProgress = false;
+    masterResetCloseTasks = [];
   }
 });
 
