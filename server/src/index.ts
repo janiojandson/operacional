@@ -1659,6 +1659,30 @@ initDatabase()
       void GoogleSheetsService.syncOpenPositions(paperTrading.getAccountState().openPositions, masterAccount.balance).catch(() => {});
     }
     
+    // 🛡️ Sincronização inicial do estado de Lockout e SAFE_HALT
+    try {
+      const { EventStoreService } = await import('./services/eventStoreService.js');
+      const initialLockout = await EventStoreService.isLockoutActive();
+      paperTrading.setDailyLockoutActive(initialLockout);
+      console.log(`[Startup] 🛡️ Estado inicial de Lockout: ${initialLockout ? 'BLOQUEADO ⛔' : 'LIBERADO ✅'}`);
+
+      // Monitor periódico anti-deadlock a cada 30s
+      setInterval(async () => {
+        try {
+          const locked = await EventStoreService.isLockoutActive();
+          const prevLocked = paperTrading.isDailyLockoutActive();
+          if (locked !== prevLocked) {
+            paperTrading.setDailyLockoutActive(locked);
+            console.log(`[SystemState] Transição de Lockout Diário: ${prevLocked} -> ${locked} (${locked ? 'BLOQUEADO ⛔' : 'LIBERADO ✅'})`);
+          }
+        } catch (e: any) {
+          console.error('[SystemState] Erro ao sincronizar lockout periódico:', e?.message);
+        }
+      }, 30000);
+    } catch (e: any) {
+      console.warn('[Startup] Aviso ao sincronizar lockout inicial:', e?.message);
+    }
+
     server.listen(Number(PORT), '0.0.0.0', () => {
       console.log(`🚀 MarketFlow Pro SaaS Backend running at http://0.0.0.0:${PORT}`);
       console.log(`🔒 Segurança: JWT + AES-256 + Helmet + Rate Limiting ATIVO`);

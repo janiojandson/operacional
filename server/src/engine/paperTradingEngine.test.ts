@@ -83,21 +83,31 @@ belowLotEngine.handleSignal(signal, 100_000, decision, {
 });
 assert.equal(belowLotEngine.getAccountState().openPositions.length, 0, 'paper master must not simulate a BTC order below the Bybit minimum lot');
 
-// Teste de Invalidação Ativa por Order Flow adverso
+// Teste de Invalidação Ativa por Order Flow adverso (Calibração Defensiva a -0.70R)
 const flowInvalidationEngine = new PaperTradingEngine();
 flowInvalidationEngine.handleSignal(signal, 100_000, decision, {
   approved: true, reasons: [], stopLoss: 98_000, takeProfit: 105_000,
   stopDistancePct: 0.02, notionalUsd: 1_000, riskUsd: 20, grossR: 2.5, netR: 2.31
 });
 assert.equal(flowInvalidationEngine.getAccountState().openPositions.length, 1);
-// Em leve prejuízo (-0.5R = 99_000) com book imbalance vendedor severo (< 0.35) e agressão de venda
+
+// Em pullback normal (-0.5R = 99_000): NÃO deve fechar prematuramente por mero ruído
 flowInvalidationEngine.updatePrice(
   'BTC/USDT',
   99_000,
   { imbalanceRatio: 0.25, bidDepthTotal: 10, askDepthTotal: 40 },
   { dominantSide: 'sell', whaleCount: 1 }
 );
-assert.equal(flowInvalidationEngine.getAccountState().openPositions.length, 0);
+assert.equal(flowInvalidationEngine.getAccountState().openPositions.length, 1, 'pullback normal a -0.50R deve respirar');
+
+// Em estresse severo (-0.75R = 98_500) com book imbalance severo (0.15 <= 0.20) e agressão de venda: DEVE fechar
+flowInvalidationEngine.updatePrice(
+  'BTC/USDT',
+  98_500,
+  { imbalanceRatio: 0.15, bidDepthTotal: 5, askDepthTotal: 35 },
+  { dominantSide: 'sell', whaleCount: 1 }
+);
+assert.equal(flowInvalidationEngine.getAccountState().openPositions.length, 0, 'deve invalidar quando estresse >= -0.70R com confluência');
 const invalidatedTrade = flowInvalidationEngine.getAccountState().history[0];
 assert.equal(invalidatedTrade.closeReason, 'ACTIVE_FLOW_INVALIDATION');
 assert.ok(invalidatedTrade.rMultiple > -1.0, 'early flow invalidation must protect from full -1.0R loss');
@@ -150,7 +160,7 @@ microStopEngine.handleSignal(signal, 100_000, decision, {
   trace: { l2DepthTop20: 100, imbalanceRatio: 2, cvdDelta60s: 10, spoofScore: 0, betaDivergence: false }
 });
 
-// Teste de Realização Parcial em +0.6R com Breakeven (Risco Zero)
+// Teste de Realização Parcial em +0.6R com Breakeven Protegido (+0.15% cobrindo taxas)
 const waveEngine = new PaperTradingEngine();
 waveEngine.handleSignal(signal, 100_000, decision, {
   approved: true, reasons: [], stopLoss: 98_000, takeProfit: 105_000,
@@ -161,8 +171,23 @@ waveEngine.updatePrice('BTC/USDT', 101_250); // Atinge +0.625R
 const waveTrade = waveEngine.getAccountState().openPositions[0];
 assert.ok(waveTrade, 'Posição deve continuar aberta após parcial');
 assert.equal(waveTrade.partialTaken, true, 'partialTaken deve ser true após bater +0.6R');
-assert.equal(waveTrade.stopLoss, 100_000, 'Stop Loss deve ter sido movido para o ponto de entrada (Breakeven)');
+assert.equal(waveTrade.stopLoss, 100_150, 'Stop Loss deve ter sido movido para Breakeven Protegido de taxas (100.150)');
 assert.ok(waveTrade.partialPnlUsd && waveTrade.partialPnlUsd > 0, 'Lucro parcial deve ser positivo e registrado');
+
+// Teste de Time-Stop para posições estagnadas em regime lateral (> 12h sem evoluir)
+const timeStopEngine = new PaperTradingEngine();
+timeStopEngine.handleSignal(signal, 100_000, decision, {
+  approved: true, reasons: [], stopLoss: 98_000, takeProfit: 105_000,
+  stopDistancePct: 0.02, notionalUsd: 1_000, riskUsd: 20, grossR: 2.5, netR: 2.31
+});
+const stagnantTrade = timeStopEngine.getAccountState().openPositions[0];
+assert.ok(stagnantTrade);
+stagnantTrade.entryTime = Math.floor((Date.now() - 13 * 3600 * 1000) / 1000);
+stagnantTrade.marketRegime = 'NEUTRAL_RANGING';
+timeStopEngine.updatePrice('BTC/USDT', 100_100); // Retorno insignificante (+0.05R) após 13h
+assert.equal(timeStopEngine.getAccountState().openPositions.length, 0, 'Time-Stop deve encerrar posição estagnada após 12h');
+assert.equal(timeStopEngine.getAccountState().history[0].closeReason, 'ACTIVE_FLOW_INVALIDATION');
+
 // Teste de Trailing Stop Vivo ancorado no Book L2
 const bookTrailingEngine = new PaperTradingEngine();
 bookTrailingEngine.handleSignal(signal, 100_000, decision, {
