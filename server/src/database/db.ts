@@ -264,6 +264,14 @@ export async function initDatabase(): Promise<void> {
   // 🚀 Migrações dos Botões: Trailing Stop e Shadow Mode Executor
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS trailing_stop_enabled INTEGER NOT NULL DEFAULT 1`).catch(() => { });
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS shadow_filter_active INTEGER NOT NULL DEFAULT 0`).catch(() => { });
+  await query(`ALTER TABLE trade_history
+    ADD COLUMN IF NOT EXISTS exit_policy TEXT NOT NULL DEFAULT 'LEGACY',
+    ADD COLUMN IF NOT EXISTS initial_stop_loss NUMERIC,
+    ADD COLUMN IF NOT EXISTS initial_qty NUMERIC,
+    ADD COLUMN IF NOT EXISTS initial_notional_usd NUMERIC,
+    ADD COLUMN IF NOT EXISTS initial_risk_usd NUMERIC,
+    ADD COLUMN IF NOT EXISTS initial_target_price NUMERIC,
+    ADD COLUMN IF NOT EXISTS protection_status TEXT NOT NULL DEFAULT 'LEGACY'`);
   await query(`ALTER TABLE client_configs ADD COLUMN IF NOT EXISTS test_sync_enabled INTEGER NOT NULL DEFAULT 0`).catch(() => { });
 
   await query(`ALTER TABLE client_configs DROP CONSTRAINT IF EXISTS client_configs_user_id_fkey`).catch(() => { });
@@ -410,6 +418,8 @@ export interface AnnouncementRow {
 }
 
 export interface TradeHistoryRow {
+  exit_policy?: 'LEGACY' | 'FIXED_3R';
+  protection_status?: 'LEGACY' | 'PENDING' | 'CONFIRMED' | 'UNCONFIRMED';
   id: string;
   client_id: string;
   symbol: string;
@@ -810,13 +820,26 @@ export const AnnouncementDB = {
 export const TradeHistoryDB = {
   insert: async (trade: Omit<TradeHistoryRow, 'close_price' | 'pnl_usd' | 'close_time' | 'bybit_order_id'> & { bybitOrderId?: string; bybit_order_id?: string | null }) => {
     await query(
-      `INSERT INTO trade_history (id, client_id, symbol, side, entry_price, qty, notional_usd, leverage, status, signal_reason, bybit_order_id, entry_time)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      `INSERT INTO trade_history (id, client_id, symbol, side, entry_price, qty, notional_usd, leverage, status, signal_reason, bybit_order_id, entry_time, exit_policy, protection_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        ON CONFLICT (id) DO NOTHING`,
-      [trade.id, trade.client_id, trade.symbol, trade.side, trade.entry_price, trade.qty, trade.notional_usd, trade.leverage || null, trade.status, trade.signal_reason || null, trade.bybitOrderId || trade.bybit_order_id || null, trade.entry_time]
+      [trade.id, trade.client_id, trade.symbol, trade.side, trade.entry_price, trade.qty, trade.notional_usd, trade.leverage || null, trade.status, trade.signal_reason || null, trade.bybitOrderId || trade.bybit_order_id || null, trade.entry_time, trade.exit_policy ?? 'LEGACY', trade.protection_status ?? 'LEGACY']
     );
   },
 
+  setExecutionFill: async (id:string, fill:{status:string;qty:number;entryPrice:number}) => {
+    await query(`UPDATE trade_history SET status=$2, qty=$3, entry_price=$4, notional_usd=$3*$4
+      WHERE id=$1 AND exit_policy='FIXED_3R' AND initial_risk_usd IS NULL`,[id,fill.status,fill.qty,fill.entryPrice]);
+  },
+  setInitialRiskSnapshot: async (id:string, snapshot:{entryPrice:number;initialStopLoss:number;initialQty:number;initialNotionalUsd:number;initialRiskUsd:number;takeProfit:number}) => {
+    await query(`UPDATE trade_history SET entry_price=$2, qty=$3, notional_usd=$4,
+      initial_stop_loss=$5, initial_qty=$3, initial_notional_usd=$4, initial_risk_usd=$6, initial_target_price=$7
+      WHERE id=$1 AND exit_policy='FIXED_3R' AND initial_risk_usd IS NULL`,
+      [id,snapshot.entryPrice,snapshot.initialQty,snapshot.initialNotionalUsd,snapshot.initialStopLoss,snapshot.initialRiskUsd,snapshot.takeProfit]);
+  },
+  setProtectionStatus: async (id:string, status:'CONFIRMED'|'UNCONFIRMED') => {
+    await query(`UPDATE trade_history SET protection_status=$2 WHERE id=$1 AND exit_policy='FIXED_3R'`,[id,status]);
+  },
   close: async (id: string, closePrice: number, pnlUsd: number) => {
     await query(
       `UPDATE trade_history SET close_price = $1, pnl_usd = $2, status = 'CLOSED', close_time = EXTRACT(EPOCH FROM NOW()) * 1000 WHERE id = $3`,

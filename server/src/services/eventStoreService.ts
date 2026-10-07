@@ -18,6 +18,7 @@ export interface RecordTradeEventInput {
   riskPlannedR: number;
   rGross: number;
   rNet: number;
+  initialRiskUsd?: number;
   fees?: number;
   funding?: number;
   slippage?: number;
@@ -102,6 +103,13 @@ export interface RecordDecisionEventInput {
   responsePayload?: Record<string, any>;
 }
 
+export function resolveTradeAccounting(input: Pick<RecordTradeEventInput, 'initialRiskUsd' | 'grossPnlUsd' | 'netPnlUsd' | 'rGross' | 'rNet'>): { rGross:number; rNet:number } {
+  if (input.initialRiskUsd === undefined) return {rGross:input.rGross, rNet:input.rNet};
+  if (!Number.isFinite(input.initialRiskUsd) || input.initialRiskUsd <= 0
+      || !Number.isFinite(input.grossPnlUsd) || !Number.isFinite(input.netPnlUsd)) throw new Error('INVALID_ORIGINAL_RISK_ACCOUNTING');
+  return {rGross:input.grossPnlUsd! / input.initialRiskUsd, rNet:input.netPnlUsd! / input.initialRiskUsd};
+}
+
 export class EventStoreService {
   /**
    * Grava um trade fechado no banco de forma estritamente imutável (Fire-and-forget assíncrono)
@@ -122,7 +130,7 @@ export class EventStoreService {
     const exitReasonRaw = input.exitReason ?? (input.exitType === 'STOP_FULL' ? 'STOP_LOSS_FULL' : input.exitType === 'STOP_EARLY' ? 'ACTIVE_INVALIDATION' : 'WAVE_HARVEST_BREAKEVEN');
     const exitReason = exitReasonRaw === 'LAYA_CLOSE_NOW' ? 'ACTIVE_INVALIDATION'
       : exitReasonRaw === 'LAYA_EARLY_HARVEST' ? 'RUNNER_TRAILING'
-      : ['WAVE_HARVEST_BREAKEVEN', 'RUNNER_TRAILING', 'ACTIVE_INVALIDATION', 'STOP_LOSS_FULL', 'CIRCUIT_BREAKER_EMERGENCY'].includes(exitReasonRaw)
+      : ['FIXED_TP', 'WAVE_HARVEST_BREAKEVEN', 'RUNNER_TRAILING', 'ACTIVE_INVALIDATION', 'STOP_LOSS_FULL', 'CIRCUIT_BREAKER_EMERGENCY'].includes(exitReasonRaw)
         ? exitReasonRaw
         : 'ACTIVE_INVALIDATION';
     const branchRaw = input.branchClassification ?? (
@@ -134,7 +142,7 @@ export class EventStoreService {
     );
     const branch = branchRaw === 'B7_LAYA_DEFENSE_EXIT' ? 'B2_INVALIDATION'
       : branchRaw === 'B8_LAYA_EARLY_HARVEST' ? 'B4_TARGET_RUNNER'
-      : ['B1_STOP_FULL', 'B2_INVALIDATION', 'B3_BE_POST_HARVEST', 'B4_TARGET_RUNNER', 'B5_RUNNER_EXTREME', 'B6_MACRO_EMERGENCY'].includes(branchRaw)
+      : ['B9_FIXED_TARGET', 'B1_STOP_FULL', 'B2_INVALIDATION', 'B3_BE_POST_HARVEST', 'B4_TARGET_RUNNER', 'B5_RUNNER_EXTREME', 'B6_MACRO_EMERGENCY'].includes(branchRaw)
         ? branchRaw
         : 'B3_BE_POST_HARVEST';
     const posSize = input.positionSizeUsd ?? 250.0;
@@ -144,10 +152,12 @@ export class EventStoreService {
     const slippage = input.estimatedSlippageUsd ?? (input.slippage ?? 0.05);
     const funding = input.fundingCostUsd ?? (input.funding ?? 0);
     const totalFriction = feesEntry + feesExit + spreadCost + slippage + funding;
-    const riskUsd = (posSize * deltaStopBps) / 10000.0;
+    const accounting = resolveTradeAccounting(input);
+    const riskUsd = input.initialRiskUsd ?? (posSize * deltaStopBps) / 10000.0;
     const frictionR = riskUsd > 0 ? totalFriction / riskUsd : 0;
-    const rNetCalculated = Number((input.rGross - frictionR).toFixed(4));
-    const rNet = input.rNet !== undefined && Math.abs(input.rNet - rNetCalculated) < 0.1 ? input.rNet : rNetCalculated;
+    const rNetCalculated = Number((accounting.rGross - frictionR).toFixed(4));
+    const rNet = input.initialRiskUsd !== undefined ? accounting.rNet
+      : input.rNet !== undefined && Math.abs(input.rNet - rNetCalculated) < 0.1 ? input.rNet : rNetCalculated;
     const venue = input.venue ?? 'BingX';
 
     const entryDecisionId = input.entryDecisionId && uuidRegex.test(input.entryDecisionId) ? input.entryDecisionId : null;
@@ -165,7 +175,7 @@ export class EventStoreService {
         fees_entry_usd, fees_exit_usd, spread_cost_usd, estimated_slippage_usd, funding_cost_usd,
         venue, opened_at, closed_at,
         entry_decision_id, exit_decision_id, exit_reason_raw, branch_classification_raw,
-        mfe_r, mae_r, rv_ol, beta_exposure
+        mfe_r, mae_r, rv_ol, beta_exposure, initial_risk_usd
       ) VALUES (
         $1, $2, $3,
         $4, $5, $6,
@@ -179,7 +189,7 @@ export class EventStoreService {
         (SELECT decision_id FROM decision_events WHERE decision_id = $31::uuid),
         (SELECT decision_id FROM decision_events WHERE decision_id = $32::uuid),
         $33, $34,
-        $35, $36, $37, $38
+        $35, $36, $37, $38, $39
       )
       ON CONFLICT (trade_id) DO NOTHING
     `, [
@@ -189,11 +199,11 @@ export class EventStoreService {
       Boolean(input.waveHarvestReached), input.waveHarvestPrice ?? null, input.whFillType ?? 'NOT_APPLICABLE',
       input.exitPrice ?? entryPrice, exitReason, branch,
       input.accountBalanceUsd ?? null, posSize, input.grossPnlUsd ?? (input.rGross * 2.5), input.netPnlUsd ?? (rNet * 2.5),
-      input.rGross, rNet,
+      accounting.rGross, rNet,
       feesEntry, feesExit, spreadCost, slippage, funding,
       venue, input.entryTs, input.exitTs,
       entryDecisionId, exitDecisionId, exitReasonRaw, branchRaw,
-      input.mfeR ?? 0, input.maeR ?? 0, input.rvOL ?? null, input.betaExposure ?? 0
+      input.mfeR ?? 0, input.maeR ?? 0, input.rvOL ?? null, input.betaExposure ?? 0, input.initialRiskUsd ?? null
     ]).then(async () => {
       console.log('[EventStore][TRADE_EVENT_PERSISTED]', {
         tradeId: tradeUuid,

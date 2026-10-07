@@ -48,6 +48,11 @@ export class ClientCopyTraderEngine {
 
   // Replica a ordem disparada pela estratégia protegendo os limites de risco
   public async replicateTrade(trade: SimulatedTrade, powerMultiplier = 1.0) {
+    if (trade.status !== 'OPEN' && trade.exitPolicy === 'FIXED_3R'
+        && trade.closeReason !== 'MANUAL' && trade.closeReason !== 'CIRCUIT_BREAKER_EMERGENCY') {
+      console.log('[CopyTrader][FIXED_3R_NATIVE_EXIT] SL/TP do fill próprio governam o encerramento do cliente.', trade.symbol);
+      return;
+    }
     // 1. Execução para clientes em memória / demonstração
     for (const client of this.clients.values()) {
       if (!client.isActive) continue;
@@ -158,6 +163,9 @@ export class ClientCopyTraderEngine {
                   entryPrice: trade.entryPrice,
                   stopLoss: trade.stopLoss,
                   takeProfit: trade.takeProfit,
+                  exitPolicy: trade.exitPolicy ?? 'LEGACY',
+                  initialStopLoss: trade.initialStopLoss,
+                  trailingStopAtivo: trade.exitPolicy === 'FIXED_3R' ? false : undefined,
                   signalReason: trade.signalReason,
                   powerMultiplier: powerMultiplier || trade.powerMultiplier || 1.5,
                   masterExposureRatio: trade.masterExposureRatio
@@ -213,6 +221,9 @@ export class ClientCopyTraderEngine {
                   entryPrice: trade.entryPrice,
                   stopLoss: trade.stopLoss,
                   takeProfit: trade.takeProfit,
+                  exitPolicy: trade.exitPolicy ?? 'LEGACY',
+                  initialStopLoss: trade.initialStopLoss,
+                  trailingStopAtivo: trade.exitPolicy === 'FIXED_3R' ? false : undefined,
                   signalReason: trade.signalReason,
                   powerMultiplier: powerMultiplier || trade.powerMultiplier || 1.5,
                   masterExposureRatio: trade.masterExposureRatio

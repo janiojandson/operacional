@@ -3,6 +3,9 @@ import { PaperTradingEngine } from './paperTradingEngine.js';
 import { evaluateCryptoOpportunity } from './cryptoStrategyDecision.js';
 import type { FlowSignal } from '../../../shared/types.js';
 
+// Regression suite for the explicitly retained legacy policy.
+process.env.MARKET_EXIT_POLICY = 'LEGACY';
+
 const signal: FlowSignal = {
   id: 'signal-1',
   type: 'BOOK_IMBALANCE',
@@ -113,7 +116,8 @@ fixedTpEngine.updatePrice('BTC/USDT', 105_000);
 assert.equal(fixedTpEngine.getAccountState().openPositions.length, 0);
 const fixedClosed = fixedTpEngine.getAccountState().history[0];
 assert.equal(fixedClosed.closeReason, 'FIXED_TP');
-assert.equal(fixedClosed.rMultiple, 2.5);
+assert.equal(fixedClosed.grossR, 2.5);
+assert.equal(fixedClosed.rMultiple, fixedClosed.totalNetPnl! / fixedClosed.initialRiskUsd!);
 
 // Teste de Cooldown pós-saída registrado no engine
 assert.ok(fixedTpEngine.getLastExitTimestamp('BTC/USDT') !== undefined, 'closing position must register lastExitTimestamp');

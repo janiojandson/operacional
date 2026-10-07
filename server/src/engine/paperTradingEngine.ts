@@ -8,6 +8,7 @@ import type { StrategyDecision } from './cryptoStrategyDecision.js';
 import type { AdaptiveRiskResult } from './adaptiveRisk.js';
 import { evaluateActivePositionRisk } from './flowEngine.js';
 import type { MarketGovernanceResponse } from '../../../shared/layaGovernanceTypes.js';
+import { configuredExitPolicy, fixed3rExit, applyRealizedRisk } from './fixed3rExitPolicy.js';
 
 export interface SimulatedTradeWithTrailing extends SimulatedTrade {
   trailingActive?: boolean;
@@ -74,6 +75,7 @@ export class PaperTradingEngine {
   }
 
   constructor(onUpdate?: (account: PaperAccount, newTradeEvent?: SimulatedTrade) => void) {
+    configuredExitPolicy(); // Fail boot on an invalid policy; existing positions retain their own policy.
     this.onUpdateCallback = onUpdate;
   }
 
@@ -125,6 +127,7 @@ export class PaperTradingEngine {
     this.realizedPnl = account.realizedPnl;
     this.openPositions.clear();
     for (const t of account.openPositions) {
+      t.exitPolicy ??= 'LEGACY';
       this.openPositions.set(t.symbol, t);
     }
     this.history = [...account.history];
@@ -257,7 +260,8 @@ export class PaperTradingEngine {
 
     // 🛡️ Alvos e Stops: ajustes pertencem à governança determinística do Mercado, nunca à Laya.
     let stopLoss = adaptiveRisk?.stopLoss ?? decision.stopLoss;
-    if (marketProposal?.governance?.stopLossMoveDirection === 'TIGHTEN' && marketProposal.governance.stopLossProposalPct) {
+    const exitPolicy = configuredExitPolicy();
+    if (exitPolicy === 'LEGACY' && marketProposal?.governance?.stopLossMoveDirection === 'TIGHTEN' && marketProposal.governance.stopLossProposalPct) {
       const tightDistance = currentPrice * (marketProposal.governance.stopLossProposalPct / 100);
       const tightStop = tradeType === 'BUY' ? currentPrice - tightDistance : currentPrice + tightDistance;
       // Garante que o micro-stop seja mais favorável (mais próximo do preço) do que o SL mecânico
@@ -267,7 +271,10 @@ export class PaperTradingEngine {
         stopLoss = Number(tightStop.toFixed(8));
       }
     }
-    const takeProfit = adaptiveRisk?.takeProfit ?? decision.takeProfit;
+    if (exitPolicy === 'FIXED_3R') fixed3rExit({ type: tradeType, entryPrice: currentPrice, initialStopLoss: stopLoss }, currentPrice);
+    const takeProfit = exitPolicy === 'FIXED_3R'
+      ? currentPrice + (tradeType === 'BUY' ? 1 : -1) * 3 * Math.abs(currentPrice - stopLoss)
+      : adaptiveRisk?.takeProfit ?? decision.takeProfit;
     const targetDistance = Math.abs((takeProfit || currentPrice) - currentPrice);
     const trailingTriggerPrice = Number((currentPrice + (tradeType === 'BUY' ? 1 : -1) * targetDistance).toFixed(8));
 
@@ -308,6 +315,11 @@ export class PaperTradingEngine {
       currentPrice: currentPrice,
       takeProfit,
       stopLoss,
+      exitPolicy,
+      initialStopLoss: stopLoss,
+      initialQty: qty,
+      initialNotionalUsd: openNotional,
+      initialRiskUsd: qty * Math.abs(currentPrice - stopLoss),
       pnlUsd: 0,
       pnlPct: 0,
       rMultiple: 0,
@@ -325,8 +337,8 @@ export class PaperTradingEngine {
       qty,
       notionalUsd: openNotional,
       riskUsd: adaptiveRisk?.riskUsd ?? undefined,
-      grossR: adaptiveRisk?.grossR ?? undefined,
-      netR: adaptiveRisk?.netR ?? undefined,
+      grossR: exitPolicy === 'FIXED_3R' ? 3 : adaptiveRisk?.grossR ?? undefined,
+      netR: exitPolicy === 'FIXED_3R' ? 3 - (execution.fee + openNotional * 0.00055) / (qty * Math.abs(currentPrice - stopLoss)) : adaptiveRisk?.netR ?? undefined,
       marginUsd: execution.marginRequired,
       masterExposureRatio: openNotional / masterBalanceAtEntry,
       masterBalanceAtEntry,
@@ -381,6 +393,21 @@ export class PaperTradingEngine {
     const trade = this.openPositions.get(symbol);
     if (!trade) return;
 
+    if (!Number.isFinite(currentPrice) || currentPrice <= 0) return;
+    if (trade.exitPolicy === 'FIXED_3R') {
+      if (!trade.initialStopLoss || !trade.initialRiskUsd || !trade.initialQty || trade.partialTaken) {
+        throw new Error('FIXED_3R_POSITION_REQUIRES_RECONCILIATION');
+      }
+      const action = fixed3rExit({ type: trade.type, entryPrice: trade.entryPrice, initialStopLoss: trade.initialStopLoss }, currentPrice);
+      trade.currentPrice = currentPrice;
+      const delta = (trade.type === 'BUY' ? 1 : -1) * (currentPrice - trade.entryPrice);
+      trade.pnlPct = Number((delta / trade.entryPrice * 100).toFixed(2));
+      trade.pnlUsd = Number((delta * trade.initialQty!).toFixed(2));
+      if (action !== 'HOLD') this.closePosition(symbol, currentPrice, false, action);
+      else this.broadcastUpdate();
+      return;
+    }
+
     trade.currentPrice = currentPrice;
 
     const notionalSize = trade.notionalUsd ?? (Math.max(100, this.balance * 0.20) * (trade.powerMultiplier / 1.5));
@@ -413,7 +440,9 @@ export class PaperTradingEngine {
       
       const currentQty = trade.qty || 0;
       const halfQty = Number((currentQty * 0.5).toFixed(decimals));
-      const partialGainUsd = Number(((notionalSize * 0.5) * priceDeltaPct).toFixed(2));
+      const partialFeeUsd = Number((notionalSize * 0.5 * 0.00055).toFixed(4));
+      const partialGainUsd = Number((Number(((notionalSize * 0.5) * priceDeltaPct).toFixed(2)) - partialFeeUsd).toFixed(4));
+      trade.partialFeeUsd = (trade.partialFeeUsd ?? 0) + partialFeeUsd;
       
       // Credita lucro parcial no saldo da conta
       this.balance += partialGainUsd;
@@ -551,14 +580,16 @@ export class PaperTradingEngine {
       const closeNotional = trade.notionalUsd ?? (Math.max(100, this.balance * 0.20) * (trade.powerMultiplier / 1.5));
       const openFee = trade.fee ?? 0;
       const closeFee = Number((closeNotional * 0.00055).toFixed(4));
-      trade.fee = Number((openFee + closeFee).toFixed(4));
-      trade.netPnl = Number((trade.pnlUsd - openFee - closeFee).toFixed(4));
+      trade.fee = Number((openFee + closeFee + (trade.partialFeeUsd ?? 0)).toFixed(4));
+      // A harvest can reduce the lot during this tick; settle only the remaining leg.
+      trade.netPnl = Number((closeNotional * priceDeltaPct - openFee - closeFee).toFixed(4));
       const settlePnl = trade.netPnl;
       trade.closeTime = Math.floor(Date.now() / 1000);
 
       // 🌊 PnL Total Consolidado (1ª Metade Parcial + 2ª Metade Final)
       const totalNetPnl = Number(((trade.partialPnlUsd || 0) + settlePnl).toFixed(4));
       trade.totalNetPnl = totalNetPnl;
+      applyRealizedRisk(trade);
       trade.isNetPositive = totalNetPnl > 0;
       if (trade.partialTaken && totalNetPnl > 0 && trade.status !== 'CLOSED_TP') {
         trade.status = 'CLOSED_PARTIAL_TP';
@@ -646,15 +677,9 @@ export class PaperTradingEngine {
     }
     if (reason) trade.closeReason = reason;
 
-    const slDistance = Math.abs(trade.entryPrice - trade.stopLoss);
-    if (slDistance > 0) {
-      const priceDiff = trade.type === 'BUY' ? (closePrice - trade.entryPrice) : (trade.entryPrice - closePrice);
-      trade.rMultiple = Number((priceDiff / slDistance).toFixed(2));
-      trade.realizedR = trade.rMultiple;
-    }
-
     trade.closeTime = Math.floor(Date.now() / 1000);
-    trade.fee = Number((openFee + closeFee).toFixed(4));
+    trade.fee = Number((openFee + closeFee + (trade.partialFeeUsd ?? 0)).toFixed(4));
+    applyRealizedRisk(trade);
 
     this.realizedPnl += netPnl;
     this.balance += netPnl;
@@ -740,6 +765,7 @@ export class MirrorTradingEngine {
     this.realizedPnl = account.realizedPnl;
     this.openPositions.clear();
     for (const t of account.openPositions) {
+      t.exitPolicy ??= 'LEGACY';
       this.openPositions.set(t.symbol, t);
     }
     this.history = [...account.history];
@@ -792,6 +818,11 @@ export class MirrorTradingEngine {
       currentPrice: masterTrade.entryPrice,
       takeProfit: masterTrade.takeProfit,
       stopLoss: masterTrade.stopLoss,
+      exitPolicy: masterTrade.exitPolicy ?? 'LEGACY',
+      initialStopLoss: masterTrade.initialStopLoss ?? masterTrade.stopLoss,
+      initialQty: qty,
+      initialNotionalUsd: notional,
+      initialRiskUsd: qty * Math.abs(masterTrade.entryPrice - (masterTrade.initialStopLoss ?? masterTrade.stopLoss)),
       pnlUsd: 0,
       pnlPct: 0,
       rMultiple: 0,
@@ -823,6 +854,21 @@ export class MirrorTradingEngine {
   public updatePrice(symbol: string, currentPrice: number) {
     const trade = this.openPositions.get(symbol);
     if (!trade) return;
+
+    if (!Number.isFinite(currentPrice) || currentPrice <= 0) return;
+    if (trade.exitPolicy === 'FIXED_3R') {
+      if (!trade.initialStopLoss || !trade.initialRiskUsd || !trade.initialQty || trade.partialTaken) {
+        throw new Error('FIXED_3R_POSITION_REQUIRES_RECONCILIATION');
+      }
+      const action = fixed3rExit({ type: trade.type, entryPrice: trade.entryPrice, initialStopLoss: trade.initialStopLoss }, currentPrice);
+      const delta = (trade.type === 'BUY' ? 1 : -1) * (currentPrice - trade.entryPrice);
+      trade.currentPrice = currentPrice;
+      trade.pnlPct = Number((delta / trade.entryPrice * 100).toFixed(2));
+      trade.pnlUsd = Number((delta * trade.initialQty!).toFixed(2));
+      if (action !== 'HOLD') this.closePosition(symbol, currentPrice, false, action);
+      else this.broadcastUpdate();
+      return;
+    }
 
     trade.currentPrice = currentPrice;
 
@@ -908,6 +954,8 @@ export class MirrorTradingEngine {
 
     if (closed) {
       trade.fee = Number((openFee + closeFee).toFixed(4));
+      trade.totalNetPnl = trade.netPnl;
+      applyRealizedRisk(trade);
       trade.closeTime = Math.floor(Date.now() / 1000);
       this.realizedPnl += trade.netPnl;
       this.balance += trade.netPnl;
@@ -925,7 +973,7 @@ export class MirrorTradingEngine {
     symbol: string,
     closePrice: number,
     isMaker = false,
-    reason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST' | 'MARKET_CLOSE_NOW' | 'MARKET_EARLY_HARVEST' | 'TACTICAL_LAYA_EXIT'
+    reason?: SimulatedTrade['closeReason']
   ): { success: boolean; pnl?: number } {
     const trade = this.openPositions.get(symbol);
     if (!trade) return { success: false };
@@ -945,13 +993,9 @@ export class MirrorTradingEngine {
     trade.status = netPnl >= 0 ? 'CLOSED_TP' : 'CLOSED_SL';
     if (reason) trade.closeReason = reason;
 
-    const slDistance = Math.abs(trade.entryPrice - trade.stopLoss);
-    if (slDistance > 0) {
-      const priceDiff = trade.type === 'BUY' ? (closePrice - trade.entryPrice) : (trade.entryPrice - closePrice);
-      trade.rMultiple = Number((priceDiff / slDistance).toFixed(2));
-      trade.realizedR = trade.rMultiple;
-    }
-
+    trade.totalNetPnl = netPnl;
+    trade.fee = Number((openFee + closeFee).toFixed(4));
+    applyRealizedRisk(trade);
     trade.closeTime = Math.floor(Date.now() / 1000);
     
     this.realizedPnl += netPnl;

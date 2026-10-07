@@ -201,4 +201,13 @@ export async function initEventStoreTables(): Promise<void> {
   }
 
   console.log('[EventStore] ✅ Tabelas e índices do Event Store v3.0 prontos.');
+  await query(`ALTER TABLE trade_events ADD COLUMN IF NOT EXISTS initial_risk_usd NUMERIC`);
+  await query(`DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'exit_reason_enum') THEN
+      ALTER TYPE exit_reason_enum ADD VALUE IF NOT EXISTS 'FIXED_TP';
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'branch_enum') THEN
+      ALTER TYPE branch_enum ADD VALUE IF NOT EXISTS 'B9_FIXED_TARGET';
+    END IF;
+  END $$`);
 }

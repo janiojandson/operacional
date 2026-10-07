@@ -19,7 +19,15 @@ export interface MasterAccountRow {
   updated_at: number;
 }
 
-export interface MasterOrderRow {
+interface RiskSnapshotRow {
+  exit_policy?: 'LEGACY' | 'FIXED_3R';
+  initial_stop_loss?: number | null;
+  initial_qty?: number | null;
+  initial_notional_usd?: number | null;
+  initial_risk_usd?: number | null;
+}
+
+export interface MasterOrderRow extends RiskSnapshotRow {
   id: string;
   symbol: string;
   type: 'BUY' | 'SELL';
@@ -46,6 +54,7 @@ export interface MasterOrderRow {
   net_pnl: number;
   partial_taken?: number;
   partial_pnl_usd?: number;
+  partial_fee_usd?: number;
   total_net_pnl?: number;
   is_net_positive?: number;
   qty?: number;
@@ -69,7 +78,7 @@ export interface MirrorAccountRow {
   updated_at: number;
 }
 
-export interface MirrorOrderRow {
+export interface MirrorOrderRow extends RiskSnapshotRow {
   id: string;
   symbol: string;
   type: 'BUY' | 'SELL';
@@ -99,6 +108,19 @@ export interface MirrorOrderRow {
 
 const MASTER_ACCOUNT_ID = 'master-paper-account';
 const MIRROR_ACCOUNT_ID = 'mirror-paper-account';
+
+export function storedRiskSnapshot(row: RiskSnapshotRow & { entry_price: number; stop_loss: number; qty?: number; notional_usd?: number; partial_taken?: number }): Pick<SimulatedTrade, 'exitPolicy' | 'initialStopLoss' | 'initialQty' | 'initialNotionalUsd' | 'initialRiskUsd'> {
+  const exitPolicy = row.exit_policy ?? 'LEGACY';
+  if (exitPolicy === 'FIXED_3R' && [row.initial_stop_loss, row.initial_qty, row.initial_notional_usd, row.initial_risk_usd].some(v => v == null || !Number.isFinite(Number(v)) || Number(v) <= 0)) throw new Error('FIXED_3R_STORAGE_SNAPSHOT_REQUIRED');
+  // The stored stop is insert-only. Legacy partials are a single 50% harvest.
+  const factor = row.partial_taken ? 2 : 1;
+  const initialStopLoss = row.initial_stop_loss != null ? Number(row.initial_stop_loss) : exitPolicy === 'LEGACY' ? Number(row.stop_loss) : undefined;
+  const initialQty = row.initial_qty != null ? Number(row.initial_qty) : exitPolicy === 'LEGACY' ? Number(row.qty ?? 0) * factor : undefined;
+  const initialNotionalUsd = row.initial_notional_usd != null ? Number(row.initial_notional_usd) : exitPolicy === 'LEGACY' ? Number(row.notional_usd ?? Number(row.entry_price) * (row.qty ?? 0)) * factor : undefined;
+  const initialRiskUsd = row.initial_risk_usd != null ? Number(row.initial_risk_usd) : initialQty && initialStopLoss ? initialQty * Math.abs(Number(row.entry_price) - initialStopLoss) : undefined;
+  if (exitPolicy === 'FIXED_3R' && (!initialStopLoss || !initialQty || !initialNotionalUsd || !initialRiskUsd)) throw new Error('FIXED_3R_STORAGE_SNAPSHOT_REQUIRED');
+  return { exitPolicy, initialStopLoss, initialQty, initialNotionalUsd, initialRiskUsd };
+}
 
 const MIN_LOTS: Record<string, number> = {
   'BTC/USDT': 0.001,
@@ -213,6 +235,7 @@ export async function initPaperTables(): Promise<void> {
   await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS margin_usd NUMERIC NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS partial_taken INTEGER NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS partial_pnl_usd NUMERIC NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS partial_fee_usd NUMERIC NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS total_net_pnl NUMERIC NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS is_net_positive INTEGER NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE paper_master_orders ADD COLUMN IF NOT EXISTS close_reason TEXT`);
@@ -272,6 +295,15 @@ export async function initPaperTables(): Promise<void> {
   await query(`ALTER TABLE paper_mirror_orders DROP CONSTRAINT IF EXISTS paper_mirror_orders_status_check`);
   await query(`ALTER TABLE paper_mirror_orders ADD CONSTRAINT paper_mirror_orders_status_check CHECK(status IN ('OPEN', 'CLOSED_TP', 'CLOSED_SL', 'CLOSED_PARTIAL_TP'))`);
 
+  for (const table of ['paper_master_orders', 'paper_mirror_orders']) {
+    await query(`ALTER TABLE ${table}
+      ADD COLUMN IF NOT EXISTS exit_policy TEXT NOT NULL DEFAULT 'LEGACY' CHECK (exit_policy IN ('LEGACY', 'FIXED_3R')),
+      ADD COLUMN IF NOT EXISTS initial_stop_loss NUMERIC,
+      ADD COLUMN IF NOT EXISTS initial_qty NUMERIC,
+      ADD COLUMN IF NOT EXISTS initial_notional_usd NUMERIC,
+      ADD COLUMN IF NOT EXISTS initial_risk_usd NUMERIC`);
+  }
+
   await query(`CREATE INDEX IF NOT EXISTS idx_paper_master_orders_symbol ON paper_master_orders(symbol)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_paper_master_orders_status ON paper_master_orders(status)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_paper_master_orders_entry_time ON paper_master_orders(entry_time DESC)`);
@@ -329,6 +361,7 @@ export async function hydrateMasterAccount(): Promise<PaperAccount> {
   const historyOrders = await query<MasterOrderRow>("SELECT * FROM paper_master_orders WHERE status != 'OPEN' ORDER BY entry_time DESC LIMIT 100");
 
   const mapRowToTrade = (row: MasterOrderRow): SimulatedTradeWithTrailing => ({
+    ...storedRiskSnapshot(row),
     id: row.id,
     symbol: row.symbol,
     type: row.type,
@@ -354,6 +387,7 @@ export async function hydrateMasterAccount(): Promise<PaperAccount> {
     fee: Number(row.fee || 0),
     netPnl: Number(row.net_pnl || row.pnl_usd || 0),
     partialTaken: Boolean(row.partial_taken),
+    partialFeeUsd: Number(row.partial_fee_usd ?? 0),
     partialPnlUsd: row.partial_pnl_usd !== null && row.partial_pnl_usd !== undefined ? Number(row.partial_pnl_usd) : undefined,
     totalNetPnl: (row.total_net_pnl !== null && row.total_net_pnl !== undefined && Number(row.total_net_pnl) !== 0)
       ? Number(row.total_net_pnl) 
@@ -415,8 +449,9 @@ export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Prom
        trailing_active, trailing_trigger_price, trailing_stop_price,
        fee, net_pnl, qty, notional_usd, margin_usd, updated_at,
        partial_taken, partial_pnl_usd, total_net_pnl, is_net_positive,
-       close_reason, entry_decision_id, exit_decision_id
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)
+       close_reason, entry_decision_id, exit_decision_id,
+       partial_fee_usd, exit_policy, initial_stop_loss, initial_qty, initial_notional_usd, initial_risk_usd
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41)
      ON CONFLICT (id) DO UPDATE SET
        current_price = EXCLUDED.current_price,
        pnl_usd = EXCLUDED.pnl_usd,
@@ -433,11 +468,16 @@ export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Prom
        margin_usd = EXCLUDED.margin_usd,
        partial_taken = EXCLUDED.partial_taken,
        partial_pnl_usd = EXCLUDED.partial_pnl_usd,
+       partial_fee_usd = EXCLUDED.partial_fee_usd,
        total_net_pnl = EXCLUDED.total_net_pnl,
        is_net_positive = EXCLUDED.is_net_positive,
        close_reason = EXCLUDED.close_reason,
        entry_decision_id = COALESCE(EXCLUDED.entry_decision_id, paper_master_orders.entry_decision_id),
        exit_decision_id = COALESCE(EXCLUDED.exit_decision_id, paper_master_orders.exit_decision_id),
+       initial_stop_loss = COALESCE(paper_master_orders.initial_stop_loss, EXCLUDED.initial_stop_loss),
+       initial_qty = COALESCE(paper_master_orders.initial_qty, EXCLUDED.initial_qty),
+       initial_notional_usd = COALESCE(paper_master_orders.initial_notional_usd, EXCLUDED.initial_notional_usd),
+       initial_risk_usd = COALESCE(paper_master_orders.initial_risk_usd, EXCLUDED.initial_risk_usd),
        updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
    `,
     [
@@ -475,7 +515,13 @@ export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Prom
       trade.isNetPositive ? 1 : ((trade.totalNetPnl ?? trade.netPnl ?? trade.pnlUsd) > 0 ? 1 : 0),
       trade.closeReason || null,
       trade.entryDecisionId || null,
-      trade.exitDecisionId || null
+      trade.exitDecisionId || null,
+      trade.partialFeeUsd ?? 0,
+      trade.exitPolicy ?? 'LEGACY',
+      trade.initialStopLoss ?? null,
+      trade.initialQty ?? null,
+      trade.initialNotionalUsd ?? null,
+      trade.initialRiskUsd ?? null
     ]
   );
 }
@@ -487,6 +533,7 @@ export async function hydrateMirrorAccount(): Promise<PaperAccount> {
   const historyOrders = await query<MirrorOrderRow>("SELECT * FROM paper_mirror_orders WHERE status != 'OPEN' ORDER BY entry_time DESC LIMIT 100");
 
   const mapRowToTrade = (row: MirrorOrderRow): SimulatedTradeWithTrailing => ({
+    ...storedRiskSnapshot(row),
     id: row.id,
     symbol: row.symbol,
     type: row.type,
@@ -554,8 +601,9 @@ export async function upsertMirrorOrder(trade: SimulatedTradeWithTrailing & { qt
        id, symbol, type, entry_price, current_price, take_profit, stop_loss,
        qty, fee, net_pnl, pnl_usd, pnl_pct, r_multiple, power_multiplier, temperature, session,
        day_of_week, market_regime, status, entry_time, close_time, signal_reason,
-       trailing_active, trailing_trigger_price, trailing_stop_price
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+       trailing_active, trailing_trigger_price, trailing_stop_price,
+       exit_policy, initial_stop_loss, initial_qty, initial_notional_usd, initial_risk_usd
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
      ON CONFLICT (id) DO UPDATE SET
        current_price = EXCLUDED.current_price,
        pnl_usd = EXCLUDED.pnl_usd,
@@ -567,6 +615,10 @@ export async function upsertMirrorOrder(trade: SimulatedTradeWithTrailing & { qt
        trailing_active = EXCLUDED.trailing_active,
         trailing_stop_price = EXCLUDED.trailing_stop_price,
         fee = EXCLUDED.fee,
+        initial_stop_loss = COALESCE(paper_mirror_orders.initial_stop_loss, EXCLUDED.initial_stop_loss),
+        initial_qty = COALESCE(paper_mirror_orders.initial_qty, EXCLUDED.initial_qty),
+        initial_notional_usd = COALESCE(paper_mirror_orders.initial_notional_usd, EXCLUDED.initial_notional_usd),
+        initial_risk_usd = COALESCE(paper_mirror_orders.initial_risk_usd, EXCLUDED.initial_risk_usd),
         updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
     `,
     [
@@ -594,7 +646,12 @@ export async function upsertMirrorOrder(trade: SimulatedTradeWithTrailing & { qt
       trade.signalReason,
       trade.trailingActive ? 1 : 0,
       trade.trailingTriggerPrice || null,
-      trade.trailingStopPrice || null
+      trade.trailingStopPrice || null,
+      trade.exitPolicy ?? 'LEGACY',
+      trade.initialStopLoss ?? null,
+      trade.initialQty ?? null,
+      trade.initialNotionalUsd ?? null,
+      trade.initialRiskUsd ?? null
     ]
   );
 }

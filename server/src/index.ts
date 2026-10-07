@@ -11,6 +11,7 @@ import dotenv from 'dotenv';
 import { FlowEngine } from './engine/flowEngine.js';
 import { MarketDataManager } from './engine/marketDataManager.js';
 import { PaperTradingEngine, MirrorTradingEngine, validateOrderExecution } from './engine/paperTradingEngine.js';
+import { permitsDiscretionaryClose } from './engine/fixed3rExitPolicy.js';
 import { PairPerformanceTracker } from './engine/pairPerformanceTracker.js';
 import { AutoPairSelectorEngine, DynamicPairStatus } from './engine/autoPairSelectorEngine.js';
 import { AIAdvisorEngine } from './engine/aiAdvisorEngine.js';
@@ -326,7 +327,9 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
 
         // Persistência imutável no Event Store v2.0 (PostgreSQL)
         const rawCloseReason = tradeEvent.closeReason;
-        const exitReason = rawCloseReason === 'LAYA_CLOSE_NOW'
+        const exitReason = rawCloseReason === 'FIXED_TP'
+          ? 'FIXED_TP'
+          : rawCloseReason === 'LAYA_CLOSE_NOW'
           ? 'LAYA_CLOSE_NOW'
           : rawCloseReason === 'LAYA_EARLY_HARVEST'
             ? 'LAYA_EARLY_HARVEST'
@@ -339,9 +342,13 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
                   : rawCloseReason === 'RUNNER_TRAILING_EXIT'
                     ? 'RUNNER_TRAILING'
                     : 'WAVE_HARVEST_BREAKEVEN';
-        const rGross = Number(tradeEvent.rMultiple ?? 0);
+        const rGross = Number(tradeEvent.grossR ?? 0);
+        const totalNet = tradeEvent.totalNetPnl ?? tradeEvent.netPnl ?? 0;
+        const totalGross = totalNet + (tradeEvent.fee ?? 0);
         const isPostHarvest = Boolean((tradeEvent as any).waveHarvestReached || tradeEvent.partialTaken);
-        const branchClassification = exitReason === 'LAYA_CLOSE_NOW'
+        const branchClassification = exitReason === 'FIXED_TP'
+          ? 'B9_FIXED_TARGET'
+          : exitReason === 'LAYA_CLOSE_NOW'
           ? 'B7_LAYA_DEFENSE_EXIT'
           : exitReason === 'LAYA_EARLY_HARVEST'
             ? 'B8_LAYA_EARLY_HARVEST'
@@ -350,8 +357,8 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
               : (exitReason === 'ACTIVE_INVALIDATION' ? 'B2_INVALIDATION' :
                  exitReason === 'CIRCUIT_BREAKER_EMERGENCY' ? 'B6_MACRO_EMERGENCY' :
                  'B1_STOP_FULL');
-        const deltaStopBps = tradeEvent.entryPrice && tradeEvent.stopLoss
-          ? Math.round((Math.abs(tradeEvent.entryPrice - tradeEvent.stopLoss) / tradeEvent.entryPrice) * 10000)
+        const deltaStopBps = tradeEvent.entryPrice && tradeEvent.initialStopLoss
+          ? Math.round((Math.abs(tradeEvent.entryPrice - tradeEvent.initialStopLoss) / tradeEvent.entryPrice) * 10000)
           : 55;
         const entryEpoch = Number(tradeEvent.entryTime || 0);
         const exitEpoch = Number(tradeEvent.closeTime || 0);
@@ -363,6 +370,10 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
           : new Date();
 
         import('./services/eventStoreService.js').then(({ EventStoreService }) => {
+          if (!tradeEvent.initialRiskUsd || tradeEvent.initialRiskUsd <= 0) {
+            console.error('[EventStore] Trade sem snapshot original de risco; R não será inventado.', tradeEvent.id);
+            return;
+          }
           EventStoreService.recordTradeEvent({
             tradeId: tradeEvent.id,
             symbol: tradeEvent.symbol,
@@ -371,7 +382,9 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
             exitDecisionId: tradeEvent.exitDecisionId,
             entryTs,
             exitTs,
-            exitType: exitReason === 'STOP_LOSS_FULL'
+            exitType: exitReason === 'FIXED_TP'
+              ? 'TP_FIXED'
+              : exitReason === 'STOP_LOSS_FULL'
               ? 'STOP_FULL'
               : (exitReason === 'ACTIVE_INVALIDATION' || exitReason === 'LAYA_CLOSE_NOW')
                 ? 'STOP_EARLY'
@@ -380,24 +393,30 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
                   : 'RUNNER',
             riskPlannedR: 1.0,
             rGross,
-            rNet: rGross,
+            rNet: totalNet / tradeEvent.initialRiskUsd,
+            initialRiskUsd: tradeEvent.initialRiskUsd,
             entryPrice: tradeEvent.entryPrice,
-            initialStopPrice: tradeEvent.stopLoss,
+            initialStopPrice: tradeEvent.initialStopLoss,
             initialTargetPrice: tradeEvent.takeProfit,
             deltaStopBps,
             entryType: (tradeEvent as any).orderType === 'LIMIT' ? 'MAKER_POST_ONLY' : 'TAKER_IOC',
             entryFillStatus: (tradeEvent as any).orderType === 'LIMIT' ? 'FILLED_MAKER' : 'FILLED_TAKER_AGGRESSIVE',
             runMode: 'PAPER_MASTER',
-            waveHarvestReached: Boolean((tradeEvent as any).waveHarvestReached),
+            waveHarvestReached: Boolean(tradeEvent.partialTaken),
             waveHarvestPrice: (tradeEvent as any).waveHarvestPrice,
-            whFillType: Boolean((tradeEvent as any).waveHarvestReached) ? 'MAKER_LIMIT' : 'NOT_APPLICABLE',
+            whFillType: tradeEvent.partialTaken ? 'TAKER_FALLBACK_1500MS' : 'NOT_APPLICABLE',
             exitPrice: (tradeEvent as any).closePrice ?? tradeEvent.currentPrice,
             exitReason,
             branchClassification,
             accountBalanceUsd: (tradeEvent as any).masterBalanceAtEntry ?? (tradeEvent as any).balanceAtEntry ?? null,
-            positionSizeUsd: tradeEvent.notionalUsd ?? 250,
-            grossPnlUsd: Number(tradeEvent.pnlUsd ?? 0),
-            netPnlUsd: Number(tradeEvent.pnlUsd ?? 0),
+            positionSizeUsd: tradeEvent.initialNotionalUsd,
+            grossPnlUsd: totalGross,
+            netPnlUsd: totalNet,
+            feesEntryUsd: tradeEvent.initialNotionalUsd ? tradeEvent.initialNotionalUsd * 0.00055 : 0,
+            feesExitUsd: Math.max(0, (tradeEvent.fee ?? 0) - (tradeEvent.initialNotionalUsd ?? 0) * 0.00055),
+            spreadCostUsd: 0,
+            estimatedSlippageUsd: 0,
+            fundingCostUsd: 0,
             venue: (tradeEvent as any).venue ?? 'BingX',
             governanceMode: marketGovernanceService.getMode()
           });
@@ -427,7 +446,7 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
         console.log(`[Mirror] ✅ Replicado ${tradeEvent.type} ${tradeEvent.symbol} @ ${tradeEvent.entryPrice}`);
       }
     } else if (tradeEvent.status === 'CLOSED_TP' || tradeEvent.status === 'CLOSED_SL' || tradeEvent.status === 'CLOSED_PARTIAL_TP') {
-      const result = mirrorTrading.closePosition(tradeEvent.symbol, tradeEvent.currentPrice, false);
+      const result = mirrorTrading.closePosition(tradeEvent.symbol, tradeEvent.currentPrice, false, tradeEvent.closeReason);
       if (result.success) {
         console.log(`[Mirror] ✅ Fechado ${tradeEvent.symbol} PnL líquido: $${result.pnl?.toFixed(2)}`);
       }
@@ -815,7 +834,7 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
     // Governança de posição: regras determinísticas primeiro; Laya tática só atua sobre HOLD neutro.
     const openTrades = paperTrading.getAccountState().openPositions;
     const currentPosition = openTrades.find(p => p.symbol === data.symbol);
-    if (currentPosition && marketGovernanceService.getMode() === 'ACTIVE') {
+    if (currentPosition && currentPosition.exitPolicy !== 'FIXED_3R' && marketGovernanceService.getMode() === 'ACTIVE') {
       const now = Date.now();
       const lastCheck = activePositionCheckMap.get(data.symbol) || 0;
       // A Laya tática opera em cadência própria; hard stops continuam no loop normal do mercado.
@@ -893,7 +912,7 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
               const livePosition = paperTrading.getAccountState().openPositions.find(
                 p => p.symbol === data.symbol
               );
-              if (!livePosition) {
+              if (!livePosition || !permitsDiscretionaryClose(livePosition, currentPosition.id)) {
                 console.log(`[POSITION GOVERNANCE] ${data.symbol} já foi encerrada por proteção determinística; decisão tática descartada.`);
                 return;
               }

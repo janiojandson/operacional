@@ -1,4 +1,6 @@
 import ccxt from 'ccxt';
+import type { ExitPolicy } from '../../../shared/paperTypes.js';
+import { fixed3rExit } from './fixed3rExitPolicy.js';
 import { decrypt, maskApiKey } from '../utils/crypto.js';
 import { ClientConfigDB, TradeHistoryDB } from '../database/db.js';
 import { runShadowAudit } from './shadowAuditor.js';
@@ -33,6 +35,8 @@ export interface BybitPosition {
 }
 
 export interface TradePayload {
+  exitPolicy?: ExitPolicy;
+  initialStopLoss?: number;
   symbol: string;
   side: 'BUY' | 'SELL';
   entryPrice: number;
@@ -52,6 +56,66 @@ export interface SizingResult {
   marginUsd: number;
   leverage: number;
   stopDistPct: number;
+}
+
+export function buildBingxProtection(payload: Pick<TradePayload, 'side' | 'entryPrice' | 'stopLoss' | 'takeProfit' | 'initialStopLoss' | 'exitPolicy' | 'trailingStopAtivo'>,
+  qty: number, defaultTrailing: boolean, precision: (price: number) => number) {
+  const fixed = payload.exitPolicy === 'FIXED_3R';
+  const stop = fixed ? precision(payload.initialStopLoss ?? payload.stopLoss) : payload.stopLoss;
+  if (fixed) fixed3rExit({type:payload.side, entryPrice:payload.entryPrice, initialStopLoss:stop}, payload.entryPrice);
+  const target = fixed ? payload.entryPrice + (payload.side === 'BUY' ? 1 : -1) * 3 * Math.abs(payload.entryPrice - stop) : payload.takeProfit;
+  const trailingActive = fixed ? false : payload.trailingStopAtivo ?? defaultTrailing;
+  const params: Record<string, any> = {};
+  if (stop > 0) params.stopLoss = { stopPrice:precision(stop), type:'STOP_MARKET', workingType:'MARK_PRICE' };
+  if (!trailingActive && target > 0) params.takeProfit = { stopPrice:precision(target), type:'TAKE_PROFIT_MARKET', workingType:'MARK_PRICE', ...(fixed ? {quantity:qty} : {}) };
+  if (fixed && (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(params.takeProfit.stopPrice) || params.takeProfit.stopPrice <= 0
+      || (payload.side === 'BUY' ? params.takeProfit.stopPrice <= payload.entryPrice : params.takeProfit.stopPrice >= payload.entryPrice))) throw new Error('INVALID_FIXED_3R_NATIVE_PROTECTION');
+  return { trailingActive, params, target, stop };
+}
+
+export async function reconcileFixed3rEntry(exchange: any, symbol: string, payload: TradePayload, entryOrder: any,
+  persistSnapshot?: (snapshot: {entryPrice:number;initialStopLoss:number;initialQty:number;initialNotionalUsd:number;initialRiskUsd:number;takeProfit:number}) => Promise<void>,
+  persistFill?: (fill:any) => Promise<void>) {
+  let fill = await exchange.fetchOrder(entryOrder.id, symbol);
+  if (fill.status === 'open') {
+    // Cancellation can race a full fill. Only the subsequent authoritative state decides.
+    try { await exchange.cancelOrder(entryOrder.id, symbol); } catch { /* refetch below */ }
+    fill = await exchange.fetchOrder(entryOrder.id, symbol); // Include fills that raced cancellation.
+  }
+  if (persistFill) await persistFill(fill);
+  if (!['closed','canceled','cancelled','expired','rejected'].includes(String(fill.status).toLowerCase())) throw new Error('FIXED_3R_ENTRY_NOT_TERMINAL');
+  const qty = Number(fill.filled), entry = Number(fill.average);
+  if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(entry) || entry <= 0) throw new Error('FIXED_3R_ENTRY_FILL_UNCONFIRMED');
+  const protection = buildBingxProtection({...payload, entryPrice:entry}, qty, false,
+    price => Number(exchange.priceToPrecision(symbol, price)));
+  const snapshot = {entryPrice:entry, initialStopLoss:protection.params.stopLoss.stopPrice,
+    initialQty:qty, initialNotionalUsd:entry * qty, initialRiskUsd:qty * Math.abs(entry - protection.params.stopLoss.stopPrice),
+    takeProfit:protection.params.takeProfit.stopPrice};
+  if (persistSnapshot) await persistSnapshot(snapshot);
+  const positionSide = payload.side === 'BUY' ? 'LONG' : 'SHORT';
+  const closeSide = payload.side === 'BUY' ? 'sell' : 'buy';
+  const select = (orders:any[], kind:string) => orders.filter(o => o.symbol === undefined || o.symbol === symbol)
+    .filter(o => o.info?.positionSide === positionSide && String(o.info?.type ?? '').toUpperCase() === kind);
+  const pending = await exchange.fetchOpenOrders(symbol);
+  for (const [kind, priceKey, price] of [
+    ['STOP_MARKET','stopLossPrice',snapshot.initialStopLoss],
+    ['TAKE_PROFIT_MARKET','takeProfitPrice',snapshot.takeProfit]
+  ] as const) {
+    const matches = select(pending, kind);
+    if (matches.length !== 1) throw new Error('FIXED_3R_NATIVE_PROTECTION_AMBIGUOUS');
+    const order = matches[0];
+    if (Number(order.stopPrice ?? order.triggerPrice ?? order.info?.stopPrice) !== price || Number(order.amount) !== qty) {
+      await exchange.editOrder(order.id, symbol, 'market', closeSide, qty, undefined,
+        {hedged:true, reduceOnly:true, positionSide, [priceKey]:price, workingType:'MARK_PRICE'});
+    }
+  }
+  const confirmed = await exchange.fetchOpenOrders(symbol);
+  for (const [kind, price] of [['STOP_MARKET',snapshot.initialStopLoss],['TAKE_PROFIT_MARKET',snapshot.takeProfit]] as const) {
+    const matches = select(confirmed, kind);
+    if (matches.length !== 1 || Number(matches[0].amount) !== qty
+        || Number(matches[0].stopPrice ?? matches[0].triggerPrice ?? matches[0].info?.stopPrice) !== price) throw new Error('FIXED_3R_NATIVE_PROTECTION_UNCONFIRMED');
+  }
+  return Object.freeze(snapshot);
 }
 
 /** BingX Swap VIP0: notional mínimo por ordem (USDT) */
@@ -458,6 +522,10 @@ export class BybitExecutionEngine {
 
       await exchange.loadMarkets();
       const market = exchange.market(ccxtSymbol);
+      if (payload.exitPolicy === 'FIXED_3R') {
+        const existing = await exchange.fetchPositions([ccxtSymbol]);
+        if (existing.some((p:any) => p.symbol === ccxtSymbol && Number(p.contracts) > 0)) throw new Error('FIXED_3R_REQUIRES_EMPTY_REAL_POSITION');
+      }
       const minQty = toValidNumber(market.limits?.amount?.min, 0.001);
       const qtyStep = toValidNumber(market.precision?.amount, 0.001);
 
@@ -470,8 +538,11 @@ export class BybitExecutionEngine {
       const effectiveRiskPct = isAutonomy ? Number((baseRiskPct * (power / 1.5)).toFixed(2)) : baseRiskPct;
 
       const validEntryPrice = toValidNumber(payload.entryPrice, 0);
-      const validStopLoss = toValidNumber(payload.stopLoss, 0);
-      const validTakeProfit = toValidNumber(payload.takeProfit, 0);
+      const validStopLoss = toValidNumber(payload.exitPolicy === 'FIXED_3R' ? payload.initialStopLoss ?? payload.stopLoss : payload.stopLoss, 0);
+      const validTakeProfit = payload.exitPolicy === 'FIXED_3R'
+        ? validEntryPrice + (payload.side === 'BUY' ? 1 : -1) * 3 * Math.abs(validEntryPrice - validStopLoss)
+        : toValidNumber(payload.takeProfit, 0);
+      if (payload.exitPolicy === 'FIXED_3R') fixed3rExit({type:payload.side, entryPrice:validEntryPrice, initialStopLoss:validStopLoss}, validEntryPrice);
 
       if (validEntryPrice <= 0) throw new Error(`Preço de entrada inválido: ${payload.entryPrice}`);
       if (validStopLoss <= 0) throw new Error(`Stop Loss inválido: ${payload.stopLoss}`);
@@ -650,9 +721,9 @@ export class BybitExecutionEngine {
       }
 
       // ─── 🚀 TRAILING STOP COM COEFICIENTE EXATO DO PAR ESCOLHIDO ──────────
-      const trailingAtivo = payload.trailingStopAtivo !== undefined
-        ? payload.trailingStopAtivo
-        : Number(config.trailing_stop_enabled ?? 1) === 1;
+      const protection = buildBingxProtection({ ...payload, entryPrice:validEntryPrice, stopLoss:validStopLoss, takeProfit:validTakeProfit },
+        cleanQty, Number(config.trailing_stop_enabled ?? 1) === 1, price => Number(exchange.priceToPrecision(ccxtSymbol, price)));
+      const trailingAtivo = protection.trailingActive;
 
       const trailingConfiguration = calculateTrailingConfiguration({
         entryPrice: validEntryPrice,
@@ -662,22 +733,7 @@ export class BybitExecutionEngine {
       });
 
       // ─── BINGX NATIVE SL & TP (Formato dicionário exigido pela API BingX Swap) ───
-      if (validStopLoss > 0) {
-        orderParams['stopLoss'] = {
-          stopPrice: Number(exchange.priceToPrecision(ccxtSymbol, validStopLoss)),
-          type: 'STOP_MARKET',
-          workingType: 'MARK_PRICE'
-        };
-      }
-
-      // Se o Trailing Stop estiver DESLIGADO, envia o Take Profit fixo na BingX
-      if (!trailingAtivo && validTakeProfit > 0) {
-        orderParams['takeProfit'] = {
-          stopPrice: Number(exchange.priceToPrecision(ccxtSymbol, validTakeProfit)),
-          type: 'TAKE_PROFIT_MARKET',
-          workingType: 'MARK_PRICE'
-        };
-      }
+      Object.assign(orderParams, protection.params);
 
       orderParams['hedged'] = true;
 
@@ -691,6 +747,32 @@ export class BybitExecutionEngine {
         orderParams
       );
       const entryOrderState = classifyBybitOrderState(order);
+      const tradeId = `trade-${clientId}-${Date.now()}`;
+      await TradeHistoryDB.insert({
+        id:tradeId, client_id:clientId, symbol:payload.symbol, side:payload.side,
+        entry_price:validEntryPrice, qty:cleanQty, notional_usd:sizing.notionalUsd,
+        leverage:sizing.leverage, status:entryOrderState, signal_reason:payload.signalReason,
+        bybitOrderId:order.id, entry_time:Date.now(), exit_policy:payload.exitPolicy ?? 'LEGACY',
+        protection_status:payload.exitPolicy === 'FIXED_3R' ? 'PENDING' : 'LEGACY'
+      });
+      if (payload.exitPolicy === 'FIXED_3R') {
+        try {
+          const snapshot = await reconcileFixed3rEntry(exchange, ccxtSymbol, payload, order,
+            s => TradeHistoryDB.setInitialRiskSnapshot(tradeId, s),
+            fill => TradeHistoryDB.setExecutionFill(tradeId, {
+              status:Number(fill.filled) > 0 && Number(fill.filled) < Number(fill.amount) ? 'PARCIAL' : classifyBybitOrderState(fill),
+              qty:Number(fill.filled) || 0, entryPrice:Number(fill.average) || validEntryPrice
+            }));
+          sizing.qty = snapshot.initialQty;
+          sizing.notionalUsd = snapshot.initialNotionalUsd;
+          sizing.marginUsd = snapshot.initialNotionalUsd / sizing.leverage;
+          sizing.stopDistPct = Math.abs(snapshot.entryPrice - snapshot.initialStopLoss) / snapshot.entryPrice;
+          await TradeHistoryDB.setProtectionStatus(tradeId, 'CONFIRMED');
+        } catch (error) {
+          await TradeHistoryDB.setProtectionStatus(tradeId, 'UNCONFIRMED');
+          throw error;
+        }
+      }
 
       // Se o Trailing Stop estiver ATIVADO, programa no endpoint nativo se suportado
       if (trailingAtivo && (entryOrderState === 'PREENCHIDA' || entryOrderState === 'PARCIAL')) {
@@ -728,22 +810,6 @@ export class BybitExecutionEngine {
           console.warn(`[ExecutionEngine] Aviso ao programar Trailing Stop: ${e?.message}`);
         }
       }
-
-      const tradeId = `trade-${clientId}-${Date.now()}`;
-      await TradeHistoryDB.insert({
-        id: tradeId,
-        client_id: clientId,
-        symbol: payload.symbol,
-        side: payload.side,
-        entry_price: validEntryPrice,
-        qty: cleanQty,
-        notional_usd: sizing.notionalUsd,
-        leverage: sizing.leverage,
-        status: entryOrderState,
-        signal_reason: payload.signalReason,
-        bybitOrderId: order.id,
-        entry_time: Date.now()
-      });
 
       const feePaid = Number((sizing.notionalUsd * (isMaker ? 0.0002 : 0.0005)).toFixed(4));
 

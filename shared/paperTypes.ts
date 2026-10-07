@@ -9,6 +9,11 @@ export type TemperatureLevel =
   | 'DIVINE_CONFLUENCE'; // 5.0x (Extração Suprema / Deus)
 
 export interface SimulatedTrade {
+  exitPolicy?: ExitPolicy;
+  readonly initialStopLoss?: number;
+  readonly initialQty?: number;
+  readonly initialNotionalUsd?: number;
+  readonly initialRiskUsd?: number;
   id: string;
   symbol: string;
   type: 'BUY' | 'SELL';
@@ -40,6 +45,7 @@ export interface SimulatedTrade {
   netPnl?: number;
   partialTaken?: boolean;
   partialPnlUsd?: number;
+  partialFeeUsd?: number;
   totalNetPnl?: number;
   isNetPositive?: boolean;
   strategyVersion?: string;
@@ -51,6 +57,8 @@ export interface SimulatedTrade {
   isRunner?: boolean;
   trailingStopPrice?: number;
 }
+
+export type ExitPolicy = 'LEGACY' | 'FIXED_3R';
 
 export interface PaperAccount {
   initialBalance?: number;
@@ -197,4 +205,3 @@ export interface QuantStrategyHealthReport {
   verdict: string;
   actionableInsights: string[];
 }
-
