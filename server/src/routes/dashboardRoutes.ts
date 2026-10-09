@@ -47,7 +47,9 @@ dashboardRouter.get('/overview', async (_req: Request, res: Response) => {
     const counterfactualR = Number(attrRows[0]?.counterfactual_r ?? 0);
 
     const payload = {
-      layaMode: status.mode,
+      governanceMode: status.mode,
+      layaMode: 'OFF', // Legacy integration field, not the local policy mode.
+      source: 'MARKET_DETERMINISTIC_GOVERNANCE',
       latency: {
         p50: status.metrics.latencyP50,
         p95: status.metrics.latencyP95,
@@ -59,6 +61,8 @@ dashboardRouter.get('/overview', async (_req: Request, res: Response) => {
         sparkline: [status.metrics.sessionPardonsUsed]
       },
       attribution: {
+        source: attrRows.length ? 'DECISION_EVENTS_HISTORY' : 'LOCAL_SESSION_FALLBACK',
+        windowHours: 24,
         deltaR,
         attributedR,
         counterfactualR
@@ -157,7 +161,7 @@ dashboardRouter.get('/blocks', async (_req: Request, res: Response) => {
     const asymmetry = avgLoss > 0 ? (avgWin / avgLoss) : 0;
     const profitFactor = grossLossR > 0 ? grossWinR / grossLossR : (grossWinR > 0 ? Number.POSITIVE_INFINITY : 0);
 
-    // Bloco 8: Atribuição Laya
+    // Bloco 8: Atribuição histórica de decisões
     const attrStats = await query<{ delta_r: string; hit_rate: string }>(`
       SELECT
         COALESCE(SUM(delta_r), 0) AS delta_r,
@@ -253,7 +257,7 @@ dashboardRouter.get('/blocks', async (_req: Request, res: Response) => {
       },
       {
         id: 8,
-        name: 'Atribuição Laya',
+        name: 'Atribuição histórica de decisões',
         value: `${deltaR >= 0 ? '+' : ''}${deltaR.toFixed(2)}R`,
         subtext: `Hit Rate: ${hitRate.toFixed(0)}%`,
         status: deltaR >= 0 ? 'green' : 'yellow',
@@ -267,7 +271,7 @@ dashboardRouter.get('/blocks', async (_req: Request, res: Response) => {
           : `${marketGovernanceService.getStatus().metrics.latencyP50.toFixed(1)}ms`,
         subtext: (marketGovernanceService.getStatus().recentDecisions?.length || 0) === 0
           ? 'Aguardando 1º fluxo'
-          : `p95 ${marketGovernanceService.getStatus().metrics.latencyP95.toFixed(1)}ms / timeout 1500ms`,
+          : `p95 ${marketGovernanceService.getStatus().metrics.latencyP95.toFixed(1)}ms / avaliação local`,
         status: marketGovernanceService.getStatus().metrics.latencyP95 <= 1500 ? 'green' : 'red',
         sparkline: [marketGovernanceService.getStatus().metrics.latencyP50, marketGovernanceService.getStatus().metrics.latencyP95]
       },
@@ -291,7 +295,7 @@ dashboardRouter.get('/blocks', async (_req: Request, res: Response) => {
 
 /**
  * GET /api/dashboard/attribution
- * Retorna detalhe discriminado dos poderes da Laya e status de gate
+ * Retorna detalhe discriminado dos decisões locais e status de gate
  */
 dashboardRouter.get('/attribution', async (_req: Request, res: Response) => {
   try {

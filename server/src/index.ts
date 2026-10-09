@@ -28,7 +28,6 @@ import { calculateProfileStopLoss, evaluateCryptoOpportunity } from './engine/cr
 import { calculateAdaptiveRisk } from './engine/adaptiveRisk.js';
 import { getCryptoStrategyProfile } from './engine/cryptoStrategyProfile.js';
 import { marketGovernanceService } from './services/marketGovernanceService.js';
-import { macroSentinelClient } from './services/macroSentinelService.js';
 import { EventStoreService } from './services/eventStoreService.js';
 // SaaS: Autenticação e Rotas
 import { authRouter } from './auth/authRoutes.js';
@@ -87,7 +86,7 @@ const globalLimiter = rateLimit({
   legacyHeaders: false,
   skip: (req) => {
     // Isenta polling de governança, saúde operacional e telemetria interna
-    return req.path.startsWith('/api/admin/laya') ||
+    return req.path.startsWith('/api/admin/governance') ||
            req.path.startsWith('/api/dashboard') ||
            req.path.startsWith('/api/health');
   },
@@ -121,7 +120,7 @@ app.use('/api/admin', adminRouter);
 app.use('/api/client', clientRouter);
 app.use('/api/dashboard', dashboardRouter);
 
-// Diagnóstico da Laya permanece exclusivamente em /api/admin/laya/*, protegido por requireAdmin.
+
 
 
 // --- SERVIÇO DE ARQUIVOS ESTÁTICOS (VITE BUILD) ---
@@ -329,34 +328,26 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
         const rawCloseReason = tradeEvent.closeReason;
         const exitReason = rawCloseReason === 'FIXED_TP'
           ? 'FIXED_TP'
-          : rawCloseReason === 'LAYA_CLOSE_NOW'
-          ? 'LAYA_CLOSE_NOW'
-          : rawCloseReason === 'LAYA_EARLY_HARVEST'
-            ? 'LAYA_EARLY_HARVEST'
-            : rawCloseReason === 'ACTIVE_FLOW_INVALIDATION'
-              ? 'ACTIVE_INVALIDATION'
-              : rawCloseReason === 'CIRCUIT_BREAKER_EMERGENCY'
-                ? 'CIRCUIT_BREAKER_EMERGENCY'
-                : tradeEvent.status === 'CLOSED_SL'
-                  ? 'STOP_LOSS_FULL'
-                  : rawCloseReason === 'RUNNER_TRAILING_EXIT'
-                    ? 'RUNNER_TRAILING'
-                    : 'WAVE_HARVEST_BREAKEVEN';
+          : rawCloseReason === 'ACTIVE_FLOW_INVALIDATION'
+            ? 'ACTIVE_INVALIDATION'
+            : rawCloseReason === 'CIRCUIT_BREAKER_EMERGENCY'
+              ? 'CIRCUIT_BREAKER_EMERGENCY'
+              : tradeEvent.status === 'CLOSED_SL'
+                ? 'STOP_LOSS_FULL'
+                : rawCloseReason === 'RUNNER_TRAILING_EXIT'
+                  ? 'RUNNER_TRAILING'
+                  : 'WAVE_HARVEST_BREAKEVEN';
         const rGross = Number(tradeEvent.grossR ?? 0);
         const totalNet = tradeEvent.totalNetPnl ?? tradeEvent.netPnl ?? 0;
         const totalGross = totalNet + (tradeEvent.fee ?? 0);
         const isPostHarvest = Boolean((tradeEvent as any).waveHarvestReached || tradeEvent.partialTaken);
         const branchClassification = exitReason === 'FIXED_TP'
           ? 'B9_FIXED_TARGET'
-          : exitReason === 'LAYA_CLOSE_NOW'
-          ? 'B7_LAYA_DEFENSE_EXIT'
-          : exitReason === 'LAYA_EARLY_HARVEST'
-            ? 'B8_LAYA_EARLY_HARVEST'
-            : isPostHarvest
-              ? (rGross >= 2.05 ? 'B5_RUNNER_EXTREME' : (rGross >= 1.30 ? 'B4_TARGET_RUNNER' : 'B3_BE_POST_HARVEST'))
-              : (exitReason === 'ACTIVE_INVALIDATION' ? 'B2_INVALIDATION' :
-                 exitReason === 'CIRCUIT_BREAKER_EMERGENCY' ? 'B6_MACRO_EMERGENCY' :
-                 'B1_STOP_FULL');
+          : isPostHarvest
+            ? (rGross >= 2.05 ? 'B5_RUNNER_EXTREME' : (rGross >= 1.30 ? 'B4_TARGET_RUNNER' : 'B3_BE_POST_HARVEST'))
+            : (exitReason === 'ACTIVE_INVALIDATION' ? 'B2_INVALIDATION' :
+               exitReason === 'CIRCUIT_BREAKER_EMERGENCY' ? 'B6_MACRO_EMERGENCY' :
+               'B1_STOP_FULL');
         const deltaStopBps = tradeEvent.entryPrice && tradeEvent.initialStopLoss
           ? Math.round((Math.abs(tradeEvent.entryPrice - tradeEvent.initialStopLoss) / tradeEvent.entryPrice) * 10000)
           : 55;
@@ -386,11 +377,9 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
               ? 'TP_FIXED'
               : exitReason === 'STOP_LOSS_FULL'
               ? 'STOP_FULL'
-              : (exitReason === 'ACTIVE_INVALIDATION' || exitReason === 'LAYA_CLOSE_NOW')
+              : exitReason === 'ACTIVE_INVALIDATION'
                 ? 'STOP_EARLY'
-                : exitReason === 'LAYA_EARLY_HARVEST'
-                  ? 'EARLY_HARVEST'
-                  : 'RUNNER',
+                : 'RUNNER',
             riskPlannedR: 1.0,
             rGross,
             rNet: totalNet / tradeEvent.initialRiskUsd,
@@ -569,7 +558,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
         }
       });
       if (pardonResult.executed && (pardonResult.decision.action === 'OVERRIDE_COOLDOWN' || pardonResult.decision.governance?.cooldownOverride)) {
-        console.log(`[LAYA OVERRIDE] Cooldown perdoado para ${signal.symbol} | Razão: ${pardonResult.decision.rationaleCode}`);
+        console.log(`[MARKET OVERRIDE] Cooldown perdoado para ${signal.symbol} | Razão: ${pardonResult.decision.rationaleCode}`);
         cooldownActive = false;
       } else {
         console.log(`[COOLDOWN ATIVO] Aguardando respiro estrutural para ${signal.symbol}`);
@@ -711,7 +700,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       }
     }
 
-    // 🛡️ Trava Anti-Perturbação: Se já existe posição aberta neste par, não perturba a Laya pedindo nova entrada
+    // 🛡️ Trava Anti-Perturbação: Se já existe posição aberta neste par, evita avaliações de entrada duplicadas
     const hasOpenPosition = paperTrading.getAccountState().openPositions.some(p => p.symbol === signal.symbol);
     if (hasOpenPosition) {
       console.warn('[IndexFlow][DROP][601_POSITION_ALREADY_OPEN]', {
@@ -723,7 +712,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       return;
     }
 
-    // 🧠 Governança Laya Sistema 1 (Grupo 1: PRE_ENTRY / NEW_OPPORTUNITY)
+    // 🧠 Governança determinística local (Grupo 1: PRE_ENTRY / NEW_OPPORTUNITY)
     const _imbalance = book?.imbalanceRatio || 1.0;
     const _whaleActivity = flowEngine.getRecentAggression(signal.symbol)?.whaleCount || 0;
     
@@ -780,7 +769,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       console.log(`[MARKET GOVERNANCE SHADOW/OFF VETO] ${signal.symbol} | Razão: ${governanceResult.decision.rationaleCode}`);
     }
 
-    // Um reset pode começar enquanto a governança/Laya está aguardando resposta.
+    // Um reset pode começar enquanto a governança está sendo avaliada.
     // Nesse caso, invalida o sinal antigo para ele não reabrir posição após a limpeza.
     if (
       signalResetGeneration !== masterResetGeneration ||
@@ -796,7 +785,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       return;
     }
 
-    // Registra oportunidade e executa com os parâmetros da governança do Mercado; a Laya atua apenas como decisão tática permitida.
+    // Registra oportunidade e executa com os parâmetros da governança do Mercado; a decisão depende exclusivamente das regras locais.
     console.log('[IndexFlow][DISPATCHING_TO_ENGINE]', {
       symbol: signal.symbol,
       type: signal.type,
@@ -814,11 +803,11 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
 });
 
 const activePositionCheckMap = new Map<string, number>();
-const configuredLayaPositionIntervalMs = Number(
-  process.env.MARKET_LAYA_POSITION_INTERVAL_MS || 10000
+const configuredPositionGovernanceIntervalMs = Number(
+  process.env.MARKET_POSITION_GOVERNANCE_INTERVAL_MS || 10000
 );
-const MARKET_LAYA_POSITION_INTERVAL_MS = Number.isFinite(configuredLayaPositionIntervalMs)
-  ? Math.max(6000, configuredLayaPositionIntervalMs)
+const MARKET_POSITION_GOVERNANCE_INTERVAL_MS = Number.isFinite(configuredPositionGovernanceIntervalMs)
+  ? Math.max(6000, configuredPositionGovernanceIntervalMs)
   : 10000;
 /** Evita avaliações/fechamentos táticos concorrentes para o mesmo símbolo. */
 const activePositionGovernanceInFlight = new Set<string>();
@@ -831,15 +820,15 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
     paperTrading.updatePrice(data.symbol, data.price, symState?.book, recentAggression);
     mirrorTrading.updatePrice(data.symbol, data.price);
 
-    // Governança de posição: regras determinísticas primeiro; Laya tática só atua sobre HOLD neutro.
+    // Governança de posição: regras determinísticas de proteção.
     const openTrades = paperTrading.getAccountState().openPositions;
     const currentPosition = openTrades.find(p => p.symbol === data.symbol);
     if (currentPosition && currentPosition.exitPolicy !== 'FIXED_3R' && marketGovernanceService.getMode() === 'ACTIVE') {
       const now = Date.now();
       const lastCheck = activePositionCheckMap.get(data.symbol) || 0;
-      // A Laya tática opera em cadência própria; hard stops continuam no loop normal do mercado.
+      // A governança local opera em cadência própria; hard stops continuam no loop normal do mercado.
       // O lock impede que uma avaliação lenta concorra com outra para o mesmo ativo.
-      if (now - lastCheck > MARKET_LAYA_POSITION_INTERVAL_MS && !activePositionGovernanceInFlight.has(data.symbol)) {
+      if (now - lastCheck > MARKET_POSITION_GOVERNANCE_INTERVAL_MS && !activePositionGovernanceInFlight.has(data.symbol)) {
         activePositionCheckMap.set(data.symbol, now);
         activePositionGovernanceInFlight.add(data.symbol);
         void (async () => {
@@ -856,7 +845,7 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
           );
 
           // Toda posição é monitorada. Evidências determinísticas continuam soberanas;
-          // sem evidência de hard exit, POSITION_MONITOR retorna HOLD local e abre espaço para a Laya tática.
+          // sem evidência de hard exit, POSITION_MONITOR mantém HOLD sem consultas externas.
           {
             const requestedAction = isContrarianWhale
               ? 'CLOSE_NOW'
@@ -900,15 +889,11 @@ const marketManager = new MarketDataManager(flowEngine, (event, data) => {
             }, { currentR });
 
             if (gov.executed && (gov.decision.action === 'CLOSE_NOW' || gov.decision.action === 'EARLY_HARVEST_CLOSE')) {
-              const tacticalLayaExit = gov.decision.rationaleCode === 'LAYA_TACTICAL_EXIT';
-              const closeReason = tacticalLayaExit
-                ? 'TACTICAL_LAYA_EXIT'
-                : gov.decision.action === 'CLOSE_NOW'
-                  ? 'MARKET_CLOSE_NOW'
-                  : 'MARKET_EARLY_HARVEST';
+              const closeReason = gov.decision.action === 'CLOSE_NOW'
+                ? 'MARKET_CLOSE_NOW' : 'MARKET_EARLY_HARVEST';
 
               // Revalida imediatamente antes de qualquer fechamento tático.
-              // Um hard stop pode ter encerrado a posição enquanto a Laya estava inferindo.
+              // Um hard stop pode ter encerrado a posição durante a avaliação local.
               const livePosition = paperTrading.getAccountState().openPositions.find(
                 p => p.symbol === data.symbol
               );
@@ -1170,17 +1155,13 @@ app.get('/api/audit-logs', requireAuth, async (req, res) => {
   }
 });
 
-// Endpoint de Regime Macro Institucional (Alimentado pelo nexus-macro-sentinel :4005)
+// Endpoint de Regime Macro Institucional (Compatibilidade com serviço macro retirado)
 app.get('/api/macro-regime', async (req, res) => {
-  const prediction = await macroSentinelClient.getMacroPrediction();
+  // Compatibility endpoint: never fabricates a healthy external macro signal.
   res.json({
-    status: 'ONLINE',
-    macroSentinel: prediction || {
-      regime: 'NEUTRAL_RANGING',
-      predictiveScore: 0,
-      isCircuitBreakerActive: false,
-      confluences: ['Fallback padrão']
-    },
+    status: 'REMOVED',
+    source: 'LOCAL_STRATEGY',
+    macroSentinel: null,
     timestamp: new Date().toISOString()
   });
 });
@@ -1190,7 +1171,6 @@ app.get('/api/client/master-feed', requireAuth, async (req, res) => {
   const account = paperTrading.getAccountState();
   const summaries = marketManager.getSummaries();
   const logs = clientCopyTrader.getLogs();
-  const macroPrediction = await macroSentinelClient.getMacroPrediction();
 
   const cryptoPairs = summaries.filter(s => s.symbol.includes('USDT')).map(s => ({
     symbol: s.symbol,
@@ -1201,8 +1181,8 @@ app.get('/api/client/master-feed', requireAuth, async (req, res) => {
   res.json({
     masterOnline: true,
     autonomiaStatus: '100% ATIVA (24/7 Binance Perpétuos - 10x Isolada)',
-    macroRegime: macroPrediction?.regime || 'NEUTRAL_RANGING',
-    macroScore: macroPrediction?.predictiveScore || 0,
+    macroRegime: 'UNKNOWN',
+    macroScore: null,
     metrics: {
       winRate: account.winRate,
       totalTrades: account.totalTrades,
@@ -1684,8 +1664,7 @@ initDatabase()
       console.log(`🐘 Banco de Dados: PostgreSQL Railway conectado`);
       console.log(`📡 WebSocket Gateway ready on ws://0.0.0.0:${PORT}`);
       
-      // CORREÇÃO P0: Inicia heartbeat do Macro Sentinel (cura estagnação de 43h)
-      macroSentinelClient.startAutoUpdate();
+      // Strategy runs entirely on local exchange data and deterministic governance.
     });
   })
   .catch((err) => {

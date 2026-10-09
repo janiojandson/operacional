@@ -7,7 +7,7 @@ import { calculateMasterMirrorSize } from './masterMirrorSizing.js';
 import type { StrategyDecision } from './cryptoStrategyDecision.js';
 import type { AdaptiveRiskResult } from './adaptiveRisk.js';
 import { evaluateActivePositionRisk } from './flowEngine.js';
-import type { MarketGovernanceResponse } from '../../../shared/layaGovernanceTypes.js';
+import type { MarketGovernanceResponse } from '../../../shared/marketGovernanceTypes.js';
 import { configuredExitPolicy, fixed3rExit, applyRealizedRisk } from './fixed3rExitPolicy.js';
 
 export interface SimulatedTradeWithTrailing extends SimulatedTrade {
@@ -649,7 +649,7 @@ export class PaperTradingEngine {
     symbol: string,
     closePrice: number,
     isMaker = false,
-    reason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST' | 'MARKET_CLOSE_NOW' | 'MARKET_EARLY_HARVEST' | 'TACTICAL_LAYA_EXIT' | 'CIRCUIT_BREAKER_EMERGENCY' | 'MANUAL'
+    reason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'MARKET_CLOSE_NOW' | 'MARKET_EARLY_HARVEST' | 'CIRCUIT_BREAKER_EMERGENCY' | 'MANUAL'
   ): { success: boolean; pnl?: number } {
     const trade = this.openPositions.get(symbol);
     if (!trade) return { success: false };

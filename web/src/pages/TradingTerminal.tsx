@@ -11,7 +11,7 @@ import { AIAdvisorModal } from '../components/Advisor/AIAdvisorModal';
 import { QuantStrategyHealthModal } from '../components/Advisor/QuantStrategyHealthModal';
 import { MasterHealthDashboard } from '../components/Advisor/MasterHealthDashboard';
 import { ShadowAuditModal } from '../components/ShadowAuditModal';
-import { LayaGovernanceControl } from '../components/Header/LayaGovernanceControl';
+
 import { ResponsiveShell } from '../components/Layout/ResponsiveShell';
 import { RefreshCw, Activity } from 'lucide-react';
 
@@ -77,12 +77,6 @@ export default function TradingTerminal() {
     }
   }, [totalUnrealizedPnl, liveEquity]);
 
-  const [sentinelData, setSentinelData] = useState<{
-    regime: string;
-    predictiveScore: number;
-    isCircuitBreakerActive: boolean;
-  }>({ regime: 'NEUTRAL_RANGING', predictiveScore: 0, isCircuitBreakerActive: false });
-
   useEffect(() => {
     fetch('/api/admin/config/toggles', {
       headers: {
@@ -100,25 +94,6 @@ export default function TradingTerminal() {
       })
       .catch(() => {});
 
-    // Polling de telemetria do Macro Sentinel
-    const fetchSentinel = () => {
-      fetch('/api/macro-regime')
-        .then((res) => res.json())
-        .then((data) => {
-          if (data && data.macroSentinel) {
-            setSentinelData({
-              regime: data.macroSentinel.regime || 'NEUTRAL_RANGING',
-              predictiveScore: data.macroSentinel.predictiveScore ?? 0,
-              isCircuitBreakerActive: Boolean(data.macroSentinel.isCircuitBreakerActive)
-            });
-          }
-        })
-        .catch(() => {});
-    };
-
-    fetchSentinel();
-    const interval = setInterval(fetchSentinel, 5000);
-    return () => clearInterval(interval);
   }, []);
 
   const handleToggleTrailing = async () => {
@@ -265,39 +240,13 @@ export default function TradingTerminal() {
                 <span>Shadow: <b className="text-white">{shadowFilterActive ? 'REAL' : 'FANTASMA'}</b></span>
               </button>
 
-              {/* Botão Governança Laya */}
-              <LayaGovernanceControl />
 
-              {/* Pílula de Telemetria do Macro Sentinel */}
-              <div
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[11px] sm:text-xs font-semibold shadow-sm transition-all shrink-0 ${
-                  sentinelData.isCircuitBreakerActive
-                    ? 'bg-rose-950/70 border-rose-500/80 text-rose-300 animate-pulse'
-                    : sentinelData.predictiveScore > 20
-                    ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
-                    : sentinelData.predictiveScore < -20
-                    ? 'bg-rose-950/40 border-rose-500/50 text-rose-300'
-                    : 'bg-slate-900/90 border-slate-700/80 text-slate-300'
-                }`}
-                title={`Macro Sentinel | Regime: ${sentinelData.regime} | Score: ${sentinelData.predictiveScore} | Circuit Breaker: ${sentinelData.isCircuitBreakerActive ? 'DISPARADO 🛑' : 'SEGURO 🟢'}`}
-              >
-                <span className={`w-2 h-2 rounded-full ${
-                  sentinelData.isCircuitBreakerActive
-                    ? 'bg-rose-500 animate-ping'
-                    : sentinelData.predictiveScore > 0
-                    ? 'bg-emerald-400'
-                    : 'bg-amber-400'
-                }`} />
-                <span>
-                  SENTINEL: <b className="text-white">{sentinelData.regime}</b> | CB: <b className={sentinelData.isCircuitBreakerActive ? 'text-rose-400 font-black' : 'text-emerald-400'}>{sentinelData.isCircuitBreakerActive ? 'ATIVO 🛑' : 'SEGURO 🟢'}</b>
-                </span>
-              </div>
 
               {/* Botão Dashboard dos 10 Blocos */}
               <button
                 onClick={() => setIsMasterHealthOpen(true)}
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[11px] sm:text-xs font-semibold transition-all bg-cyan-950/40 border-cyan-500/50 text-cyan-300 hover:bg-cyan-900/60 shadow-sm shadow-cyan-950/20 shrink-0"
-                title="Abrir Dashboard dos 10 Blocos e Atribuição Laya v3.0"
+                title="Abrir Dashboard dos 10 Blocos e Governança Local"
               >
                 <Activity className="w-3.5 h-3.5 text-cyan-400" />
                 <span className="hidden sm:inline">10 BLOCOS &amp; SAÚDE</span>

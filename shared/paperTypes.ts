@@ -49,7 +49,7 @@ export interface SimulatedTrade {
   totalNetPnl?: number;
   isNetPositive?: boolean;
   strategyVersion?: string;
-  closeReason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'LAYA_CLOSE_NOW' | 'LAYA_EARLY_HARVEST' | 'MARKET_CLOSE_NOW' | 'MARKET_EARLY_HARVEST' | 'TACTICAL_LAYA_EXIT' | 'CIRCUIT_BREAKER_EMERGENCY' | 'MANUAL';
+  closeReason?: 'FIXED_TP' | 'TRAILING' | 'STOP_LOSS' | 'RUNNER_TRAILING_EXIT' | 'ACTIVE_FLOW_INVALIDATION' | 'MARKET_CLOSE_NOW' | 'MARKET_EARLY_HARVEST' | 'CIRCUIT_BREAKER_EMERGENCY' | 'MANUAL';
   entryDecisionId?: string;
   exitDecisionId?: string;
   realizedR?: number;
@@ -157,7 +157,7 @@ export interface ContextSegmentationBlock {
   bySession: SegmentItem[];
   byDayOfWeek: SegmentItem[];
   byDirection: SegmentItem[];
-  bySentinelRegime?: SegmentItem[];
+
   byTemperature: TemperatureImpactAnalysis[];
   optimalTemperatureLimit: string;
   exposureImpactVerdict: string;

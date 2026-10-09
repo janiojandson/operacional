@@ -1,8 +1,8 @@
 /**
- * Contratos de Dados e Tipos do Decisor Sistema 1 (Laya) ↔ Mercado Financeiro v2.0
+ * Contratos de Dados e Tipos do Decisor Sistema 1 (Market Deterministic) ↔ Mercado Financeiro v2.0
  */
 
-export type LayaGovernanceAction =
+export type MarketGovernanceAction =
   | 'AUTHORIZE'
   | 'VETO'
   | 'CLOSE_NOW'
@@ -15,7 +15,7 @@ export type LayaGovernanceAction =
 
 export type MarketGovernanceMode = 'OFF' | 'SHADOW' | 'ACTIVE';
 /** @deprecated Use MarketGovernanceMode. */
-export type LayaMode = MarketGovernanceMode;
+export type MarketMode = MarketGovernanceMode;
 
 export type StopLossMoveDirection = 'TIGHTEN' | 'TO_PROFIT' | 'WIDEN';
 
@@ -24,7 +24,7 @@ export type CooldownOverrideReason =
   | 'ABSORPTION_EXHAUSTION_REVERSAL'
   | 'NONE';
 
-export type LayaRationaleCode =
+export type MarketRationaleCode =
   | 'SWEEP_RECLAIM_CVD_CONVERGENT'
   | 'MICRO_STOP_REORGANIZATION'
   | 'EARLY_HARVEST_EXHAUSTION'
@@ -33,14 +33,9 @@ export type LayaRationaleCode =
   | 'SPOOFING_DETECTED_VETO'
   | 'SPREAD_TOXIC_VETO'
   | 'BETA_DIVERGENCE_VETO'
-  | 'SENTINEL_CIRCUIT_BREAKER_VETO'
-  | 'LAYA_TACTICAL_EXIT'
-  | 'LAYA_TACTICAL_WAIT'
-  | 'LAYA_TACTICAL_ABSTAIN'
-  | 'LAYA_TACTICAL_UNAVAILABLE'
   | 'NO_OPPORTUNITY';
 
-export interface LayaGovernanceProposal {
+export interface MarketGovernanceProposal {
   cooldownOverride?: boolean;
   cooldownOverrideReason?: CooldownOverrideReason;
   stopLossProposalPct?: number;
@@ -51,7 +46,7 @@ export interface LayaGovernanceProposal {
   executionMode?: 'MAKER_POST_ONLY' | 'TAKER_IOC';
 }
 
-export interface LayaTraceData {
+export interface MarketTraceData {
   l2DepthTop20: number;
   imbalanceRatio: number;
   cvdDelta60s: number;
@@ -60,9 +55,9 @@ export interface LayaTraceData {
   [key: string]: any;
 }
 
-export type LayaIntentGroup = 'PRE_ENTRY' | 'COOLDOWN_AUDIT' | 'POSITION_LIFECYCLE';
+export type MarketIntentGroup = 'PRE_ENTRY' | 'COOLDOWN_AUDIT' | 'POSITION_LIFECYCLE';
 
-export type LayaIntentSubgroup =
+export type MarketIntentSubgroup =
   | 'NEW_OPPORTUNITY'
   | 'LIQUIDITY_SWEEP_REENTRY'
   | 'DEFENSE_CONTRARIAN_FLOW'
@@ -70,11 +65,11 @@ export type LayaIntentSubgroup =
   | 'POSITION_MONITOR'
   | 'SCALE_IN_REQUEST';
 
-export interface LayaGovernanceRequest {
+export interface MarketGovernanceRequest {
   stateVersion: number;
   symbol: string;
-  intentGroup?: LayaIntentGroup;
-  intentSubgroup?: LayaIntentSubgroup;
+  intentGroup?: MarketIntentGroup;
+  intentSubgroup?: MarketIntentSubgroup;
   side?: 'BUY' | 'SELL';
   currentPrice: number;
   requestedAction?: string;
@@ -94,7 +89,7 @@ export interface LayaGovernanceRequest {
     sweepBreachBps?: number;
     sweepConfirmedAt?: number;
   };
-  trace: LayaTraceData;
+  trace: MarketTraceData;
   proposedStopLoss?: number;
   proposedTakeProfit?: number;
   signalSource?: string;
@@ -112,26 +107,24 @@ export interface LayaGovernanceRequest {
   };
 }
 
-export interface LayaGovernanceResponse {
+export interface MarketGovernanceResponse {
   decisionId: string;
   stateVersion: number;
   issuedAt: number;
   expiresAt: number;
-  action: LayaGovernanceAction;
+  action: MarketGovernanceAction;
   symbol: string;
   side?: 'BUY' | 'SELL';
   powerMultiplier: number;
   riskPct: number;
-  governance: LayaGovernanceProposal;
-  rationaleCode: LayaRationaleCode;
-  trace: LayaTraceData;
+  governance: MarketGovernanceProposal;
+  rationaleCode: MarketRationaleCode;
+  trace: MarketTraceData;
   signalSource?: string;
   vetoRuleCode?: string;
 }
 
-export type MarketGovernanceAction = LayaGovernanceAction;
-export type MarketGovernanceRequest = LayaGovernanceRequest;
-export type MarketGovernanceResponse = LayaGovernanceResponse;
+
 
 export interface ConstitutionContext {
   currentR?: number;
@@ -144,8 +137,8 @@ export interface ConstitutionCheckResult {
   rejectionReason?: string;
 }
 
-export interface LayaMetrics {
-  mode: LayaMode;
+export interface MarketMetrics {
+  mode: MarketMode;
   p50LatencyMs: number;
   p95LatencyMs: number;
   overridesUsedSession: number;
@@ -154,7 +147,7 @@ export interface LayaMetrics {
   recentDecisions: Array<{
     decisionId: string;
     timestamp: number;
-    action: LayaGovernanceAction;
+    action: MarketGovernanceAction;
     symbol: string;
     executed: boolean;
     rejectionReason?: string;
@@ -162,4 +155,4 @@ export interface LayaMetrics {
   }>;
 }
 
-export type MarketGovernanceMetrics = LayaMetrics;
+

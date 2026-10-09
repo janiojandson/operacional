@@ -3,8 +3,6 @@ import { requireAdmin } from '../auth/authMiddleware.js';
 import { UserDB, ClientConfigDB, TradeHistoryDB, AnnouncementDB, query, queryOne, UserRow, ClientConfigRow } from '../database/db.js';
 import { BybitExecutionEngine } from '../engine/bybitExecutionEngine.js';
 import { sanitizeCsvField, escapeHtml } from '../utils/sanitizer.js';
-import { marketGovernanceService } from '../services/marketGovernanceService.js';
-import type { MarketGovernanceMode } from '../../../shared/layaGovernanceTypes.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
@@ -525,118 +523,5 @@ adminRouter.delete('/clients/:id', async (req: Request, res: Response) => {
 
   await UserDB.deleteClient(user.id, user.client_id);
   res.json({ success: true, message: `Cliente ${user.name || user.email} excluído com sucesso.` });
-});
-
-// GET /api/admin/laya/status — Métricas e decisões recentes da governança Laya
-adminRouter.get('/laya/status', (_req: Request, res: Response) => {
-  const mode = marketGovernanceService.getMode();
-  const metrics = marketGovernanceService.getMetrics();
-  res.json({
-    mode,
-    metrics: {
-      latencyP50: metrics.p50LatencyMs,
-      latencyP95: metrics.p95LatencyMs,
-      sessionPardonsUsed: metrics.overridesUsedSession,
-      maxSessionPardons: metrics.maxOverridesPerSession,
-      totalDecisions: metrics.recentDecisions.length,
-      counterfactualPnL: metrics.pnlAttributedOverrides
-    },
-    recentDecisions: metrics.recentDecisions
-  });
-});
-
-// POST /api/admin/laya/mode — Alternar modo operacional (OFF, SHADOW, ACTIVE)
-adminRouter.post('/laya/mode', (req: Request, res: Response) => {
-  const { mode } = req.body || {};
-  const validModes: MarketGovernanceMode[] = ['OFF', 'SHADOW', 'ACTIVE'];
-  if (!mode || !validModes.includes(mode)) {
-    return res.status(400).json({ error: 'Modo inválido. Valores permitidos: OFF, SHADOW, ACTIVE' });
-  }
-  marketGovernanceService.setMode(mode);
-  console.log(`[MARKET GOVERNANCE] Modo operacional alterado para: ${mode}`);
-  res.json({ success: true, mode: marketGovernanceService.getMode() });
-});
-
-// POST /api/admin/laya/reset-decisions
-// Zera decisões de ruído (NO_ACTION não executadas >1h) no banco e buffers em memória.
-// Seguro: não afeta trades, histórico financeiro ou decisões executadas.
-adminRouter.post('/laya/reset-decisions', async (_req: Request, res: Response) => {
-  try {
-    const { EventStoreService } = await import('../services/eventStoreService.js');
-
-    // 1. Limpa banco de dados (decisões de ruído > 1h)
-    const cleared = await EventStoreService.clearNoiseDecisions();
-
-    // 2. Zera buffers em memória (recentDecisions, latencyBuffer, debounce map)
-    marketGovernanceService.resetSession();
-
-    console.log(`[Admin] Reset Laya: ${cleared} decisões de ruído removidas do banco.`);
-
-      res.json({
-        cleared,
-        timestamp: new Date().toISOString(),
-        message: `${cleared} decisões de ruído removidas. Buffers em memória zerados.`
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: 'Falha ao resetar decisões Laya', details: err.message });
-    }
-  });
-
-// GET /api/admin/laya/test-ports
-// Testa somente a Laya original (upstream) usada em shadow/advisory.
-adminRouter.get('/laya/test-ports', async (_req: Request, res: Response) => {
-  const configuredUrl = process.env.MARKET_LAYA_NATIVE_URL;
-  if (!configuredUrl) {
-    return res.status(503).json({ error: 'MARKET_LAYA_NATIVE_URL não configurada' });
-  }
-  const tests = [
-    { name: 'Laya Original Configurada', url: configuredUrl }
-  ];
-
-  const results: any[] = [];
-
-  for (const t of tests) {
-    const start = performance.now();
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 2000);
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const apiKey = process.env.MARKET_LAYA_API_KEY;
-      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-      const resp = await fetch(`${t.url}/v1/systemone`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          state: { origem: 'teste_diagnostico', body: 'ping teste de portas' },
-          questions: { action: { type: 'choice', instructions: 'Escolha a opção mais adequada para um ping de diagnóstico.', criteria: { OK: 'diagnóstico saudável', REVIEW: 'diagnóstico inconclusivo' } } }
-        }),
-        signal: controller.signal
-      });
-      clearTimeout(timer);
-      const elapsed = performance.now() - start;
-      results.push({
-        alvo: t.name,
-        url: t.url,
-        sucesso: resp.ok,
-        statusHttp: resp.status,
-        latenciaMs: Number(elapsed.toFixed(2))
-      });
-    } catch (err: any) {
-      const elapsed = performance.now() - start;
-      results.push({
-        alvo: t.name,
-        url: t.url,
-        sucesso: false,
-        erro: err.message,
-        latenciaMs: Number(elapsed.toFixed(2))
-      });
-    }
-  }
-
-  res.json({
-    timestamp: new Date().toISOString(),
-    ambiente: process.env.NODE_ENV || 'production',
-    diagnostico: results
-  });
 });
 

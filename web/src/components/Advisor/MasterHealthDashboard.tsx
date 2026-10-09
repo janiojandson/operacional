@@ -1,6 +1,6 @@
 // ==============================================================================
 // 📁 web/src/components/Advisor/MasterHealthDashboard.tsx
-// Dashboard dos 10 Blocos de Saúde Quantitativa & Governança Laya v3.0
+// Dashboard dos 10 Blocos de Saúde Quantitativa & Governança local v3.0
 // ==============================================================================
 
 import React, { useState, useEffect } from 'react';
@@ -27,7 +27,7 @@ interface BlockMetric {
   sparkline: number[];
 }
 
-interface LayaDecisionItem {
+interface MarketDecisionItem {
   decisionId: string;
   timestamp: number;
   action: string;
@@ -38,7 +38,7 @@ interface LayaDecisionItem {
 }
 
 interface OverviewData {
-  layaMode: 'OFF' | 'SHADOW' | 'ACTIVE';
+  governanceMode: 'OFF' | 'SHADOW' | 'ACTIVE';
   latency: {
     p50: number;
     p95: number;
@@ -58,7 +58,7 @@ interface OverviewData {
     symbol: string;
     rationaleCode: string;
   } | null;
-  recentDecisions?: LayaDecisionItem[];
+  recentDecisions?: MarketDecisionItem[];
   breaker: boolean;
 }
 
@@ -120,13 +120,13 @@ export const MasterHealthDashboard: React.FC<MasterHealthDashboardProps> = ({ is
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <h2 className="text-sm font-bold text-white tracking-wide">Dashboard dos 10 Blocos (Laya ↔ Motor v3.0)</h2>
+                <h2 className="text-sm font-bold text-white tracking-wide">Dashboard dos 10 Blocos (Motor determinístico local)</h2>
                 <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold">
                   POSTGRES EVENT STORE
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 font-sans mt-0.5">
-                Saúde quantitativa, latência sub-15ms e auditoria de atribuição de poderes da Laya.
+                Saúde quantitativa, latência medida e histórico de decisões locais.
               </p>
             </div>
           </div>
@@ -183,7 +183,7 @@ export const MasterHealthDashboard: React.FC<MasterHealthDashboardProps> = ({ is
 
           <div className="bg-slate-900/80 border border-slate-800 p-3 rounded-xl">
             <div className="flex items-center justify-between text-slate-400 text-[10px] uppercase font-bold">
-              <span>💰 Atribuição Contrafactual</span>
+              <span>💰 Atribuição contrafactual histórica (24h)</span>
               <span className="text-emerald-400">ΔR Líquido</span>
             </div>
             <div className={`text-lg font-black mt-1 ${Number(overview?.attribution.deltaR ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -196,8 +196,8 @@ export const MasterHealthDashboard: React.FC<MasterHealthDashboardProps> = ({ is
 
           <div className="bg-slate-900/80 border border-slate-800 p-3 rounded-xl">
             <div className="flex items-center justify-between text-slate-400 text-[10px] uppercase font-bold">
-              <span>🧠 Última Proposta</span>
-              <span className="text-purple-400">Laya S1</span>
+              <span>🧠 Última decisão</span>
+              <span className="text-purple-400">Regras locais</span>
             </div>
             <div className="text-sm font-bold text-white mt-1 truncate">
               {overview?.lastDecision ? `${overview.lastDecision.decisionType} (${overview.lastDecision.symbol})` : 'Aguardando fluxo'}
@@ -245,12 +245,12 @@ export const MasterHealthDashboard: React.FC<MasterHealthDashboardProps> = ({ is
             ))}
           </div>
 
-          {/* Histórico em Tempo Real de Atuações da Laya */}
+          {/* Histórico em Tempo Real de decisões locais */}
           <div className="mt-5 bg-slate-900/80 border border-slate-800 rounded-xl p-3.5">
             <div className="flex items-center justify-between mb-2.5">
               <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
                 <Brain className="w-4 h-4 text-purple-400" />
-                <span>Histórico de Atuações da Laya (Decisões do Sistema 1)</span>
+                <span>Histórico de decisões do motor local</span>
               </span>
               <span className="text-[10px] text-slate-500 font-mono">
                 {overview?.recentDecisions?.length || 0} eventos registrados
@@ -400,7 +400,7 @@ export const MasterHealthDashboard: React.FC<MasterHealthDashboardProps> = ({ is
               </div>
 
               <div className="mt-4 p-2.5 rounded-lg bg-cyan-950/30 border border-cyan-500/30 text-[11px] text-cyan-200">
-                💡 <b>Dono Único do Stop:</b> A Laya propõe e analisa microestrutura; o motor em Node.js (porta 4000) valida a constituição e grava de forma imutável no PostgreSQL.
+                💡 <b>Dono Único do Stop:</b> O motor local avalia fluxo e risco, mantém as proteções e e grava de forma imutável no PostgreSQL.
               </div>
             </div>
           </div>

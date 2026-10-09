@@ -2,7 +2,7 @@
 **Módulo:** Mercado Financeiro
 **Versão do Agente:** 2.3.0
 **Porta do Serviço:** 4000 (`operacional-production-57d9.up.railway.app`)
-**Sistema 1 advisory:** Laya upstream ✅ (endpoint obrigatório via `MARKET_LAYA_NATIVE_URL`; sem fallback hardcoded)
+**Governança:** motor determinístico local; Laya e Macro Sentinel removidos do runtime.
 
 ---
 
@@ -20,8 +20,6 @@
 Entrada (Terminal CLI | OpenCode | Webhook Trading | Cron Bybit)
   → CAMADA 1 — GOVERNANÇA DETERMINÍSTICA DO MERCADO [✅ AUTORIDADE FINANCEIRA]
       Regras de spread, risco, stop, cooldown, lifecycle, scale-in, circuit breaker e modo de execução.
-  → CAMADA 1B — LAYA UPSTREAM (Sistema 1) [✅ SHADOW/ADVISORY]
-      Triagem tipada choice/score/noul com answer_confidence. Nunca autoriza ordem, tamanho, stop, fechamento ou execução.
   → CAMADA 2 — CÉREBRO (Orquestrador Sistema 2) [nexus-cerebro:3000]
       pensarEAgir + tool calling distribuído + despacho aos membros.
   → CAMADA 3 — OMNIROUTE (Maestro de Chaves & IA) [nexus-omniroute:8080]
@@ -76,7 +74,6 @@ Toda a comunicação com a malha interna do Railway opera com sub-20ms e custo z
 | **nexus-membro-memoria** | **3003** | `nexus-membro-memoria.railway.internal:3003` | Interno |
 | **Mercado Financeiro** | **4000** | `operacional.railway.internal:4000` | `operacional-production-57d9.up.railway.app` |
 | **Postgres Principal** | **5432** | `postgres.railway.internal:5432` | Proxy TCP externo 25561 |
-| **Laya upstream canônica** | dinâmica | `MARKET_LAYA_NATIVE_URL` | Configurada por ambiente; nunca contém regras do Mercado |
 | **nexus-omniroute** | **8080** | `nexus-omniroute.railway.internal:8080` | `nexus-omniroute-production.up.railway.app` |
 
 ---
@@ -86,7 +83,7 @@ Toda a comunicação com a malha interna do Railway opera com sub-20ms e custo z
    - As variáveis `RAILWAY_PROJECT_ID` e `RAILWAY_TOKEN` ficam restritas ao `.env` do container/serviço para localização do projeto `nexus-multi` e consulta de logs/telemetria.
 2. **Auto-Cura Exclusiva do Cérebro (Proibição de Restart Autônomo):**
    - O Mercado Financeiro é um ambiente financeiro crítico e **NÃO deve executar auto-cura ou reinicializações autônomas de infraestrutura**.
-   - Em caso de falha da Laya advisory, o módulo registra a anomalia e mantém a decisão financeira exclusivamente no motor determinístico local; a falha nunca vira autorização implícita, nem impede ações explícitas de proteção.
+   - O motor financeiro funciona com dados locais da exchange e governança determinística. Não reintroduzir chamadas, heartbeats ou bloqueios dos serviços Laya e Macro Sentinel. A compatibilidade histórica não pode reativá-los.
 
 ---
 *Padrão unificado Nexus v2.3 — Fonte da verdade: `Documento_Mestre_Projeto_SaaS`.*

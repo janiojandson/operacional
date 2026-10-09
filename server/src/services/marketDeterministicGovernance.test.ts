@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateMarketDeterministicGovernance } from './marketDeterministicGovernance.js';
-import type { LayaGovernanceRequest } from '../../../shared/layaGovernanceTypes.js';
+import type { MarketGovernanceRequest } from '../../../shared/marketGovernanceTypes.js';
 
-function req(overrides: Partial<LayaGovernanceRequest> = {}): LayaGovernanceRequest {
+function req(overrides: Partial<MarketGovernanceRequest> = {}): MarketGovernanceRequest {
   return {
     stateVersion: 1,
     symbol: 'BTC/USDT',
