@@ -267,10 +267,42 @@ export class EventStoreService {
    */
   static async isLockoutActive(): Promise<boolean> {
     try {
-      const res = await query<{ daily_lockout_active: boolean; safe_halt_active: boolean }>(
-        'SELECT daily_lockout_active, safe_halt_active FROM system_state WHERE id = 1'
+      const res = await query<{
+        daily_lockout_active: boolean;
+        safe_halt_active: boolean;
+        lockout_session_date: string | Date | null;
+      }>(
+        'SELECT daily_lockout_active, safe_halt_active, lockout_session_date FROM system_state WHERE id = 1'
       );
-      return Boolean(res[0]?.daily_lockout_active || res[0]?.safe_halt_active);
+      if (!res[0]) return false;
+      if (res[0].safe_halt_active) return true;
+
+      if (res[0].daily_lockout_active) {
+        // Validação temporal UTC contra deadlocks interdiários:
+        // Se a data do lockout for anterior ao dia de hoje em UTC, ele já expirou à meia-noite!
+        if (res[0].lockout_session_date) {
+          const sessionDateStr = res[0].lockout_session_date instanceof Date
+            ? res[0].lockout_session_date.toISOString().split('T')[0]
+            : String(res[0].lockout_session_date).substring(0, 10);
+          const todayUtcStr = new Date().toISOString().split('T')[0];
+
+          if (sessionDateStr < todayUtcStr) {
+            console.log(`[EventStore] 🔓 Lockout Diário expirou (Sessão: ${sessionDateStr} < Hoje UTC: ${todayUtcStr}). Auto-resetando...`);
+            await query(
+              `UPDATE system_state 
+               SET daily_lockout_active = FALSE, lockout_session_date = NULL, updated_at = NOW() 
+               WHERE id = 1`
+            ).catch(err => console.error('[EventStore] Erro ao resetar lockout expirado:', err));
+            await query(
+              `INSERT INTO system_state_events (event_type, r_at_event, details) 
+               VALUES ('SESSION_RESET', 0.0, '{"reason": "AUTO_RECOVERY_EXPIRED_UTC"}')`
+            ).catch(() => {});
+            return false;
+          }
+        }
+        return true;
+      }
+      return false;
     } catch {
       return false;
     }

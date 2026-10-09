@@ -299,16 +299,18 @@ export function evaluateActivePositionRisk(
 
   // 1. REGRAS PARA POSIÇÃO LONG (COMPRA)
   if (isBuy) {
-    // Se o trade estiver em prejuízo comprovado (-0.35R a -0.95R) com desbalanceamento severo e agressão de baleia
-    if (currentR <= -0.35 && currentR > -0.95) {
-      if (imbalance <= 0.30 && (dominantSide === 'sell' || whaleCount > 0)) {
+    // 🛡️ Invalidação Defensiva: Só corta se o trade estiver sob estresse real (-0.70R a -0.95R)
+    // com desbalanceamento severo de livro (asks massivos) E agressão vendedora dominante confirmada.
+    // Evita estopar prematuramente em pullbacks normais (-0.35R) causados por ruído de spread.
+    if (currentR <= -0.70 && currentR > -0.95) {
+      if (imbalance <= 0.20 && (dominantSide === 'sell' && whaleCount >= 1)) {
         return { shouldClose: true, reason: 'ACTIVE_FLOW_INVALIDATION_BEARISH_PRESSURE' };
       }
     }
 
     // Se estiver em lucro acima de 1.0R e houver forte absorção passiva no topo com agressão vendedora
     if (currentR >= 1.0) {
-      if (imbalance < 0.30 && dominantSide === 'sell') {
+      if (imbalance < 0.25 && dominantSide === 'sell') {
         return { shouldClose: true, reason: 'ABSORPTION_EXHAUSTION' };
       }
     }
@@ -316,16 +318,17 @@ export function evaluateActivePositionRisk(
 
   // 2. REGRAS PARA POSIÇÃO SHORT (VENDA)
   if (!isBuy) {
-    // Se o trade estiver em prejuízo comprovado (-0.35R a -0.95R) com desbalanceamento severo e agressão de baleia
-    if (currentR <= -0.35 && currentR > -0.95) {
-      if (imbalance >= 3.0 && (dominantSide === 'buy' || whaleCount > 0)) {
+    // 🛡️ Invalidação Defensiva: Só corta se o trade estiver sob estresse real (-0.70R a -0.95R)
+    // com desbalanceamento severo de livro (bids massivos) E agressão compradora dominante confirmada.
+    if (currentR <= -0.70 && currentR > -0.95) {
+      if (imbalance >= 4.0 && (dominantSide === 'buy' && whaleCount >= 1)) {
         return { shouldClose: true, reason: 'ACTIVE_FLOW_INVALIDATION_BULLISH_PRESSURE' };
       }
     }
 
     // Se estiver em lucro acima de 1.0R e houver absorção no fundo com pressão compradora
     if (currentR >= 1.0) {
-      if (imbalance > 3.0 && dominantSide === 'buy') {
+      if (imbalance > 4.0 && dominantSide === 'buy') {
         return { shouldClose: true, reason: 'ABSORPTION_EXHAUSTION' };
       }
     }

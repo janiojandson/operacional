@@ -451,9 +451,30 @@ export class PaperTradingEngine {
       trade.qty = halfQty;
       if (trade.notionalUsd) trade.notionalUsd = Number((trade.notionalUsd * 0.5).toFixed(2));
 
-      // Trava Stop Loss instantaneamente no ponto de entrada (Breakeven)
-      trade.stopLoss = trade.entryPrice;
-      console.log(`[WAVE HARVEST] Parcial executada em ${symbol} a +${currentR.toFixed(2)}R | Lucro Parcial: +$${partialGainUsd} | Stop movido para Breakeven (${trade.entryPrice})`);
+      // 🛡️ Trava Stop Loss em BREAKEVEN POSITIVO PROTEGIDO (cobre taxa round-trip + 0.05% de lucro líquido)
+      // Evita que o retorno ao preço de entrada coma o lucro da parcial através do fee drag
+      const feeBufferPct = 0.0015; // 0.15% cobre taker fee roundtrip (0.11%) + slippage buffer
+      if (trade.type === 'BUY') {
+        const feeCoverPrice = Number((trade.entryPrice * (1 + feeBufferPct)).toFixed(decimals));
+        trade.stopLoss = Math.max(trade.entryPrice, feeCoverPrice);
+      } else {
+        const feeCoverPrice = Number((trade.entryPrice * (1 - feeBufferPct)).toFixed(decimals));
+        trade.stopLoss = Math.min(trade.entryPrice, feeCoverPrice);
+      }
+      console.log(`[WAVE HARVEST] Parcial executada em ${symbol} a +${currentR.toFixed(2)}R | Lucro Parcial: +$${partialGainUsd} | Stop movido para Breakeven Protegido (${trade.stopLoss})`);
+      this.broadcastUpdate(trade);
+    }
+
+    // ⏱️ 0.15 TIME-STOP PARA POSIÇÕES ESTAGNADAS EM REGIMES LATERAIS
+    const nowTs = Date.now();
+    const entryTs = trade.entryTime ? (trade.entryTime < 1e12 ? trade.entryTime * 1000 : trade.entryTime) : nowTs;
+    const holdingHours = (nowTs - entryTs) / (1000 * 60 * 60);
+    const isStagnantRegime = trade.marketRegime === 'NEUTRAL_RANGING' || trade.marketRegime === 'CHOPPY' || trade.marketRegime === 'LOW_LIQUIDITY';
+
+    if (holdingHours >= 12 && isStagnantRegime && currentR < 0.40 && !trade.isRunner) {
+      console.log(`[TIME_STOP] Posição ${symbol} estagnada há ${holdingHours.toFixed(1)}h em regime ${trade.marketRegime} (R=${currentR.toFixed(2)}R). Encerramento controlado para reciclagem de capital.`);
+      this.closePosition(trade.symbol, currentPrice, false, 'ACTIVE_FLOW_INVALIDATION');
+      return;
     }
 
     // ─── 0. INVALIDAÇÃO ATIVA POR ORDER FLOW (Antes de testar Stop Loss passivo) ───
