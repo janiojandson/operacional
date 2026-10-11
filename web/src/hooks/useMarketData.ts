@@ -32,9 +32,11 @@ export function useMarketData(activeSymbol: string) {
   useEffect(() => {
     const isLocal = typeof window !== 'undefined' && window.location.hostname === 'localhost';
     const serverUrl = isLocal ? 'http://localhost:4000' : window.location.origin;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('mfp_token') : null;
 
     const s = io(serverUrl, {
-      transports: ['websocket', 'polling']
+      transports: ['websocket', 'polling'],
+      auth: { token }
     });
 
     s.on('connect', () => {

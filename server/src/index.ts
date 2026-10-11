@@ -1454,7 +1454,16 @@ app.get('/api/assets/:symbol/state', (req, res) => {
   }
   const { pairStats, dynamicPairs } = recalculateAllPairs();
 
-  res.json({
+  const authHeader = req.headers.authorization;
+  let isAdmin = false;
+  if (authHeader?.startsWith('Bearer ')) {
+    try {
+      const payload = verifyToken(authHeader.split(' ')[1]);
+      isAdmin = (payload as any)?.role === 'ADMIN';
+    } catch {}
+  }
+
+  const responseData: any = {
     symbol: state.symbol,
     category: state.category,
     lastPrice: state.lastPrice,
@@ -1469,7 +1478,13 @@ app.get('/api/assets/:symbol/state', (req, res) => {
     recentSignals: flowEngine.getRecentSignals().filter(s => s.symbol === symbol),
     pairStats,
     dynamicPairs
-  });
+  };
+
+  if (isAdmin) {
+    responseData.paperAccount = paperTrading.getAccountState();
+  }
+
+  res.json(responseData);
 });
 
 app.get('/api/assets/:symbol/klines', async (req, res) => {
