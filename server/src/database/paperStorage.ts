@@ -1,4 +1,4 @@
-import { query, queryOne } from './db.js';
+import { query, queryOne, withTransaction } from './db.js';
 import { PaperAccount, SimulatedTrade } from '../../../shared/paperTypes';
 
 interface SimulatedTradeWithTrailing extends SimulatedTrade {
@@ -334,22 +334,24 @@ export async function initPaperTables(): Promise<void> {
 
 // Reset parametrizado para ambas as contas
 export async function resetTradingAccounts(masterBal = 10000, mirrorBal = 500): Promise<{ masterBalance: number; mirrorBalance: number }> {
-  await query('DELETE FROM paper_master_orders');
-  await query('DELETE FROM paper_mirror_orders');
-  
-  await query(
-    `INSERT INTO paper_master_account (id, balance, equity, realized_pnl, win_rate, total_trades, winning_trades, losing_trades) 
-     VALUES ($1, $2, $2, 0, 0, 0, 0, 0)
-     ON CONFLICT (id) DO UPDATE SET balance = $2, equity = $2, realized_pnl = 0, win_rate = 0, total_trades = 0, winning_trades = 0, losing_trades = 0, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000`,
-    [MASTER_ACCOUNT_ID, masterBal]
-  );
+  await withTransaction(async (client) => {
+    await client.query('DELETE FROM paper_master_orders');
+    await client.query('DELETE FROM paper_mirror_orders');
 
-  await query(
-    `INSERT INTO paper_mirror_account (id, balance, equity, realized_pnl, win_rate, total_trades, winning_trades, losing_trades) 
-     VALUES ($1, $2, $2, 0, 0, 0, 0, 0)
-     ON CONFLICT (id) DO UPDATE SET balance = $2, equity = $2, realized_pnl = 0, win_rate = 0, total_trades = 0, winning_trades = 0, losing_trades = 0, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000`,
-    [MIRROR_ACCOUNT_ID, mirrorBal]
-  );
+    await client.query(
+      `INSERT INTO paper_master_account (id, balance, equity, realized_pnl, win_rate, total_trades, winning_trades, losing_trades)
+       VALUES ($1, $2, $2, 0, 0, 0, 0, 0)
+       ON CONFLICT (id) DO UPDATE SET balance = $2, equity = $2, realized_pnl = 0, win_rate = 0, total_trades = 0, winning_trades = 0, losing_trades = 0, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000`,
+      [MASTER_ACCOUNT_ID, masterBal]
+    );
+
+    await client.query(
+      `INSERT INTO paper_mirror_account (id, balance, equity, realized_pnl, win_rate, total_trades, winning_trades, losing_trades)
+       VALUES ($1, $2, $2, 0, 0, 0, 0, 0)
+       ON CONFLICT (id) DO UPDATE SET balance = $2, equity = $2, realized_pnl = 0, win_rate = 0, total_trades = 0, winning_trades = 0, losing_trades = 0, updated_at = EXTRACT(EPOCH FROM NOW()) * 1000`,
+      [MIRROR_ACCOUNT_ID, mirrorBal]
+    );
+  });
 
   console.log(`[PaperStorage] ♻️ Reset parametrizado: Master=$${masterBal} | Mirror=$${mirrorBal}`);
   return { masterBalance: masterBal, mirrorBalance: mirrorBal };
@@ -416,24 +418,32 @@ export async function hydrateMasterAccount(): Promise<PaperAccount> {
   };
 }
 
-export async function persistMasterBalance(account: PaperAccount): Promise<void> {
-  await query(
-    `UPDATE paper_master_account SET 
-       balance = $1, equity = $2, realized_pnl = $3, win_rate = $4, 
-       total_trades = $5, winning_trades = $6, losing_trades = $7,
-       updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
-     WHERE id = $8`,
-    [
-      account.balance,
-      account.equity,
-      account.realizedPnl,
-      account.winRate,
-      account.totalTrades,
-      account.winningTrades,
-      account.losingTrades,
-      MASTER_ACCOUNT_ID
-    ]
-  );
+let masterPersistQueue: Promise<void> = Promise.resolve();
+
+export function persistMasterBalance(account: PaperAccount): Promise<void> {
+  const task = masterPersistQueue.then(async () => {
+    await query(
+      `UPDATE paper_master_account SET
+         balance = $1, equity = $2, realized_pnl = $3, win_rate = $4,
+         total_trades = $5, winning_trades = $6, losing_trades = $7,
+         updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
+       WHERE id = $8`,
+      [
+        account.balance,
+        account.equity,
+        account.realizedPnl,
+        account.winRate,
+        account.totalTrades,
+        account.winningTrades,
+        account.losingTrades,
+        MASTER_ACCOUNT_ID
+      ]
+    );
+  });
+  masterPersistQueue = task.catch((err) => {
+    console.error('[DB] Erro na fila de saldo Master:', err);
+  });
+  return task;
 }
 
 export async function upsertMasterOrder(trade: SimulatedTradeWithTrailing): Promise<void> {
@@ -575,24 +585,32 @@ export async function hydrateMirrorAccount(): Promise<PaperAccount> {
   };
 }
 
-export async function persistMirrorBalance(account: PaperAccount): Promise<void> {
-  await query(
-    `UPDATE paper_mirror_account SET 
-       balance = $1, equity = $2, realized_pnl = $3, win_rate = $4, 
-       total_trades = $5, winning_trades = $6, losing_trades = $7,
-       updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
-     WHERE id = $8`,
-    [
-      account.balance,
-      account.equity,
-      account.realizedPnl,
-      account.winRate,
-      account.totalTrades,
-      account.winningTrades,
-      account.losingTrades,
-      MIRROR_ACCOUNT_ID
-    ]
-  );
+let mirrorPersistQueue: Promise<void> = Promise.resolve();
+
+export function persistMirrorBalance(account: PaperAccount): Promise<void> {
+  const task = mirrorPersistQueue.then(async () => {
+    await query(
+      `UPDATE paper_mirror_account SET
+         balance = $1, equity = $2, realized_pnl = $3, win_rate = $4,
+         total_trades = $5, winning_trades = $6, losing_trades = $7,
+         updated_at = EXTRACT(EPOCH FROM NOW()) * 1000
+       WHERE id = $8`,
+      [
+        account.balance,
+        account.equity,
+        account.realizedPnl,
+        account.winRate,
+        account.totalTrades,
+        account.winningTrades,
+        account.losingTrades,
+        MIRROR_ACCOUNT_ID
+      ]
+    );
+  });
+  mirrorPersistQueue = task.catch((err) => {
+    console.error('[DB] Erro na fila de saldo Mirror:', err);
+  });
+  return task;
 }
 
 export async function upsertMirrorOrder(trade: SimulatedTradeWithTrailing & { qty: number; fee: number; netPnl: number }): Promise<void> {

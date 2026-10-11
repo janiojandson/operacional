@@ -154,10 +154,9 @@ export async function initEventStoreTables(): Promise<void> {
     const fs = await import('fs');
     const path = await import('path');
     const migrationNames = [
-      // O patch aditivo roda primeiro para reparar schema drift necessário
-      // às views/índices da migração canônica histórica.
-      '20261001_event_store_forensics.sql',
-      '20260928_laya_v2_event_store.sql'
+      // Canônico primeiro (cria/renomeia as tabelas canônicas); forense depois (colunas aditivas)
+      '20260928_laya_v2_event_store.sql',
+      '20261001_event_store_forensics.sql'
     ];
     for (const migrationName of migrationNames) {
       const candidatePaths = [
@@ -202,6 +201,11 @@ export async function initEventStoreTables(): Promise<void> {
 
   console.log('[EventStore] ✅ Tabelas e índices do Event Store v3.0 prontos.');
   await query(`ALTER TABLE trade_events ADD COLUMN IF NOT EXISTS initial_risk_usd NUMERIC`);
+  // Blindagem idempotente das colunas forenses (garante recordTradeEvent em bancos novos)
+  await query(`ALTER TABLE trade_events ADD COLUMN IF NOT EXISTS entry_decision_id UUID`).catch(() => {});
+  await query(`ALTER TABLE trade_events ADD COLUMN IF NOT EXISTS exit_decision_id UUID`).catch(() => {});
+  await query(`ALTER TABLE trade_events ADD COLUMN IF NOT EXISTS exit_reason_raw VARCHAR(80)`).catch(() => {});
+  await query(`ALTER TABLE trade_events ADD COLUMN IF NOT EXISTS branch_classification_raw VARCHAR(80)`).catch(() => {});
   await query(`DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'exit_reason_enum') THEN
       ALTER TYPE exit_reason_enum ADD VALUE IF NOT EXISTS 'FIXED_TP';

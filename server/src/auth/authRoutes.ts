@@ -1,3 +1,4 @@
+import { randomInt } from 'crypto';
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { UserDB, ClientConfigDB, OtpDB, query } from '../database/db.js';
@@ -229,7 +230,7 @@ authRouter.post('/forgot-password', async (req: Request, res: Response) => {
   }
 
   // Gerar OTP de 6 dígitos (100000 - 999999)
-  const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+  const otpCode = randomInt(100000, 1000000).toString();
   const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutos
   const otpId = `otp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
@@ -272,25 +273,19 @@ authRouter.post('/reset-password-otp', async (req: Request, res: Response) => {
   }
 
   const cleanOtp = String(otp).trim();
-  let validOtp = null;
-  if (identifier) {
-    const cleanIdent = String(identifier).trim().toLowerCase();
-    const user = (await UserDB.findByEmail(cleanIdent)) || (await UserDB.findByWhatsApp(cleanIdent.replace(/\D/g, '')));
-    if (user) {
-      validOtp = await OtpDB.findValid(user.email, cleanOtp);
-    }
-  }
-  if (!validOtp) {
-    validOtp = await OtpDB.findByCode(cleanOtp);
+  if (!identifier) {
+    return res.status(400).json({ error: 'Identificador (e-mail ou WhatsApp) é obrigatório para redefinir a senha.' });
   }
 
-  if (!validOtp) {
+  const cleanIdent = String(identifier).trim().toLowerCase();
+  const user = (await UserDB.findByEmail(cleanIdent)) || (await UserDB.findByWhatsApp(cleanIdent.replace(/\D/g, '')));
+  if (!user) {
     return res.status(400).json({ error: 'Código de verificação inválido ou expirado (válido por 10 min).' });
   }
 
-  const user = await UserDB.findByEmail(validOtp.email);
-  if (!user) {
-    return res.status(404).json({ error: 'Usuário associado a este código não foi localizado.' });
+  const validOtp = await OtpDB.findValid(user.email, cleanOtp);
+  if (!validOtp) {
+    return res.status(400).json({ error: 'Código de verificação inválido ou expirado (válido por 10 min).' });
   }
 
   const hash = await bcrypt.hash(newPassword, 12);

@@ -2,12 +2,14 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import PresellPage from './pages/PresellPage';
-import LoginPage from './pages/LoginPage';
-import AdminDashboard from './pages/AdminDashboard';
-import ClientDashboard from './pages/ClientDashboard';
-import TradingTerminal from './pages/TradingTerminal';
 import './index.css';
+
+// Code-splitting (React.lazy): páginas carregadas sob demanda para reduzir o bundle inicial
+const PresellPage = React.lazy(() => import('./pages/PresellPage'));
+const LoginPage = React.lazy(() => import('./pages/LoginPage'));
+const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
+const ClientDashboard = React.lazy(() => import('./pages/ClientDashboard'));
+const TradingTerminal = React.lazy(() => import('./pages/TradingTerminal'));
 
 // ─── Rotas Protegidas ─────────────────────────────────────────────────────
 
@@ -46,6 +48,7 @@ function AppRouter() {
 
   return (
     <BrowserRouter>
+      <React.Suspense fallback={<div className="h-screen w-screen bg-background flex items-center justify-center font-mono text-xs text-slate-400">Carregando...</div>}>
       <Routes>
         {/* Pre-sell / Apresentação Institucional */}
         <Route path="/" element={<PresellPage />} />
@@ -85,6 +88,7 @@ function AppRouter() {
         {/* Catch-all */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </React.Suspense>
     </BrowserRouter>
   );
 }

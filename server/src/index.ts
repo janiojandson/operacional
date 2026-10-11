@@ -85,9 +85,8 @@ const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
-    // Isenta polling de governança, saúde operacional e telemetria interna
+    // Isenta polling de governança e saúde operacional (dashboard agora é rate-limited)
     return req.path.startsWith('/api/admin/governance') ||
-           req.path.startsWith('/api/dashboard') ||
            req.path.startsWith('/api/health');
   },
   message: { error: 'Muitas requisições. Aguarde alguns minutos.' }
@@ -164,15 +163,15 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
     const nowTs = Date.now();
     if (nowTs - lastMasterTickEmit >= 1000) {
       lastMasterTickEmit = nowTs;
-      io.emit('paper_account_update', account);
+      io.to('admin_room').emit('paper_account_update', account);
     }
     return;
   }
 
   const isResetClosure = masterResetInProgress && tradeEvent.closeReason === 'MANUAL';
-  io.emit('paper_account_update', account);
+  io.to('admin_room').emit('paper_account_update', account);
   if (!isResetClosure) {
-    await persistMasterBalance(account);
+    void persistMasterBalance(account).catch(err => console.error('[PaperEngine] Erro ao persistir saldo Master:', err));
   }
 
   // Callback protegido para nunca derrubar o processo em caso de falha de I/O
@@ -196,7 +195,7 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
   };
 
   if (!isResetClosure) {
-    await safeUpsert(tradeEvent);
+    void safeUpsert(tradeEvent);
   } else {
     console.log('[TradingReset] Fechamento MANUAL de reset: persistência histórica ignorada para evitar recriação pós-limpeza.', {
       symbol: tradeEvent.symbol,
@@ -204,7 +203,7 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
     });
   }
   if (tradeEvent) {
-    io.emit('simulated_trade_event', tradeEvent);
+    io.to('admin_room').emit('simulated_trade_event', tradeEvent);
     const pairConfig = AutoPairSelectorEngine.getPairConfig(tradeEvent.symbol);
     const power = tradeEvent.powerMultiplier || pairConfig?.powerMultiplier || 1.5;
     const copyTask = clientCopyTrader.replicateTrade(tradeEvent, power).catch((err) => {
@@ -306,7 +305,7 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
         } : undefined
       ).then(auditResult => {
         if (auditResult) {
-          io.emit('shadow_audit_event', auditResult);
+          io.to('admin_room').emit('shadow_audit_event', auditResult);
         }
       }).catch(auditErr => {
         console.error('[ShadowAuditor] Erro no shadow mode do Master:', auditErr.message);
@@ -321,7 +320,7 @@ const paperTrading = new PaperTradingEngine(async (account, tradeEvent) => {
           Number(tradeEvent.pnlPct ?? Number.NaN)
         );
         if (outcome) {
-          io.emit('shadow_audit_outcome', outcome);
+          io.to('admin_room').emit('shadow_audit_outcome', outcome);
         }
 
         // Persistência imutável no Event Store v2.0 (PostgreSQL)
@@ -451,13 +450,13 @@ const mirrorTrading = new MirrorTradingEngine(async (account, tradeEvent) => {
     const nowTs = Date.now();
     if (nowTs - lastMirrorTickEmit >= 1000) {
       lastMirrorTickEmit = nowTs;
-      io.emit('mirror_account_update', account);
+      io.to('admin_room').emit('mirror_account_update', account);
     }
     return;
   }
 
-  io.emit('mirror_account_update', account);
-  await persistMirrorBalance(account);
+  io.to('admin_room').emit('mirror_account_update', account);
+  void persistMirrorBalance(account).catch(err => console.error('[MirrorTradingEngine] Erro ao persistir saldo espelho:', err));
 
   // Callback protegido para nunca derrubar o processo em caso de falha de I/O
   const safeUpsertMirror = async (trade: any) => {
@@ -468,7 +467,7 @@ const mirrorTrading = new MirrorTradingEngine(async (account, tradeEvent) => {
     }
   };
 
-  await safeUpsertMirror(tradeEvent);
+  void safeUpsertMirror(tradeEvent);
 });
 
 bindMasterControlHandler({
@@ -595,8 +594,8 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
         [shadowOpportunity.id, shadowOpportunity.symbol, shadowOpportunity.side, shadowOpportunity.mode, shadowOpportunity.approved ? 1 : 0, JSON.stringify(shadowOpportunity.reasons), shadowOpportunity.source, Date.parse(shadowOpportunity.timestamp)]
       ).catch((error: any) => console.error('[Shadow] Falha não-fatal ao persistir oportunidade:', error.message));
       GoogleSheetsService.logShadowOpportunity(shadowOpportunity);
-      io.emit('shadow_opportunity', shadowOpportunity);
-      io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
+      io.to('admin_room').emit('shadow_opportunity', shadowOpportunity);
+      io.to('admin_room').emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
     };
 
     if (!decision.approved) {
@@ -610,7 +609,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
         bookTimestamp: book?.timestamp ?? 0,
         bookAgeMs: book?.timestamp ? Date.now() - book.timestamp : null
       });
-      io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
+      io.to('admin_room').emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
       return;
     }
 
@@ -664,7 +663,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       });
       decision.approved = false;
       decision.reasons.push(...adaptiveRisk.reasons);
-      io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
+      io.to('admin_room').emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
       return;
     }
     if ((adaptiveRisk.notionalUsd || 0) / asset.lastPrice < getMinLot(signal.symbol)) {
@@ -678,7 +677,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       });
       decision.approved = false;
       decision.reasons.push('LOTE_MINIMO_EXCEDE_RISCO');
-      io.emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
+      io.to('admin_room').emit('strategy_decision', { signalId: signal.id, symbol: signal.symbol, decision });
       return;
     }
 
@@ -963,17 +962,17 @@ app.get('/api/assets', (req, res) => {
 });
 
 // Endpoints de paper trading (admin apenas — tela do terminal)
-app.get('/api/paper-trading', requireAuth, (req, res) => {
+app.get('/api/paper-trading', requireAdmin, (req, res) => {
   res.json(paperTrading.getAccountState());
 });
 
 // ─── Mirror Account Endpoints ────────────────────────────────────────────────
-app.get('/api/trading/mirror/account', requireAuth, (req, res) => {
+app.get('/api/trading/mirror/account', requireAdmin, (req, res) => {
   res.json(mirrorTrading.getAccountState());
 });
 
 // POST /api/trading/balance — Ajuste manual de saldo Master com persistência no PostgreSQL
-app.post('/api/trading/balance', requireAuth, async (req, res) => {
+app.post('/api/trading/balance', requireAdmin, async (req, res) => {
   try {
     const rawBalance = req.body?.balance;
     const balanceNum = typeof rawBalance === 'number' 
@@ -992,8 +991,8 @@ app.post('/api/trading/balance', requireAuth, async (req, res) => {
     await persistMasterBalance(paperState);
 
     // 3. Emite broadcast para todas as sessões conectadas em tempo real
-    io.emit('paper_account_update', paperState);
-    io.emit('master_feed_update', { 
+    io.to('admin_room').emit('paper_account_update', paperState);
+    io.to('admin_room').to('clients').emit('master_feed_update', { 
       metrics: paperState, 
       masterOpenPositions: paperState.openPositions, 
       masterHistory: paperState.history 
@@ -1014,7 +1013,7 @@ app.post('/api/trading/balance', requireAuth, async (req, res) => {
 });
 
 // POST /api/trading/reset — Reset parametrizado Master + Mirror
-app.post('/api/trading/reset', requireAuth, async (req, res) => {
+app.post('/api/trading/reset', requireAdmin, async (req, res) => {
   if (masterResetInProgress) {
     return res.status(409).json({
       success: false,
@@ -1066,11 +1065,11 @@ app.post('/api/trading/reset', requireAuth, async (req, res) => {
     // Zera o Shadow Mode Auditor e histórico de oportunidades
     clearShadowAudits();
     await query('DELETE FROM shadow_opportunities');
-    io.emit('shadow_audit_reset');
+    io.to('admin_room').emit('shadow_audit_reset');
 
     // Zera logs do Copy Trader
     clientCopyTrader.clearLogs();
-    io.emit('client_logs_cleared');
+    io.to('admin_room').emit('client_logs_cleared');
 
     // Zera planilha Google de forma segura
     void GoogleSheetsService.resetSpreadsheet().catch(() => {});
@@ -1083,10 +1082,10 @@ app.post('/api/trading/reset', requireAuth, async (req, res) => {
 
     const paperState = paperTrading.getAccountState();
     const mirrorState = mirrorTrading.getAccountState();
-    io.emit('paper_account_update', paperState);
-    io.emit('mirror_account_update', mirrorState);
-    io.emit('master_feed_update', { metrics: paperState, masterOpenPositions: [], masterHistory: [] });
-    io.emit('trading_reset', {
+    io.to('admin_room').emit('paper_account_update', paperState);
+    io.to('admin_room').emit('mirror_account_update', mirrorState);
+    io.to('admin_room').to('clients').emit('master_feed_update', { metrics: paperState, masterOpenPositions: [], masterHistory: [] });
+    io.to('admin_room').emit('trading_reset', {
       ...result,
       eventStoreReset,
       cooldownSeconds: 15,
@@ -1116,7 +1115,7 @@ app.get('/api/pair-performance', requireAuth, (req, res) => {
   res.json({ pairStats, dynamicPairs });
 });
 
-app.get('/api/clients', requireAuth, (req, res) => {
+app.get('/api/clients', requireAdmin, (req, res) => {
   res.json({
     clients: clientCopyTrader.getClients(),
     logs: clientCopyTrader.getLogs()
@@ -1124,7 +1123,7 @@ app.get('/api/clients', requireAuth, (req, res) => {
 });
 
 // Endpoint de Logs do Shadow Mode (Modo Fantasma)
-app.get('/api/audit-logs', requireAuth, async (req, res) => {
+app.get('/api/audit-logs', requireAdmin, async (req, res) => {
   try {
     const logFilePath1 = path.resolve(process.cwd(), RISK_CONFIG.LOG_FILE_PATH);
     const logFilePath2 = path.resolve(rootDir, RISK_CONFIG.LOG_FILE_PATH);
@@ -1227,14 +1226,14 @@ app.get('/api/client/master-feed', requireAuth, async (req, res) => {
   });
 });
 
-app.post('/api/clients', requireAuth, (req, res) => {
+app.post('/api/clients', requireAdmin, (req, res) => {
   const config: ClientAccountConfig = req.body;
   clientCopyTrader.addOrUpdateClient(config);
-  io.emit('client_accounts_update', clientCopyTrader.getClients());
+  io.to('admin_room').emit('client_accounts_update', clientCopyTrader.getClients());
   res.json({ status: 'ok', client: config });
 });
 
-app.post('/api/pairs/:symbol/toggle', requireAuth, (req, res) => {
+app.post('/api/pairs/:symbol/toggle', requireAdmin, (req, res) => {
   const symbol = decodeURIComponent(String(req.params.symbol));
   const active = req.body.active;
   AutoPairSelectorEngine.toggleManualOverride(symbol, active);
@@ -1242,7 +1241,7 @@ app.post('/api/pairs/:symbol/toggle', requireAuth, (req, res) => {
   res.json({ status: 'ok', symbol, active, dynamicPairs });
 });
 
-app.post('/api/paper-trading/balance', requireAuth, async (req, res) => {
+app.post('/api/paper-trading/balance', requireAdmin, async (req, res) => {
   const rawBalance = req.body?.balance;
   const balanceNum = typeof rawBalance === 'number' 
     ? rawBalance 
@@ -1252,14 +1251,14 @@ app.post('/api/paper-trading/balance', requireAuth, async (req, res) => {
     paperTrading.setInitialBalance(balanceNum);
     const updated = paperTrading.getAccountState();
     await persistMasterBalance(updated);
-    io.emit('paper_account_update', updated);
-    io.emit('master_feed_update', { metrics: updated, masterOpenPositions: updated.openPositions, masterHistory: updated.history });
+    io.to('admin_room').emit('paper_account_update', updated);
+    io.to('admin_room').to('clients').emit('master_feed_update', { metrics: updated, masterOpenPositions: updated.openPositions, masterHistory: updated.history });
     return res.json({ success: true, balance: updated.balance });
   }
   res.status(400).json({ error: 'Saldo inválido' });
 });
 
-app.post('/api/paper-trading/reset', requireAuth, async (req, res) => {
+app.post('/api/paper-trading/reset', requireAdmin, async (req, res) => {
   try {
     const { balance } = req.body;
     const newBalance = typeof balance === 'number' ? balance : 10000;
@@ -1267,7 +1266,7 @@ app.post('/api/paper-trading/reset', requireAuth, async (req, res) => {
     // 1. Zera a conta Master Quant (saldo, posições abertas, histórico)
     paperTrading.resetData(newBalance);
     const updated = paperTrading.getAccountState();
-    io.emit('paper_account_update', updated);
+    io.to('admin_room').emit('paper_account_update', updated);
     
     // Persistir reset no banco
     await query(`DELETE FROM paper_master_orders`);
@@ -1279,11 +1278,11 @@ app.post('/api/paper-trading/reset', requireAuth, async (req, res) => {
     // 2. Zera o Shadow Mode Auditor (arquivo de log e auditorias pendentes)
     clearShadowAudits();
     void query('DELETE FROM shadow_opportunities').catch(() => {});
-    io.emit('shadow_audit_reset');
+    io.to('admin_room').emit('shadow_audit_reset');
 
     // 3. Zera os logs do Copy Trader dos clientes
     clientCopyTrader.clearLogs();
-    io.emit('client_logs_cleared');
+    io.to('admin_room').emit('client_logs_cleared');
 
     // 4. Zera as abas de trades e auditoria na Planilha Google
     void GoogleSheetsService.resetSpreadsheet().catch(() => {});
@@ -1293,8 +1292,8 @@ app.post('/api/paper-trading/reset', requireAuth, async (req, res) => {
 
     // 6. Ativa cooldown de 15 segundos para sincronização completa de dados
     masterResetCooldownUntil = Date.now() + 15000;
-    io.emit('master_feed_update', { metrics: updated, masterOpenPositions: [], masterHistory: [] });
-    io.emit('trading_reset', { masterBalance: newBalance, cooldownSeconds: 15, cooldownUntil: masterResetCooldownUntil });
+    io.to('admin_room').to('clients').emit('master_feed_update', { metrics: updated, masterOpenPositions: [], masterHistory: [] });
+    io.to('admin_room').emit('trading_reset', { masterBalance: newBalance, cooldownSeconds: 15, cooldownUntil: masterResetCooldownUntil });
 
     res.json({ 
       success: true, 
@@ -1309,7 +1308,7 @@ app.post('/api/paper-trading/reset', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/paper-trading/pairs', requireAuth, (req, res) => {
+app.post('/api/paper-trading/pairs', requireAdmin, (req, res) => {
   const { pairs } = req.body;
   if (Array.isArray(pairs)) {
     paperTrading.setActivePairs(pairs);
@@ -1318,7 +1317,7 @@ app.post('/api/paper-trading/pairs', requireAuth, (req, res) => {
   res.status(400).json({ error: 'Array de pares inválido' });
 });
 
-app.post('/api/paper-trading/temperature', requireAuth, (req, res) => {
+app.post('/api/paper-trading/temperature', requireAdmin, (req, res) => {
   const { temperature } = req.body;
   if (typeof temperature === 'number') {
     paperTrading.setMinTemperature(temperature);
@@ -1327,41 +1326,41 @@ app.post('/api/paper-trading/temperature', requireAuth, (req, res) => {
   res.status(400).json({ error: 'Temperatura inválida' });
 });
 
-app.get('/api/autonomous-pairs', requireAuth, (req, res) => {
+app.get('/api/autonomous-pairs', requireAdmin, (req, res) => {
   res.json(AutonomousPairScanner.getAllPairs());
 });
 
-app.post('/api/autonomous-pairs/:symbol/toggle', requireAuth, (req, res) => {
+app.post('/api/autonomous-pairs/:symbol/toggle', requireAdmin, (req, res) => {
   const symbol = decodeURIComponent(String(req.params.symbol));
   const { active } = req.body;
   const updated = AutonomousPairScanner.togglePairManual(symbol, active);
-  io.emit('autonomous_pairs_update', AutonomousPairScanner.getAllPairs());
+  io.to('admin_room').emit('autonomous_pairs_update', AutonomousPairScanner.getAllPairs());
   res.json(updated);
 });
 
-app.get('/api/client-protection', requireAuth, (req, res) => {
+app.get('/api/client-protection', requireAdmin, (req, res) => {
   res.json(ClientProtectionEngine.getAllClients());
 });
 
-app.post('/api/client-protection', requireAuth, (req, res) => {
+app.post('/api/client-protection', requireAdmin, (req, res) => {
   const client = ClientProtectionEngine.addClient(req.body);
-  io.emit('client_protection_update', ClientProtectionEngine.getAllClients());
+  io.to('admin_room').emit('client_protection_update', ClientProtectionEngine.getAllClients());
   res.json(client);
 });
 
-app.delete('/api/client-protection/:id', requireAuth, (req, res) => {
+app.delete('/api/client-protection/:id', requireAdmin, (req, res) => {
   const success = ClientProtectionEngine.deleteClient(String(req.params.id));
-  io.emit('client_protection_update', ClientProtectionEngine.getAllClients());
+  io.to('admin_room').emit('client_protection_update', ClientProtectionEngine.getAllClients());
   res.json({ success });
 });
 
-app.post('/api/client-protection/:id/unlock', requireAuth, (req, res) => {
+app.post('/api/client-protection/:id/unlock', requireAdmin, (req, res) => {
   const client = ClientProtectionEngine.unlockClient(String(req.params.id));
-  io.emit('client_protection_update', ClientProtectionEngine.getAllClients());
+  io.to('admin_room').emit('client_protection_update', ClientProtectionEngine.getAllClients());
   res.json(client);
 });
 
-app.post('/api/client-protection/send-alert', requireAuth, async (req, res) => {
+app.post('/api/client-protection/send-alert', requireAdmin, async (req, res) => {
   const { phone, clientName, messageType, currentBalance, initialBalance, dailyPnl, reason } = req.body;
   const result = await ClientProtectionEngine.sendWhatsAppAlert({
     phone,
@@ -1398,14 +1397,14 @@ app.get('/api/assets/:symbol/pressure', requireAuth, (req, res) => {
   });
 });
 
-app.get('/api/strategy/health-report', requireAuth, (req, res) => {
+app.get('/api/strategy/health-report', requireAdmin, (req, res) => {
   const account = paperTrading.getAccountState();
   const report = QuantStrategyEngine.generateHealthReport(account);
   res.json(report);
 });
 
 
-app.get('/api/shadow-opportunities', requireAuth, async (req, res) => {
+app.get('/api/shadow-opportunities', requireAdmin, async (req, res) => {
   try {
     const rows = await query<{ id: string; symbol: string; side: 'BUY' | 'SELL'; mode: 'AUDIT' | 'FILTER'; approved: number; reasons: string[]; source: string; created_at: number }>(
       'SELECT id, symbol, side, mode, approved, reasons, source, created_at FROM shadow_opportunities ORDER BY created_at DESC LIMIT 500'
@@ -1417,7 +1416,7 @@ app.get('/api/shadow-opportunities', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/ai-advisor/audit', requireAuth, async (req, res) => {
+app.post('/api/ai-advisor/audit', requireAdmin, async (req, res) => {
   const provider = req.body?.provider || process.env.AI_PROVIDER || 'HYBRID_AUTO';
   const account = paperTrading.getAccountState();
   const summaries = marketManager.getSummaries();
@@ -1428,7 +1427,7 @@ app.post('/api/ai-advisor/audit', requireAuth, async (req, res) => {
   res.json(auditReport);
 });
 
-app.post('/api/ai-advisor/chat', requireAuth, async (req, res) => {
+app.post('/api/ai-advisor/chat', requireAdmin, async (req, res) => {
   try {
     const { message, history = [], provider = 'HYBRID_AUTO' } = req.body;
     if (!message) {
@@ -1468,7 +1467,6 @@ app.get('/api/assets/:symbol/state', (req, res) => {
     book: state.book,
     trades: state.trades,
     recentSignals: flowEngine.getRecentSignals().filter(s => s.symbol === symbol),
-    paperAccount: paperTrading.getAccountState(),
     pairStats,
     dynamicPairs
   });
@@ -1566,23 +1564,31 @@ io.on('connection', (socket) => {
   const user = (socket as any).user;
   const { pairStats, dynamicPairs } = recalculateAllPairs();
 
-  // Enviar estado inicial: dados de mercado sempre; dados de clientes APENAS se for ADMIN autenticado
-  socket.emit('initial_state', {
+  const isAdmin = user?.role === 'ADMIN';
+
+  // Enviar estado inicial: dados de mercado sempre; contas Master/Mirror e dados de clientes APENAS para ADMIN
+  const initialState: any = {
     assets: marketManager.getSummaries(),
     signals: flowEngine.getRecentSignals(),
-    paperAccount: paperTrading.getAccountState(),
-    mirrorAccount: mirrorTrading.getAccountState(),
     pairStats,
     dynamicPairs,
-    clients: user?.role === 'ADMIN' ? clientCopyTrader.getClients() : [],
-    clientLogs: user?.role === 'ADMIN' ? clientCopyTrader.getLogs() : []
-  });
+    clients: isAdmin ? clientCopyTrader.getClients() : [],
+    clientLogs: isAdmin ? clientCopyTrader.getLogs() : []
+  };
+  if (isAdmin) {
+    initialState.paperAccount = paperTrading.getAccountState();
+    initialState.mirrorAccount = mirrorTrading.getAccountState();
+  }
+  socket.emit('initial_state', initialState);
 
   // Inscrever em salas específicas por permissão
-  if (user?.role === 'ADMIN') {
+  if (isAdmin) {
     socket.join('admin_room');
-  } else if (user?.clientId) {
-    socket.join(`client_${user.clientId}`);
+  } else if (user) {
+    socket.join('clients'); // sala compartilhada de clientes autenticados (master_feed_update)
+    if (user.clientId) {
+      socket.join(`client_${user.clientId}`);
+    }
   }
 });
 
@@ -1650,8 +1656,8 @@ initDatabase()
         mirrorTrading.updatePrice(pos.symbol, curPrice);
       }
     }
-    io.emit('paper_account_update', paperTrading.getAccountState());
-    io.emit('mirror_account_update', mirrorTrading.getAccountState());
+    io.to('admin_room').emit('paper_account_update', paperTrading.getAccountState());
+    io.to('admin_room').emit('mirror_account_update', mirrorTrading.getAccountState());
     
     // Sincroniza posições ativas do Master na Planilha Google
     if (paperTrading.getAccountState().openPositions.length > 0) {

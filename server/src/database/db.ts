@@ -9,7 +9,10 @@ const { Pool } = pkg;
 // ─── Pool de Conexão PostgreSQL ───────────────────────────────────────────
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  connectionTimeoutMillis: 10000,
+  max: 20,
+  connectionTimeoutMillis: 5000,
+  idleTimeoutMillis: 30000,
+  statement_timeout: 5000,
   ssl: process.env.NODE_ENV === 'production' && process.env.DATABASE_URL?.includes('railway.internal')
     ? false  // Conexão interna Railway não precisa de SSL
     : process.env.DATABASE_URL?.includes('railway.internal')
@@ -35,6 +38,24 @@ export async function query<T = any>(text: string, params?: any[]): Promise<T[]>
 export async function queryOne<T = any>(text: string, params?: any[]): Promise<T | undefined> {
   const rows = await query<T>(text, params);
   return rows[0];
+}
+
+// Transação atômica: BEGIN/COMMIT/ROLLBACK com release garantido em finally
+export async function withTransaction<T>(
+  fn: (client: pkg.PoolClient) => Promise<T>
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function bootstrapAdministrator(
@@ -490,16 +511,19 @@ export const UserDB = {
   },
 
   deleteClient: async (userId: string, clientId?: string | null) => {
-    if (clientId) {
-      await query('DELETE FROM trade_history WHERE client_id = $1', [clientId]);
-      await query('DELETE FROM client_configs WHERE client_id = $1', [clientId]);
-    }
-    await query('DELETE FROM client_configs WHERE user_id = $1', [userId]);
-    const user = await queryOne<UserRow>('SELECT email, whatsapp FROM app_users WHERE id = $1', [userId]);
-    if (user) {
-      if (user.email) await query('DELETE FROM password_reset_otps WHERE email = $1', [user.email]);
-    }
-    await query('DELETE FROM app_users WHERE id = $1', [userId]);
+    await withTransaction(async (client) => {
+      if (clientId) {
+        await client.query('DELETE FROM trade_history WHERE client_id = $1', [clientId]);
+        await client.query('DELETE FROM client_configs WHERE client_id = $1', [clientId]);
+      }
+      await client.query('DELETE FROM client_configs WHERE user_id = $1', [userId]);
+      const userRes = await client.query<UserRow>('SELECT email, whatsapp FROM app_users WHERE id = $1', [userId]);
+      const email = userRes.rows[0]?.email;
+      if (email) {
+        await client.query('DELETE FROM password_reset_otps WHERE email = $1', [email]);
+      }
+      await client.query('DELETE FROM app_users WHERE id = $1', [userId]);
+    });
   },
 
   listClients: () =>

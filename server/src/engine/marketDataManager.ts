@@ -53,6 +53,7 @@ export class MarketDataManager {
   private isRefreshingBooks = false;
   private isUpdatingTickers = false;
   private isStreamingWS = false;
+  private exchangeRateLimitUntil = 0;
   private processedTradeIds = new Map<string, Set<string>>();
 
   constructor(flowEngine: FlowEngine, onBroadcast?: (type: string, data: any) => void) {
@@ -317,56 +318,87 @@ export class MarketDataManager {
     if (this.isUpdatingTickers) return;
     this.isUpdatingTickers = true;
     try {
-      for (const [symbol, state] of this.symbols.entries()) {
-        try {
-          const ccxtSymbol = toExchangeLinear(symbol);
-          const [ticker, rawTrades] = await Promise.all([
+      const entries = Array.from(this.symbols.entries());
+      await Promise.allSettled(
+        entries.map(([symbol, state]) =>
+          this.updateSingleSymbol(symbol, state).catch((err) => {
+            console.debug(`[MarketData] Falha/Timeout ao atualizar ${symbol}:`, (err as any)?.message);
+          })
+        )
+      );
+    } finally {
+      this.isUpdatingTickers = false;
+    }
+  }
+
+  private async updateSingleSymbol(symbol: string, state: ActiveSymbolState): Promise<void> {
+    if (Date.now() < this.exchangeRateLimitUntil) return;
+    try {
+      const ccxtSymbol = toExchangeLinear(symbol);
+      let timerId: NodeJS.Timeout | undefined;
+      let ticker: any;
+      let rawTrades: any[];
+      try {
+        [ticker, rawTrades] = await Promise.race([
+          Promise.all([
             this.exchange.fetchTicker(ccxtSymbol),
             this.exchange.fetchTrades(ccxtSymbol, undefined, 50).catch(() => [])
-          ]);
-          if (!ticker.last) continue;
-
-        const prevPrice = state.lastPrice;
-        state.lastPrice = ticker.last;
-        state.high24h = ticker.high || state.high24h;
-        state.low24h = ticker.low || state.low24h;
-        state.volume24h = ticker.baseVolume || state.volume24h;
-        state.change24h = ticker.percentage || state.change24h;
-
-        for (const rt of rawTrades) {
-          this.processTradeEvent(symbol, state, rt);
-        }
-
-        if (state.trades.length === 0) {
-          const trade: Trade = {
-            id: `${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-            symbol,
-            price: ticker.last,
-            amount: 0,
-            side: ticker.last >= prevPrice ? 'buy' : 'sell',
-            timestamp: Date.now(),
-            cost: 0,
-            isWhale: false
-          };
-          state.trades.unshift(trade);
-          if (state.trades.length > 80) state.trades.pop();
-          if (this.onBroadcast) this.onBroadcast('trade', trade);
-        }
-
-        this.updateLiveCandle(state, ticker.last);
-
-        if (state.book && this.onBroadcast) {
-          this.flowEngine.checkBookImbalance(state.book);
-        }
-      } catch (err: any) {
-        console.debug(`[MarketData] Ticker update failed for ${symbol}:`, err.message);
+          ]),
+          new Promise<never>((_, reject) => {
+            timerId = setTimeout(() => reject(new Error(`Timeout ao atualizar ${symbol}`)), 3000);
+          })
+        ]);
+      } finally {
+        if (timerId) clearTimeout(timerId);
       }
-    }
-  } finally {
-    this.isUpdatingTickers = false;
-  }
-}
+      if (!ticker.last) return;
 
+      const prevPrice = state.lastPrice;
+      state.lastPrice = ticker.last;
+      state.high24h = ticker.high || state.high24h;
+      state.low24h = ticker.low || state.low24h;
+      state.volume24h = ticker.baseVolume || state.volume24h;
+      state.change24h = ticker.percentage || state.change24h;
+
+      for (const rt of rawTrades) {
+        this.processTradeEvent(symbol, state, rt);
+      }
+
+      if (state.trades.length === 0) {
+        const trade: Trade = {
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          symbol,
+          price: ticker.last,
+          amount: 0,
+          side: ticker.last >= prevPrice ? 'buy' : 'sell',
+          timestamp: Date.now(),
+          cost: 0,
+          isWhale: false
+        };
+        state.trades.unshift(trade);
+        if (state.trades.length > 80) state.trades.pop();
+        if (this.onBroadcast) this.onBroadcast('trade', trade);
+      }
+
+      this.updateLiveCandle(state, ticker.last);
+
+      if (state.book && this.onBroadcast) {
+        this.flowEngine.checkBookImbalance(state.book);
+      }
+    } catch (err: any) {
+      if (this.isRateLimitError(err)) {
+        this.exchangeRateLimitUntil = Date.now() + 5000 + Math.floor(Math.random() * 2000);
+        console.warn(`[MarketData] ⚠️ Rate limit 429 detectado. Pausando requisições até ${new Date(this.exchangeRateLimitUntil).toISOString()}`);
+      }
+      console.debug(`[MarketData] Ticker update failed for ${symbol}:`, err.message);
+    }
+  }
+
+
+  private isRateLimitError(err: any): boolean {
+    const msg = String(err?.message ?? err?.name ?? '');
+    return err?.name === 'RateLimitExceeded' || msg.includes('429') || msg.includes('DDoSProtection') || msg.toLowerCase().includes('rate limit');
+  }
 
   private updateLiveCandle(state: ActiveSymbolState, price: number): void {
     const nowSec = Math.floor(Date.now() / 1000);
@@ -454,10 +486,18 @@ export class MarketDataManager {
       const ccxtSymbol = toExchangeLinear(symbol);
       const ccxtTf = tf === '1D' ? '1d' : tf === '1W' ? '1w' : tf;
       const safeLimit = Math.min(Math.max(limit, 10), 200);
-      const ohlcv = await Promise.race([
-        this.exchange.fetchOHLCV(ccxtSymbol, ccxtTf as any, undefined, safeLimit),
-        new Promise<null>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_KLINES_1500MS')), 1500))
-      ]);
+      let timerId: NodeJS.Timeout | undefined;
+      let ohlcv: any;
+      try {
+        ohlcv = await Promise.race([
+          this.exchange.fetchOHLCV(ccxtSymbol, ccxtTf as any, undefined, safeLimit),
+          new Promise<never>((_, reject) => {
+            timerId = setTimeout(() => reject(new Error('TIMEOUT_KLINES_1500MS')), 1500);
+          })
+        ]);
+      } finally {
+        if (timerId) clearTimeout(timerId);
+      }
       if (!Array.isArray(ohlcv) || ohlcv.length === 0) return null;
       return this.normalizeCandles(ohlcv, symbol);
     } catch (err: any) {

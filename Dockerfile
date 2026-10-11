@@ -22,7 +22,7 @@ FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV PORT=8000
+ENV PORT=4000
 
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
@@ -30,6 +30,6 @@ COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app ./
 
-EXPOSE 8000
+EXPOSE 4000
 
 CMD ["npx", "tsx", "server/src/index.ts"]

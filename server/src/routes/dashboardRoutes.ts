@@ -6,8 +6,12 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../database/db.js';
 import { marketGovernanceService } from '../services/marketGovernanceService.js';
+import { requireAdmin } from '../auth/authMiddleware.js';
 
 export const dashboardRouter = Router();
+
+// Blindagem de autorização (P0-3): telemetria operacional restrita ao administrador
+dashboardRouter.use(requireAdmin);
 
 // Cache em memória para garantir respostas em < 5ms sem sobrecarregar o PostgreSQL
 let cachedOverview: any = null;

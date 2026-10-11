@@ -123,6 +123,29 @@ export const MIN_NOTIONAL_USD = 2.0;
 /** Spread (bps) a partir do qual priorizamos LIMIT Post-Only (taxa Maker) */
 const SPREAD_MAKER_THRESHOLD_BPS = 2.0;
 
+// Cache em memória de mercados CCXT por ambiente (evita loadMarkets() a cada ordem)
+const marketsCache: { [env: string]: { markets: any; timestamp: number } } = {};
+const MARKETS_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hora
+
+async function loadMarketsCached(exchange: any, env: 'live' | 'testnet'): Promise<void> {
+  const now = Date.now();
+  const cached = marketsCache[env];
+  if (cached && (now - cached.timestamp) < MARKETS_CACHE_TTL_MS) {
+    exchange.markets = cached.markets;
+    return;
+  }
+  await exchange.loadMarkets();
+  marketsCache[env] = { markets: exchange.markets, timestamp: Date.now() };
+}
+
+// Cooldown de rate limit (429/DDoSProtection) para evitar repetição cega contra a exchange
+let exchangeRateLimitUntil = 0;
+
+function isRateLimitError(err: any): boolean {
+  const msg = String(err?.message ?? err?.name ?? '');
+  return err?.name === 'RateLimitExceeded' || msg.includes('429') || msg.includes('DDoSProtection') || msg.toLowerCase().includes('rate limit');
+}
+
 function toBybitLinear(symbol: string): string {
   if (symbol.includes(':')) return symbol;
   const [base, quote] = symbol.split('/');
@@ -518,9 +541,13 @@ export class BybitExecutionEngine {
       const apiSecret = decrypt(apiSecretEnc);
       const exchange = createBybitClient(apiKey, apiSecret, testnet);
 
+      if (Date.now() < exchangeRateLimitUntil) {
+        return { success: false, error: 'RATE_LIMIT_COOLDOWN_ACTIVE' };
+      }
+
       const ccxtSymbol = toBybitLinear(payload.symbol);
 
-      await exchange.loadMarkets();
+      await loadMarketsCached(exchange, testnet ? 'testnet' : 'live');
       const market = exchange.market(ccxtSymbol);
       if (payload.exitPolicy === 'FIXED_3R') {
         const existing = await exchange.fetchPositions([ccxtSymbol]);
@@ -748,28 +775,28 @@ export class BybitExecutionEngine {
       );
       const entryOrderState = classifyBybitOrderState(order);
       const tradeId = `trade-${clientId}-${Date.now()}`;
-      await TradeHistoryDB.insert({
+      void TradeHistoryDB.insert({
         id:tradeId, client_id:clientId, symbol:payload.symbol, side:payload.side,
         entry_price:validEntryPrice, qty:cleanQty, notional_usd:sizing.notionalUsd,
         leverage:sizing.leverage, status:entryOrderState, signal_reason:payload.signalReason,
         bybitOrderId:order.id, entry_time:Date.now(), exit_policy:payload.exitPolicy ?? 'LEGACY',
         protection_status:payload.exitPolicy === 'FIXED_3R' ? 'PENDING' : 'LEGACY'
-      });
+      }).catch(err => console.error('[BybitEngine] Falha não-fatal ao gravar histórico:', err));
       if (payload.exitPolicy === 'FIXED_3R') {
         try {
           const snapshot = await reconcileFixed3rEntry(exchange, ccxtSymbol, payload, order,
-            s => TradeHistoryDB.setInitialRiskSnapshot(tradeId, s),
-            fill => TradeHistoryDB.setExecutionFill(tradeId, {
+            async s => { void TradeHistoryDB.setInitialRiskSnapshot(tradeId, s).catch(() => {}); },
+            async fill => { void TradeHistoryDB.setExecutionFill(tradeId, {
               status:Number(fill.filled) > 0 && Number(fill.filled) < Number(fill.amount) ? 'PARCIAL' : classifyBybitOrderState(fill),
               qty:Number(fill.filled) || 0, entryPrice:Number(fill.average) || validEntryPrice
-            }));
+            }).catch(() => {}); });
           sizing.qty = snapshot.initialQty;
           sizing.notionalUsd = snapshot.initialNotionalUsd;
           sizing.marginUsd = snapshot.initialNotionalUsd / sizing.leverage;
           sizing.stopDistPct = Math.abs(snapshot.entryPrice - snapshot.initialStopLoss) / snapshot.entryPrice;
-          await TradeHistoryDB.setProtectionStatus(tradeId, 'CONFIRMED');
+          void TradeHistoryDB.setProtectionStatus(tradeId, 'CONFIRMED').catch(() => {});
         } catch (error) {
-          await TradeHistoryDB.setProtectionStatus(tradeId, 'UNCONFIRMED');
+          void TradeHistoryDB.setProtectionStatus(tradeId, 'UNCONFIRMED').catch(() => {});
           throw error;
         }
       }
@@ -831,6 +858,10 @@ export class BybitExecutionEngine {
 
       return { success: true, orderId: order.id, sizing };
     } catch (err: any) {
+      if (isRateLimitError(err)) {
+        exchangeRateLimitUntil = Date.now() + 5000 + Math.floor(Math.random() * 2000);
+        console.warn(`[BingXEngine] ⚠️ Rate limit 429 detectado. Pausando ordens até ${new Date(exchangeRateLimitUntil).toISOString()}`);
+      }
       console.error(`[BingXEngine] Erro ao executar ordem ${clientId}:`, err.message);
 
       (GoogleSheetsService.logTradeExecution as any)({
@@ -908,8 +939,11 @@ export class BybitExecutionEngine {
 
     try {
       const exchange = createBybitClient(decrypt(apiKeyEnc), decrypt(apiSecretEnc), testnet);
+      if (Date.now() < exchangeRateLimitUntil) {
+        return { success: false, error: 'RATE_LIMIT_COOLDOWN_ACTIVE' };
+      }
       const ccxtSymbol = toBybitLinear(symbol);
-      await exchange.loadMarkets();
+      await loadMarketsCached(exchange, testnet ? 'testnet' : 'live');
       const positions = await exchange.fetchPositions([ccxtSymbol]);
       const active = (positions as any[]).filter((p: any) =>
         Number(p?.contracts || p?.info?.size || 0) > 0 &&
@@ -947,6 +981,10 @@ export class BybitExecutionEngine {
       }
       return { success: true, orderId: lastOrderId, closedQty: totalClosed };
     } catch (err: any) {
+      if (isRateLimitError(err)) {
+        exchangeRateLimitUntil = Date.now() + 5000 + Math.floor(Math.random() * 2000);
+        console.warn(`[BingXEngine] ⚠️ Rate limit 429 detectado no fechamento. Pausando até ${new Date(exchangeRateLimitUntil).toISOString()}`);
+      }
       return { success: false, error: err?.message || String(err) };
     }
   }

@@ -4,7 +4,7 @@
 // ==============================================================================
 
 import crypto from 'crypto';
-import { query } from '../database/db.js';
+import { query, withTransaction } from '../database/db.js';
 
 export interface RecordTradeEventInput {
   tradeId: string;
@@ -332,67 +332,73 @@ export class EventStoreService {
       throw new Error('RESET_STARTING_BALANCE_INVALID');
     }
 
-    const deletedDecisions = await query<{ decision_id: string }>(
-      'DELETE FROM decision_events RETURNING decision_id'
-    );
-    const deletedTrades = await query<{ trade_id: string }>(
-      'DELETE FROM trade_events RETURNING trade_id'
-    );
+    const { deletedTrades, deletedDecisions } = await withTransaction(async (client) => {
+      const deletedDecisionsRows = await client.query<{ decision_id: string }>(
+        'DELETE FROM decision_events RETURNING decision_id'
+      );
+      const deletedTradesRows = await client.query<{ trade_id: string }>(
+        'DELETE FROM trade_events RETURNING trade_id'
+      );
+      const deletedTrades = deletedTradesRows.rowCount ?? deletedTradesRows.rows.length;
+      const deletedDecisions = deletedDecisionsRows.rowCount ?? deletedDecisionsRows.rows.length;
 
-    await query(
-      `INSERT INTO account_state (id, starting_balance_usd, created_at)
-       VALUES (1, $1, NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         starting_balance_usd = EXCLUDED.starting_balance_usd,
-         created_at = NOW()`,
-      [balance]
-    );
+      await client.query(
+        `INSERT INTO account_state (id, starting_balance_usd, created_at)
+         VALUES (1, $1, NOW())
+         ON CONFLICT (id) DO UPDATE SET
+           starting_balance_usd = EXCLUDED.starting_balance_usd,
+           created_at = NOW()`,
+        [balance]
+      );
 
-    await query(
-      `INSERT INTO system_state (
-         id, daily_lockout_active, lockout_session_date, lockout_r_at_trigger,
-         lockout_triggered_at, safe_halt_active, safe_halt_reason,
-         safe_halt_triggered_at, hwm_usd, hwm_reached_at
-       )
-       VALUES (1, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, $1, NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         daily_lockout_active = FALSE,
-         lockout_session_date = NULL,
-         lockout_r_at_trigger = NULL,
-         lockout_triggered_at = NULL,
-         safe_halt_active = FALSE,
-         safe_halt_reason = NULL,
-         safe_halt_triggered_at = NULL,
-         hwm_usd = EXCLUDED.hwm_usd,
-         hwm_reached_at = NOW(),
-         updated_at = NOW()`,
-      [balance]
-    );
-
-    await query(
-      `INSERT INTO system_state_events (event_type, r_at_event, detail)
-       VALUES (
-         'SESSION_RESET',
-         0,
-         jsonb_build_object(
-           'source', 'ADMIN_TRADING_RESET',
-           'startingBalanceUsd', $1::numeric,
-           'deletedTrades', $2::int,
-           'deletedDecisions', $3::int
+      await client.query(
+        `INSERT INTO system_state (
+           id, daily_lockout_active, lockout_session_date, lockout_r_at_trigger,
+           lockout_triggered_at, safe_halt_active, safe_halt_reason,
+           safe_halt_triggered_at, hwm_usd, hwm_reached_at
          )
-       )`,
-      [balance, deletedTrades.length, deletedDecisions.length]
-    );
+         VALUES (1, FALSE, NULL, NULL, NULL, FALSE, NULL, NULL, $1, NOW())
+         ON CONFLICT (id) DO UPDATE SET
+           daily_lockout_active = FALSE,
+           lockout_session_date = NULL,
+           lockout_r_at_trigger = NULL,
+           lockout_triggered_at = NULL,
+           safe_halt_active = FALSE,
+           safe_halt_reason = NULL,
+           safe_halt_triggered_at = NULL,
+           hwm_usd = EXCLUDED.hwm_usd,
+           hwm_reached_at = NOW(),
+           updated_at = NOW()`,
+        [balance]
+      );
+
+      await client.query(
+        `INSERT INTO system_state_events (event_type, r_at_event, detail)
+         VALUES (
+           'SESSION_RESET',
+           0,
+           jsonb_build_object(
+             'source', 'ADMIN_TRADING_RESET',
+             'startingBalanceUsd', $1::numeric,
+             'deletedTrades', $2::int,
+             'deletedDecisions', $3::int
+           )
+         )`,
+        [balance, deletedTrades, deletedDecisions]
+      );
+
+      return { deletedTrades, deletedDecisions };
+    });
 
     console.log('[EventStore] ♻️ Sessão operacional reiniciada.', {
       startingBalanceUsd: balance,
-      deletedTrades: deletedTrades.length,
-      deletedDecisions: deletedDecisions.length
+      deletedTrades,
+      deletedDecisions
     });
 
     return {
-      deletedTrades: deletedTrades.length,
-      deletedDecisions: deletedDecisions.length,
+      deletedTrades,
+      deletedDecisions,
       startingBalanceUsd: balance
     };
   }

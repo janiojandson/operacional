@@ -280,7 +280,7 @@ export class PaperTradingEngine {
 
     // Potência proporcional à banca (20% por trade padrão)
     const baseAllocation = Math.max(100, this.balance * 0.20);
-    const powerMultiplier = Math.max(this.minTemperature, pairConfig?.powerMultiplier || 1.5);
+    const powerMultiplier = Math.min(2.0, Math.max(this.minTemperature, pairConfig?.powerMultiplier || 1.5));
     const temperature = pairConfig?.temperature || 'HOT_MAX_EXTRACT';
     const powerLabel = ` [Potência ${powerMultiplier.toFixed(1)}x]`;
 
@@ -469,7 +469,7 @@ export class PaperTradingEngine {
     const nowTs = Date.now();
     const entryTs = trade.entryTime ? (trade.entryTime < 1e12 ? trade.entryTime * 1000 : trade.entryTime) : nowTs;
     const holdingHours = (nowTs - entryTs) / (1000 * 60 * 60);
-    const isStagnantRegime = trade.marketRegime === 'NEUTRAL_RANGING' || trade.marketRegime === 'CHOPPY' || trade.marketRegime === 'LOW_LIQUIDITY';
+    const isStagnantRegime = trade.marketRegime === 'NEUTRAL_RANGING' || trade.marketRegime === 'CHOPPY_RANGING' || trade.marketRegime === 'LOW_LIQUIDITY';
 
     if (holdingHours >= 12 && isStagnantRegime && currentR < 0.40 && !trade.isRunner) {
       console.log(`[TIME_STOP] Posição ${symbol} estagnada há ${holdingHours.toFixed(1)}h em regime ${trade.marketRegime} (R=${currentR.toFixed(2)}R). Encerramento controlado para reciclagem de capital.`);
