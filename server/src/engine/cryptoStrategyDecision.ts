@@ -1,4 +1,5 @@
 import { CRYPTO_STRATEGY_VERSION, getCryptoStrategyProfile } from './cryptoStrategyProfile.js';
+import { RISK_CONFIG } from '../config/riskConfig.js';
 
 export type StrategyEntrySide = 'BUY' | 'SELL';
 export type StrategyDataSource = 'BINGX' | 'BINANCE' | 'BYBIT' | 'LOCAL_FALLBACK' | 'UNAVAILABLE';
@@ -52,6 +53,9 @@ export function evaluateCryptoOpportunity(input: CryptoOpportunityInput): Strate
   const reasons: string[] = [];
   let score = 0;
 
+  if (!RISK_CONFIG.ALLOWED_SIGNAL_TYPES.includes(input.signalType)) {
+    reasons.push('SINAL_DESABILITADO');
+  }
   if (!profile) reasons.push('PAR_SEM_PERFIL');
   if (!Number.isFinite(input.price) || input.price <= 0) reasons.push('PRECO_INVALIDO');
   if (input.source !== 'BINGX' && input.source !== 'BINANCE' && input.source !== 'BYBIT') reasons.push('FONTE_NAO_EXCHANGE');

@@ -294,17 +294,19 @@ export class EventStoreService {
                WHERE id = 1`
             ).catch(err => console.error('[EventStore] Erro ao resetar lockout expirado:', err));
             await query(
-              `INSERT INTO system_state_events (event_type, r_at_event, details) 
+              `INSERT INTO system_state_events (event_type, r_at_event, detail) 
                VALUES ('SESSION_RESET', 0.0, '{"reason": "AUTO_RECOVERY_EXPIRED_UTC"}')`
-            ).catch(() => {});
+            ).catch((err) => console.error('[EventStore] Falha ao registrar SESSION_RESET de auto-recovery:', err));
             return false;
           }
         }
         return true;
       }
       return false;
-    } catch {
-      return false;
+    } catch (err) {
+      // fail-closed: em falha de leitura do estado, assume lockout ativo (bloqueia) para não furar o gate de risco.
+      console.error('[EventStore] Falha ao ler lockout diário (fail-closed):', err);
+      return true;
     }
   }
 
@@ -312,8 +314,9 @@ export class EventStoreService {
     try {
       const res = await query<{ safe_halt_active: boolean }>('SELECT safe_halt_active FROM system_state WHERE id = 1');
       return Boolean(res[0]?.safe_halt_active);
-    } catch {
-      return false;
+    } catch (err) {
+      console.error('[EventStore] Falha ao ler safe halt (fail-closed):', err);
+      return true;
     }
   }
 

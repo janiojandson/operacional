@@ -15,7 +15,12 @@ export const RISK_CONFIG = {
   MAX_SPREAD_BPS: 5.0,     // 5.0 basis points (0.050%) teto máximo de spread seguro na Bybit Linear
   MAX_SPREAD_PIPS: 5.0,    // Retrocompatibilidade
   MAX_USD_EXPOSURE: 3.0,   // 3.0R (permite até 3 operações simultâneas na mesma ponta na cesta de 5 pares)
-  
+
+  // Kill-switch de sinais (reversível): mantém apenas o subconjunto com edge observado.
+  // ABSORPTION_BUY = vencedor (+0,62R/trade); WHALE_AGGRESSION = raro/neutro.
+  // BOOK_IMBALANCE e ABSORPTION_SELL ficaram 0/5 nos dados (desligados).
+  ALLOWED_SIGNAL_TYPES: ['ABSORPTION_BUY', 'WHALE_AGGRESSION'],
+
   // Caminho do log de auditoria
   LOG_FILE_PATH: 'audit_shadow_mode.log'
 };
