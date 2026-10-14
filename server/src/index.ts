@@ -624,7 +624,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       });
       return;
     }
-    const powerMultiplier = Math.max(paperTrading.getMinTemperature(), pairConfig?.powerMultiplier || 1.5);
+    const powerMultiplier = Math.min(RISK_CONFIG.MAX_POWER_MULTIPLIER, Math.max(paperTrading.getMinTemperature(), pairConfig?.powerMultiplier || 1.5));
     const requestedNotionalUsd = Math.max(100, account.balance * 0.20) * (powerMultiplier / 1.5);
     const existingAggregateRiskUsd = account.openPositions.reduce((sum, position) => {
       if (Number.isFinite(position.riskUsd) && (position.riskUsd || 0) > 0) return sum + (position.riskUsd || 0);

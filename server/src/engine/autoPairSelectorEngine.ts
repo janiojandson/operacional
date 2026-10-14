@@ -1,5 +1,6 @@
 import { AssetSummary, OrderBookData } from '../../../shared/types';
 import { PairPerformance } from './pairPerformanceTracker';
+import { RISK_CONFIG } from '../config/riskConfig.js';
 
 export type RegimeType = 'HIGH_TREND' | 'CHOPPY_RANGING' | 'LOW_LIQUIDITY' | 'EXPANSION_FLOW' | 'NEUTRAL_RANGING';
 
@@ -134,6 +135,15 @@ export class AutoPairSelectorEngine {
         temperature = 'COLD_DEFENSE';
         temperatureLabel = '⛔ Pausado (0.0x)';
         actionReason = '⛔ Par pausado pela IA: Condições desfavoráveis para proteger o patrimônio.';
+      }
+
+      // Guarda de cold-start: sem histórico suficiente, limita a potência a 1.5x (Base Quant).
+      if (totalTrades < RISK_CONFIG.MIN_TRADES_FOR_HIGH_POWER && powerMultiplier > 1.5) {
+        powerMultiplier = 1.5;
+        baseAllocation = 3000;
+        temperature = 'HOT_MAX_EXTRACT';
+        temperatureLabel = '⚡ Base Quant (1.5x) — cold-start';
+        actionReason = '⏳ Cold-start: sem histórico suficiente. Potência limitada a 1.5x até acumular ' + RISK_CONFIG.MIN_TRADES_FOR_HIGH_POWER + ' trades.';
       }
 
       const status: DynamicPairStatus = {

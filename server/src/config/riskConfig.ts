@@ -21,6 +21,11 @@ export const RISK_CONFIG = {
   // BOOK_IMBALANCE e ABSORPTION_SELL ficaram 0/5 nos dados (desligados).
   ALLOWED_SIGNAL_TYPES: ['ABSORPTION_BUY', 'WHALE_AGGRESSION'],
 
+  // ─── Controle de potência e concentração (reversível) ───
+  MAX_POWER_MULTIPLIER: 3.0,      // teto no notional = SUPERNOVA_POWER (3x); 4x/5x historicamente perdedores
+  MIN_TRADES_FOR_HIGH_POWER: 3,   // cold-start: par com <3 trades fechados fica em 1.5x (Base Quant)
+  MAX_SAME_SIDE_POSITIONS: 2,     // máx. 2 posições simultâneas no mesmo lado (BUY/SELL)
+
   // Caminho do log de auditoria
   LOG_FILE_PATH: 'audit_shadow_mode.log'
 };

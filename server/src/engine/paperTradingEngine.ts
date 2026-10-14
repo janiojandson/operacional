@@ -9,6 +9,7 @@ import type { AdaptiveRiskResult } from './adaptiveRisk.js';
 import { evaluateActivePositionRisk } from './flowEngine.js';
 import type { MarketGovernanceResponse } from '../../../shared/marketGovernanceTypes.js';
 import { configuredExitPolicy, fixed3rExit, applyRealizedRisk } from './fixed3rExitPolicy.js';
+import { RISK_CONFIG } from '../config/riskConfig.js';
 
 export interface SimulatedTradeWithTrailing extends SimulatedTrade {
   trailingActive?: boolean;
@@ -239,6 +240,20 @@ export class PaperTradingEngine {
         signalPrice: signal.price,
         marketGovernanceAction: marketProposal?.action,
         layaRationaleCode: marketProposal?.rationaleCode
+      });
+      return;
+    }
+
+    // Concentração direcional: limita posições simultâneas no mesmo lado.
+    const sameSideCount = Array.from(this.openPositions.values()).filter(p => p.type === tradeType).length;
+    if (sameSideCount >= RISK_CONFIG.MAX_SAME_SIDE_POSITIONS) {
+      console.warn('[PaperEngine][DROP][225_SAME_SIDE_LIMIT]', {
+        symbol: signal.symbol,
+        signalType: signal.type,
+        tradeType,
+        sameSideCount,
+        maxSameSide: RISK_CONFIG.MAX_SAME_SIDE_POSITIONS,
+        openPositionSymbols: Array.from(this.openPositions.keys())
       });
       return;
     }
