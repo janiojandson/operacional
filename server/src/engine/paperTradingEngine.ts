@@ -411,7 +411,8 @@ export class PaperTradingEngine {
     if (!Number.isFinite(currentPrice) || currentPrice <= 0) return;
     if (trade.exitPolicy === 'FIXED_3R') {
       if (!trade.initialStopLoss || !trade.initialRiskUsd || !trade.initialQty || trade.partialTaken) {
-        throw new Error('FIXED_3R_POSITION_REQUIRES_RECONCILIATION');
+        console.warn(`[Engine] FIXED_3R sem dados de reconciliação para ${symbol}; ignorando tick (evita crash loop).`);
+        return;
       }
       const action = fixed3rExit({ type: trade.type, entryPrice: trade.entryPrice, initialStopLoss: trade.initialStopLoss }, currentPrice);
       trade.currentPrice = currentPrice;
@@ -749,6 +750,7 @@ export class PaperTradingEngine {
   public partialClose(symbol: string, closePrice: number, fraction: number): { success: boolean; reason?: string } {
     const trade = this.openPositions.get(symbol);
     if (!trade) return { success: false, reason: 'SEM_POSICAO' };
+    if (trade.exitPolicy === 'FIXED_3R') return { success: false, reason: 'FIXED_3R_NAO_SUPORTA_SCALE_OUT' };
     const f = Number(fraction);
     if (!Number.isFinite(f) || f <= 0 || f >= 1) return { success: false, reason: 'FRACAO_INVALIDA' };
     const notional = trade.notionalUsd ?? (Math.max(100, this.balance * 0.20) * (trade.powerMultiplier / 1.5));
@@ -934,7 +936,8 @@ export class MirrorTradingEngine {
     if (!Number.isFinite(currentPrice) || currentPrice <= 0) return;
     if (trade.exitPolicy === 'FIXED_3R') {
       if (!trade.initialStopLoss || !trade.initialRiskUsd || !trade.initialQty || trade.partialTaken) {
-        throw new Error('FIXED_3R_POSITION_REQUIRES_RECONCILIATION');
+        console.warn(`[Engine] FIXED_3R sem dados de reconciliação para ${symbol}; ignorando tick (evita crash loop).`);
+        return;
       }
       const action = fixed3rExit({ type: trade.type, entryPrice: trade.entryPrice, initialStopLoss: trade.initialStopLoss }, currentPrice);
       const delta = (trade.type === 'BUY' ? 1 : -1) * (currentPrice - trade.entryPrice);
