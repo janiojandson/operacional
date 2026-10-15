@@ -1571,6 +1571,19 @@ app.get('/api/ai-copilot/status', requireAdmin, (req, res) => {
   });
 });
 
+app.get('/api/ai-copilot/decisions', requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query?.limit) || 50, 200);
+    const rows = await query(
+      `SELECT id, ts, source, ok, raw, actions, applied, rejected, error FROM ai_posture_decisions ORDER BY id DESC LIMIT $1`,
+      [limit]
+    );
+    res.json({ decisions: rows });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 function syncActivePairs(active: string[]) {
   paperTrading.setActivePairs(active);
   mirrorTrading.setActivePairs(active);

@@ -8,8 +8,9 @@ import {
   AlertOctagon, CheckCircle2, Phone
 } from 'lucide-react';
 import TradingTerminal from './TradingTerminal';
+import AiCopilotPanel from '../components/Advisor/AiCopilotPanel';
 
-type AdminTab = 'dashboard' | 'clients' | 'reports' | 'trading';
+type AdminTab = 'dashboard' | 'clients' | 'reports' | 'trading' | 'ai';
 
 interface ClientRow {
   userId: string;
@@ -345,6 +346,7 @@ export default function AdminDashboard() {
             { id: 'dashboard', icon: Activity, label: 'Dashboard' },
             { id: 'clients', icon: Users, label: 'Clientes' },
             { id: 'reports', icon: FileText, label: 'Relatórios' },
+            { id: 'ai', icon: Zap, label: 'IA & Pares' },
             { id: 'trading', icon: Terminal, label: 'Terminal' }
           ] as const).map(tab => (
             <button
@@ -1033,6 +1035,9 @@ export default function AdminDashboard() {
             )}
           </div>
         )}
+
+        {/* ── IA & PARES (OBSERVAÇÃO, read-only) ── */}
+        {activeTab === 'ai' && <AiCopilotPanel />}
 
       </main>
     </div>
