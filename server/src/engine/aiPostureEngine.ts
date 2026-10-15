@@ -146,6 +146,49 @@ Analise o momento e retorne as ações de postura em JSON (ou ações vazias).`;
     return { ok: false, raw: '', actions: [], error: 'OMNIROUTE_INDISPONIVEL' };
   }
 
+  public async consultPairs(market: Array<{ symbol: string; change24h: number; volume24h: number }>): Promise<{ ok: boolean; raw: string; add: string[]; remove: string[]; error?: string }> {
+    if (!this.isEnabled()) return { ok: false, raw: '', add: [], remove: [], error: 'AI_POSTURE_DESABILITADA_OU_SEM_CONFIG' };
+    const symbolList = market
+      .map((m) => `${m.symbol} (24h ${(m.change24h || 0).toFixed(1)}%, vol $${((m.volume24h || 0) / 1e6).toFixed(1)}M)`)
+      .join('\n');
+
+    const system = `Você é um estrategista de seleção de pares de um motor quant de cripto (perpetuals, BingX Swap). Recomende pares a ADICIONAR ou REMOVER, priorizando moedas com movimento (volatilidade) E liquidez. Evite memecoins ilíquidas.
+REGRAS:
+- Responda SOMENTE um JSON válido, sem markdown: {"add":["BTC/USDT"],"remove":["XRP/USDT"]}.
+- "add": pares novos no formato BASE/USDT, com boa liquidez e movimento.
+- "remove": pares atuais fracos/parados.
+- Máximo 3 por campo. Sem boa sugestão, retorne {"add":[],"remove":[]}.`;
+
+    const user = `PARES ATUAIS:\n${symbolList}\n\nSugira add/remove em JSON.`;
+
+    for (const base of this.baseUrls) {
+      try {
+        const response = await fetch(`${base}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.apiKey}` },
+          body: JSON.stringify({
+            model: 'auto/best-reasoning',
+            messages: [
+              { role: 'system', content: system },
+              { role: 'user', content: user },
+            ],
+          }),
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+        if (!response.ok) continue;
+        const data = (await response.json()) as any;
+        const raw = data?.choices?.[0]?.message?.content || '';
+        const parsed = extractJson(raw);
+        const add = Array.isArray(parsed?.add) ? (parsed.add as any[]).filter((s) => typeof s === 'string') : [];
+        const remove = Array.isArray(parsed?.remove) ? (parsed.remove as any[]).filter((s) => typeof s === 'string') : [];
+        return { ok: true, raw, add, remove };
+      } catch (e: any) {
+        console.warn(`[AiPosture] consultPairs falha em ${base}: ${e.message}`);
+      }
+    }
+    return { ok: false, raw: '', add: [], remove: [], error: 'OMNIROUTE_INDISPONIVEL' };
+  }
+
   public applyActions(actions: PostureAction[], deps: PostureDeps): ApplyResult {
     const result: ApplyResult = { applied: [], rejected: [] };
 

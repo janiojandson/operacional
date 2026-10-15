@@ -25,6 +25,7 @@ export const RISK_CONFIG = {
   MAX_POWER_MULTIPLIER: 5.0,
   MIN_TRADES_FOR_HIGH_POWER: 0,
   MAX_SAME_SIDE_POSITIONS: 999,
+  MIN_ACTIVE_PAIRS: 3,        // piso mínimo de pares ativos (IA não pode esvaziar a cesta)
 
   // ─── IA Controladora de Postura (reversível; kill-switch = AI_POSTURE_ENABLED:false) ───
   AI_POSTURE_ENABLED: true,

@@ -9,7 +9,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import { FlowEngine } from './engine/flowEngine.js';
-import { MarketDataManager } from './engine/marketDataManager.js';
+import { MarketDataManager, normalizeSymbol } from './engine/marketDataManager.js';
 import { PaperTradingEngine, MirrorTradingEngine, validateOrderExecution } from './engine/paperTradingEngine.js';
 import { permitsDiscretionaryClose } from './engine/fixed3rExitPolicy.js';
 import { PairPerformanceTracker } from './engine/pairPerformanceTracker.js';
@@ -27,7 +27,7 @@ import { runShadowAudit, recordShadowOutcome, clearShadowAudits, getShadowOpport
 import { RISK_CONFIG } from './config/riskConfig.js';
 import { calculateProfileStopLoss, evaluateCryptoOpportunity } from './engine/cryptoStrategyDecision.js';
 import { calculateAdaptiveRisk } from './engine/adaptiveRisk.js';
-import { getCryptoStrategyProfile } from './engine/cryptoStrategyProfile.js';
+import { getOrCreateCryptoStrategyProfile } from './engine/cryptoStrategyProfile.js';
 import { marketGovernanceService } from './services/marketGovernanceService.js';
 import { EventStoreService } from './services/eventStoreService.js';
 // SaaS: Autenticação e Rotas
@@ -614,7 +614,7 @@ const flowEngine = new FlowEngine((signal: FlowSignal) => {
       return;
     }
 
-    const profile = getCryptoStrategyProfile(signal.symbol);
+    const profile = getOrCreateCryptoStrategyProfile(signal.symbol);
     const account = paperTrading.getAccountState();
     if (!profile || (book?.source !== 'BINGX' && book?.source !== 'BINANCE' && book?.source !== 'BYBIT')) {
       console.warn('[IndexFlow][DROP][551_BOOK_OR_PROFILE_INVALID]', {
@@ -1570,6 +1570,107 @@ app.get('/api/ai-copilot/status', requireAdmin, (req, res) => {
     lockout: paperTrading.isDailyLockoutActive(),
   });
 });
+
+function syncActivePairs(active: string[]) {
+  paperTrading.setActivePairs(active);
+  mirrorTrading.setActivePairs(active);
+}
+
+app.get('/api/pairs/list', requireAdmin, (req, res) => {
+  const symbols = marketManager.getSymbols();
+  const pairs = symbols.map((s) => {
+    const cfg = AutoPairSelectorEngine.getPairConfig(s);
+    return { symbol: s, active: paperTrading.getActivePairs().includes(s), regime: cfg?.regime, temperature: cfg?.temperature, powerMultiplier: cfg?.powerMultiplier };
+  });
+  res.json({ pairs });
+});
+
+app.post('/api/pairs/add', requireAdmin, async (req, res) => {
+  const symbol = normalizeSymbol(String(req.body?.symbol || ''));
+  if (!symbol) return res.status(400).json({ success: false, error: 'SYMBOL_OBRIGATORIO' });
+  const result = await marketManager.addSymbol(symbol);
+  if (result.success) {
+    const active = new Set(paperTrading.getActivePairs());
+    active.add(result.symbol);
+    syncActivePairs(Array.from(active));
+    void recalculateAllPairs();
+  }
+  res.json(result);
+});
+
+app.post('/api/pairs/remove', requireAdmin, (req, res) => {
+  const symbol = normalizeSymbol(String(req.body?.symbol || ''));
+  if (!symbol) return res.status(400).json({ success: false, error: 'SYMBOL_OBRIGATORIO' });
+  const active = paperTrading.getActivePairs();
+  if (!active.includes(symbol)) return res.json({ success: false, error: 'PAR_NAO_ATIVO' });
+  if (active.length <= RISK_CONFIG.MIN_ACTIVE_PAIRS) return res.status(409).json({ success: false, error: 'PISO_MINIMO_DE_PARES' });
+  marketManager.removeSymbol(symbol);
+  syncActivePairs(active.filter((s) => s !== symbol));
+  void recalculateAllPairs();
+  res.json({ success: true, removed: symbol });
+});
+
+app.post('/api/pairs/ai-scan', requireAdmin, async (req, res) => {
+  try {
+    const summaries = marketManager.getSummaries();
+    const market = summaries.map((s) => ({ symbol: s.symbol, change24h: s.change24h, volume24h: s.volume24h }));
+    const scan = await aiPosture.consultPairs(market);
+    const added: string[] = [];
+    const removed: string[] = [];
+    if (scan.ok) {
+      const active = new Set(paperTrading.getActivePairs());
+      for (const raw of scan.remove) {
+        const sym = normalizeSymbol(raw);
+        if (active.has(sym) && active.size > RISK_CONFIG.MIN_ACTIVE_PAIRS) {
+          marketManager.removeSymbol(sym);
+          active.delete(sym);
+          removed.push(sym);
+        }
+      }
+      for (const raw of scan.add) {
+        const sym = normalizeSymbol(raw);
+        const r = await marketManager.addSymbol(sym);
+        if (r.success) { active.add(r.symbol); added.push(r.symbol); }
+      }
+      syncActivePairs(Array.from(active));
+      void recalculateAllPairs();
+    }
+    res.json({ success: scan.ok, raw: scan.raw, added, removed, suggestedAdd: scan.add, suggestedRemove: scan.remove, error: scan.error });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Estrategista de pares autônomo (a cada 4h, dentro da guarda de liquidez do addSymbol)
+setInterval(() => {
+  if (!aiPosture.isEnabled()) return;
+  void (async () => {
+    try {
+      const summaries = marketManager.getSummaries();
+      const market = summaries.map((s) => ({ symbol: s.symbol, change24h: s.change24h, volume24h: s.volume24h }));
+      const scan = await aiPosture.consultPairs(market);
+      if (!scan.ok) return;
+      const active = new Set(paperTrading.getActivePairs());
+      for (const raw of scan.remove) {
+        const sym = normalizeSymbol(raw);
+        if (active.has(sym) && active.size > RISK_CONFIG.MIN_ACTIVE_PAIRS) {
+          marketManager.removeSymbol(sym);
+          active.delete(sym);
+        }
+      }
+      for (const raw of scan.add) {
+        const sym = normalizeSymbol(raw);
+        const r = await marketManager.addSymbol(sym);
+        if (r.success) active.add(r.symbol);
+      }
+      syncActivePairs(Array.from(active));
+      console.log(`[AiPair] scan autônomo -> add=${scan.add.length} remove=${scan.remove.length}`);
+      void recalculateAllPairs();
+    } catch (e: any) {
+      console.error('[AiPair] erro no scan autônomo:', e.message);
+    }
+  })();
+}, 4 * 60 * 60 * 1000);
 
 app.get('/api/assets/:symbol/state', (req, res) => {
   const symbol = decodeURIComponent(String(req.params.symbol));

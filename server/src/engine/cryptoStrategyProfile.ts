@@ -32,3 +32,14 @@ export const CRYPTO_STRATEGY_PROFILES: Record<string, CryptoStrategyProfile> = {
 export function getCryptoStrategyProfile(symbol: string): CryptoStrategyProfile | undefined {
   return CRYPTO_STRATEGY_PROFILES[symbol];
 }
+
+const DEFAULT_PROFILE: Omit<CryptoStrategyProfile, 'symbol'> = {
+  stopLossPct: 0.015, takeProfitPct: 0.0375, maxSpreadPct: 0.0020, maxBookAgeMs: 25_000,
+  minBookImbalance: 3.0, maxBookImbalance: 0.33, minScore: 2, atrMultiplier: 1.8,
+  maxRiskPct: 0.010, maxAggregateRiskPct: 0.05, slippageBufferPct: 0.0005
+};
+
+// Retorna o perfil cadastrado ou um perfil padrão (modo laboratório permite pares novos sem travar por PAR_SEM_PERFIL).
+export function getOrCreateCryptoStrategyProfile(symbol: string): CryptoStrategyProfile {
+  return CRYPTO_STRATEGY_PROFILES[symbol] || { symbol, ...DEFAULT_PROFILE };
+}

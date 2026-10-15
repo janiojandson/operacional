@@ -40,6 +40,10 @@ function toExchangeLinear(symbol: string): string {
   return `${base}/${quote}:${quote}`;
 }
 
+export function normalizeSymbol(raw: string): string {
+  return raw.toUpperCase().replace(/[-:]/g, '/').trim();
+}
+
 export class MarketDataManager {
   private symbols: Map<string, ActiveSymbolState> = new Map();
   private flowEngine: FlowEngine;
@@ -87,6 +91,56 @@ export class MarketDataManager {
     this.startStreaming();
     this.isInitialized = true;
     console.log('[MarketData] ✅ Dados reais da BingX Swap inicializados');
+  }
+
+  public getSymbols(): string[] {
+    return Array.from(this.symbols.keys());
+  }
+
+  public async addSymbol(symbolRaw: string): Promise<{ success: boolean; symbol: string; error?: string }> {
+    const symbol = normalizeSymbol(symbolRaw);
+    if (!symbol.endsWith('/USDT')) return { success: false, symbol, error: 'SIMBOLO_INVALIDO' };
+    if (this.symbols.has(symbol)) return { success: true, symbol };
+
+    try {
+      const ccxtSymbol = toExchangeLinear(symbol);
+      const [ohlcv, ticker] = await Promise.all([
+        this.exchange.fetchOHLCV(ccxtSymbol, '1m', undefined, 200),
+        this.exchange.fetchTicker(ccxtSymbol)
+      ]);
+      const minVolume = Number(process.env.MIN_PAIR_VOLUME_24H || 1000000); // guarda de liquidez: US$ 1M/24h
+      if (Number(ticker.baseVolume || 0) < minVolume) {
+        return { success: false, symbol, error: `LIQUIDEZ_INSUFICIENTE (vol24h=${ticker.baseVolume})` };
+      }
+      const candles = this.normalizeCandles(ohlcv, symbol);
+      const cvd = this.calculateCVD(candles);
+      const book = await this.fetchOrderBook(ccxtSymbol, ticker.last);
+      book.symbol = symbol;
+      this.symbols.set(symbol, {
+        symbol,
+        category: 'crypto',
+        lastPrice: ticker.last || candles[candles.length - 1]?.close || 0,
+        high24h: ticker.high || 0,
+        low24h: ticker.low || 0,
+        volume24h: ticker.baseVolume || 0,
+        change24h: ticker.percentage || 0,
+        cvd,
+        candles,
+        currentCandle: null,
+        book,
+        trades: []
+      });
+      void this.streamTrades(symbol);
+      void this.streamOrderBook(symbol);
+      return { success: true, symbol };
+    } catch (err: any) {
+      return { success: false, symbol, error: err.message };
+    }
+  }
+
+  public removeSymbol(symbol: string): void {
+    this.symbols.delete(symbol);
+    this.processedTradeIds.delete(symbol);
   }
 
   private async loadInitialData(): Promise<void> {
@@ -213,7 +267,7 @@ export class MarketDataManager {
     this.isStreamingWS = true;
     console.log('[MarketData] 🚀 Iniciando túneis WebSocket nativos (ccxt.pro)...');
 
-    for (const symbol of DEFAULT_SYMBOLS) {
+    for (const symbol of Array.from(this.symbols.keys())) {
       this.streamTrades(symbol);
       this.streamOrderBook(symbol);
     }

@@ -1,4 +1,4 @@
-import { CRYPTO_STRATEGY_VERSION, getCryptoStrategyProfile } from './cryptoStrategyProfile.js';
+import { CRYPTO_STRATEGY_VERSION, getOrCreateCryptoStrategyProfile } from './cryptoStrategyProfile.js';
 import { RISK_CONFIG } from '../config/riskConfig.js';
 
 export type StrategyEntrySide = 'BUY' | 'SELL';
@@ -49,7 +49,7 @@ export function calculateProfileStopLoss(
 }
 
 export function evaluateCryptoOpportunity(input: CryptoOpportunityInput): StrategyDecision {
-  const profile = getCryptoStrategyProfile(input.symbol);
+  const profile = getOrCreateCryptoStrategyProfile(input.symbol);
   const reasons: string[] = [];
   let score = 0;
 
