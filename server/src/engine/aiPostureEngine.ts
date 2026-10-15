@@ -33,7 +33,7 @@ export interface ApplyResult {
   rejected: Array<{ action: PostureAction; reason: string }>;
 }
 
-const PAIR_WHITELIST = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT'];
+const PAIR_WHITELIST = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'AVAX/USDT', 'LINK/USDT', 'ADA/USDT', 'NEAR/USDT', 'SUI/USDT', 'DOGE/USDT'];
 
 function extractJson(text: string): any | null {
   const first = text.indexOf('{');
@@ -90,10 +90,10 @@ REGRAS ABSOLUTAS:
   - MOVE_STOP: mover stop-loss APENAS para TRAVAR lucro (aproximar do preço). symbol + newStop (número).
   - MOVE_TARGET: ajustar take-profit. symbol + newTarget (número).
   - SCALE_OUT: reduzir parte da posição (fração 0.1 a 0.9). symbol + fraction.
-  - ADJUST_POWER: ajustar a potência global (1.5 a 3.0). power (número).
+  - ADJUST_POWER: ajustar a potência global (1.5 a 5.0). power (número).
   - SET_PAIR_ACTIVE: ativar/desativar um par. symbol + active (boolean).
 - Se não houver ação claramente justificada, retorne {"actions":[]}.
-- Nunca sugira alavancagem acima de 3x, nunca aumente o risco por trade acima de 1%, nunca proponha abrir BUY (o sistema opera apenas SELL por decisão estratégica).`;
+- Nunca sugira alavancagem acima de 5x, nunca aumente o risco por trade acima de 1%. Você pode operar BUY e SELL conforme o momento.`;
 
     const user = `DADOS DA CONTA:
 - Saldo: ${snapshot.account.balance.toFixed(2)} | PnL realizado: ${snapshot.account.realizedPnl.toFixed(2)} | Win rate: ${snapshot.account.winRate.toFixed(1)}% (${snapshot.account.totalTrades} trades)

@@ -16,22 +16,22 @@ export const RISK_CONFIG = {
   MAX_SPREAD_PIPS: 5.0,    // Retrocompatibilidade
   MAX_USD_EXPOSURE: 3.0,   // 3.0R (permite até 3 operações simultâneas na mesma ponta na cesta de 5 pares)
 
-  // Kill-switch de sinais (reversível): mantém apenas o subconjunto com edge observado.
-  // ABSORPTION_BUY = vencedor (+0,62R/trade); WHALE_AGGRESSION = raro/neutro.
-  // BOOK_IMBALANCE e ABSORPTION_SELL ficaram 0/5 nos dados (desligados).
-  ALLOWED_SIGNAL_TYPES: ['ABSORPTION_BUY', 'WHALE_AGGRESSION'],
+  // ─── MODO LABORATÓRIO (exploração ampla; reversível) ───
+  // Todos os tipos de sinal habilitados (BUY e SELL) para coletar dados de exploração.
+  ALLOWED_SIGNAL_TYPES: ['ABSORPTION_BUY', 'ABSORPTION_SELL', 'BOOK_IMBALANCE', 'WHALE_AGGRESSION'],
 
-  // ─── Controle de potência e concentração (reversível) ───
-  MAX_POWER_MULTIPLIER: 3.0,      // teto no notional = SUPERNOVA_POWER (3x); 4x/5x historicamente perdedores
-  MIN_TRADES_FOR_HIGH_POWER: 3,   // cold-start: par com <3 trades fechados fica em 1.5x (Base Quant)
-  MAX_SAME_SIDE_POSITIONS: 2,     // máx. 2 posições simultâneas no mesmo lado (BUY/SELL)
+  // Potência liberada até 5x, sem trava de cold-start, concorrência sem limite.
+  // ⚠️ Os circuit-breakers determinísticos (lockout −3R/dia e safe-halt 15% DD) PERMANECEM ativos como rede de segurança.
+  MAX_POWER_MULTIPLIER: 5.0,
+  MIN_TRADES_FOR_HIGH_POWER: 0,
+  MAX_SAME_SIDE_POSITIONS: 999,
 
   // ─── IA Controladora de Postura (reversível; kill-switch = AI_POSTURE_ENABLED:false) ───
   AI_POSTURE_ENABLED: true,
   AI_POSTURE_INTERVAL_MS: 10 * 60 * 1000, // 10 min entre consultas autônomas
   AI_POSTURE_TIMEOUT_MS: 45000,           // timeout por chamada ao omniroute
-  AI_POSTURE_MODEL: 'auto/best-coding',
-  AI_POSTURE_MAX_POWER: 3.0,              // piso/teto de potência que a IA pode ajustar
+  AI_POSTURE_MODEL: 'auto/best-fast',
+  AI_POSTURE_MAX_POWER: 5.0,              // piso/teto de potência que a IA pode ajustar
   AI_POSTURE_MIN_POWER: 1.5,
 
   // Caminho do log de auditoria

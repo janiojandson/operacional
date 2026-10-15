@@ -43,7 +43,7 @@ export class PaperTradingEngine {
   private openPositions: Map<string, SimulatedTradeWithTrailing> = new Map();
   private history: SimulatedTradeWithTrailing[] = [];
   private onUpdateCallback?: (account: PaperAccount, newTradeEvent?: SimulatedTrade) => void;
-  private activePairs: Set<string> = new Set(['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT']);
+  private activePairs: Set<string> = new Set(['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'AVAX/USDT', 'LINK/USDT', 'ADA/USDT', 'NEAR/USDT', 'SUI/USDT', 'DOGE/USDT']);
   private minTemperature: number = 1.5;
   private trailingStopEnabled: boolean = true;
   private lastExitTimestamp: Map<string, number> = new Map();
@@ -787,7 +787,7 @@ export class MirrorTradingEngine {
   private openPositions: Map<string, SimulatedTradeWithTrailing> = new Map();
   private history: SimulatedTradeWithTrailing[] = [];
   private onUpdateCallback?: (account: PaperAccount, newTradeEvent?: SimulatedTrade) => void;
-  private activePairs: Set<string> = new Set(['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT']);
+  private activePairs: Set<string> = new Set(['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'AVAX/USDT', 'LINK/USDT', 'ADA/USDT', 'NEAR/USDT', 'SUI/USDT', 'DOGE/USDT']);
   private minTemperature: number = 1.5;
   private trailingStopEnabled: boolean = true;
 
