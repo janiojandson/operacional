@@ -15,6 +15,7 @@ import { permitsDiscretionaryClose } from './engine/fixed3rExitPolicy.js';
 import { PairPerformanceTracker } from './engine/pairPerformanceTracker.js';
 import { AutoPairSelectorEngine, DynamicPairStatus } from './engine/autoPairSelectorEngine.js';
 import { AIAdvisorEngine } from './engine/aiAdvisorEngine.js';
+import { AiPostureEngine, PostureDeps, PostureSnapshot } from './engine/aiPostureEngine.js';
 import { QuantStrategyEngine } from './engine/quantStrategyEngine.js';
 import { ClientCopyTraderEngine } from './engine/clientCopyTraderEngine.js';
 import { AutonomousPairScanner } from './engine/autonomousPairScanner.js';
@@ -951,6 +952,100 @@ setInterval(() => {
   }
 }, 60000);
 
+// ─── IA Controladora de Postura (omniroute direto, interno → externo) ──────
+const aiPosture = new AiPostureEngine();
+
+const postureDeps: PostureDeps = {
+  getAccountState: () => paperTrading.getAccountState(),
+  closePosition: (symbol, price, isMaker, reason) => {
+    const pos = paperTrading.getAccountState().openPositions.find((p) => p.symbol === symbol);
+    if (pos) {
+      void clientCopyTrader.closeRealPositionsBeforeMaster(pos).then((r) => {
+        if (!r.success || (r.errors && r.errors.length > 0)) {
+          console.error('[AiPosture] falha ao fechar posição real:', { symbol, success: r.success, errors: r.errors });
+        }
+      }).catch((e: any) => console.error('[AiPosture] erro ao fechar real:', e.message));
+    }
+    mirrorTrading.closePosition(symbol, price, isMaker, reason);
+    return paperTrading.closePosition(symbol, price, isMaker, reason);
+  },
+  updateStopLoss: (symbol, newStop) => paperTrading.updateStopLoss(symbol, newStop),
+  updateTakeProfit: (symbol, newTarget) => paperTrading.updateTakeProfit(symbol, newTarget),
+  partialClose: (symbol, closePrice, fraction) => paperTrading.partialClose(symbol, closePrice, fraction),
+  setMinTemperature: (t) => paperTrading.setMinTemperature(t),
+  getMinTemperature: () => paperTrading.getMinTemperature(),
+  setActivePairs: (pairs) => paperTrading.setActivePairs(pairs),
+  getActivePairs: () => paperTrading.getActivePairs(),
+  isDailyLockoutActive: () => paperTrading.isDailyLockoutActive(),
+};
+
+function buildPostureSnapshot(): PostureSnapshot {
+  const account = paperTrading.getAccountState();
+  const summaries = marketManager.getSummaries();
+  const pairConfigs = summaries.map((a) => {
+    const cfg = AutoPairSelectorEngine.getPairConfig(a.symbol);
+    return {
+      symbol: a.symbol,
+      regime: cfg?.regime || 'TREND',
+      temperature: cfg?.temperature || 'HOT_MAX_EXTRACT',
+      powerMultiplier: cfg?.powerMultiplier || 1.5,
+      isActiveForTrading: cfg?.isActiveForTrading ?? true,
+    };
+  });
+  const recentClosed = account.history.slice(0, 15).map((t) => ({
+    symbol: t.symbol,
+    type: t.type,
+    netPnl: Number(t.netPnl ?? t.pnlUsd ?? 0),
+    rMultiple: Number(t.rMultiple ?? 0),
+    temperature: t.temperature,
+    session: t.session,
+    closeReason: t.closeReason,
+  }));
+  return { account, pairConfigs, recentClosed };
+}
+
+async function recordAiPostureDecision(source: string, result: {
+  ok: boolean; raw: string; actions: unknown[]; applied: unknown[]; rejected: unknown[]; error?: string;
+}) {
+  try {
+    await query(`CREATE TABLE IF NOT EXISTS ai_posture_decisions (
+      id BIGSERIAL PRIMARY KEY,
+      ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      source TEXT NOT NULL,
+      ok BOOLEAN NOT NULL,
+      raw TEXT,
+      actions TEXT,
+      applied TEXT,
+      rejected TEXT,
+      error TEXT
+    )`);
+    await query(
+      `INSERT INTO ai_posture_decisions (source, ok, raw, actions, applied, rejected, error)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [source, result.ok, result.raw || null, JSON.stringify(result.actions || []), JSON.stringify(result.applied || []), JSON.stringify(result.rejected || []), result.error || null]
+    );
+  } catch (e: any) {
+    console.error('[AiPosture] falha ao gravar auditoria:', e.message);
+  }
+}
+
+async function aiPostureRun(source: string) {
+  if (!aiPosture.isEnabled()) return;
+  const snapshot = buildPostureSnapshot();
+  const result = await aiPosture.consult(snapshot);
+  if (!result.ok) {
+    await recordAiPostureDecision(source, { ok: false, raw: '', actions: [], applied: [], rejected: [], error: result.error });
+    return;
+  }
+  const applied = aiPosture.applyActions(result.actions, postureDeps);
+  await recordAiPostureDecision(source, { ok: true, raw: result.raw, actions: result.actions, applied: applied.applied, rejected: applied.rejected });
+  console.log(`[AiPosture] ${source} -> ${applied.applied.length} aplicadas / ${applied.rejected.length} rejeitadas`);
+}
+
+setInterval(() => {
+  void aiPostureRun('SCHEDULER');
+}, RISK_CONFIG.AI_POSTURE_INTERVAL_MS);
+
 // ─── REST Endpoints (Trading Terminal) ────────────────────────────────────
 // Endpoints públicos de mercado (sem auth, dados públicos)
 app.get('/api/health', (req, res) => {
@@ -1444,6 +1539,36 @@ app.post('/api/ai-advisor/chat', requireAdmin, async (req, res) => {
     console.error('Erro no chat com o consultor IA:', error);
     res.status(500).json({ error: error.message || 'Erro ao processar mensagem com o Consultor IA' });
   }
+});
+
+app.post('/api/ai-copilot/consult', requireAdmin, async (req, res) => {
+  try {
+    if (!aiPosture.isEnabled()) {
+      return res.status(503).json({ success: false, error: 'AI_POSTURE_DESABILITADA_OU_SEM_CONFIG' });
+    }
+    const snapshot = buildPostureSnapshot();
+    const consult = await aiPosture.consult(snapshot);
+    if (!consult.ok) {
+      await recordAiPostureDecision('ON_DEMAND', { ok: false, raw: '', actions: [], applied: [], rejected: [], error: consult.error });
+      return res.json({ success: false, error: consult.error, raw: consult.raw });
+    }
+    const applied = aiPosture.applyActions(consult.actions, postureDeps);
+    await recordAiPostureDecision('ON_DEMAND', { ok: true, raw: consult.raw, actions: consult.actions, applied: applied.applied, rejected: applied.rejected });
+    res.json({ success: true, raw: consult.raw, actions: consult.actions, applied: applied.applied, rejected: applied.rejected });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.get('/api/ai-copilot/status', requireAdmin, (req, res) => {
+  res.json({
+    enabled: RISK_CONFIG.AI_POSTURE_ENABLED,
+    configured: aiPosture.isEnabled(),
+    model: RISK_CONFIG.AI_POSTURE_MODEL,
+    intervalMs: RISK_CONFIG.AI_POSTURE_INTERVAL_MS,
+    powerRange: [RISK_CONFIG.AI_POSTURE_MIN_POWER, RISK_CONFIG.AI_POSTURE_MAX_POWER],
+    lockout: paperTrading.isDailyLockoutActive(),
+  });
 });
 
 app.get('/api/assets/:symbol/state', (req, res) => {

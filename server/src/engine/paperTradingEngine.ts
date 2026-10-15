@@ -728,6 +728,46 @@ export class PaperTradingEngine {
     return { success: true, pnl: netPnl };
   }
 
+  public updateStopLoss(symbol: string, newStop: number): { success: boolean; reason?: string } {
+    const trade = this.openPositions.get(symbol);
+    if (!trade) return { success: false, reason: 'SEM_POSICAO' };
+    if (!Number.isFinite(newStop) || newStop <= 0) return { success: false, reason: 'STOP_INVALIDO' };
+    trade.stopLoss = newStop;
+    this.broadcastUpdate();
+    return { success: true };
+  }
+
+  public updateTakeProfit(symbol: string, newTarget: number): { success: boolean; reason?: string } {
+    const trade = this.openPositions.get(symbol);
+    if (!trade) return { success: false, reason: 'SEM_POSICAO' };
+    if (!Number.isFinite(newTarget) || newTarget <= 0) return { success: false, reason: 'TARGET_INVALIDO' };
+    trade.takeProfit = newTarget;
+    this.broadcastUpdate();
+    return { success: true };
+  }
+
+  public partialClose(symbol: string, closePrice: number, fraction: number): { success: boolean; reason?: string } {
+    const trade = this.openPositions.get(symbol);
+    if (!trade) return { success: false, reason: 'SEM_POSICAO' };
+    const f = Number(fraction);
+    if (!Number.isFinite(f) || f <= 0 || f >= 1) return { success: false, reason: 'FRACAO_INVALIDA' };
+    const notional = trade.notionalUsd ?? (Math.max(100, this.balance * 0.20) * (trade.powerMultiplier / 1.5));
+    const gross = trade.type === 'BUY'
+      ? (closePrice - trade.entryPrice) / trade.entryPrice * notional * f
+      : (trade.entryPrice - closePrice) / trade.entryPrice * notional * f;
+    const fee = Number((notional * f * 0.00055).toFixed(4));
+    const net = Number((gross - fee).toFixed(4));
+    trade.partialTaken = true;
+    trade.partialPnlUsd = Number(((trade.partialPnlUsd || 0) + net).toFixed(4));
+    trade.partialFeeUsd = Number(((trade.partialFeeUsd || 0) + fee).toFixed(4));
+    trade.qty = trade.qty ? Number((trade.qty * (1 - f)).toFixed(8)) : undefined;
+    trade.notionalUsd = trade.notionalUsd ? Number((trade.notionalUsd * (1 - f)).toFixed(4)) : undefined;
+    this.realizedPnl += net;
+    this.balance += net;
+    this.broadcastUpdate(trade);
+    return { success: true, reason: `net=${net}` };
+  }
+
   private broadcastUpdate(eventTrade?: SimulatedTrade) {
     if (this.onUpdateCallback) {
       this.onUpdateCallback(this.getAccountState(), eventTrade);

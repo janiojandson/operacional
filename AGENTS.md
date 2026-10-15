@@ -2,7 +2,7 @@
 **Módulo:** Mercado Financeiro
 **Versão do Agente:** 2.3.0
 **Porta do Serviço:** 4000 (`operacional-production-57d9.up.railway.app`)
-**Governança:** motor determinístico local; Laya e Macro Sentinel removidos do runtime.
+**Governança:** motor determinístico local + camada IA de postura (`aiPostureEngine` via nexus-omniroute). Os circuit-breakers determinísticos (lockout −3R/dia, safe-halt 15% DD, kill-switch `AI_POSTURE_ENABLED`, teto 3×, máx 2 same-side) permanecem autoritativos e NÃO podem ser desligados pela IA. Laya e Macro Sentinel removidos do runtime.
 
 ---
 

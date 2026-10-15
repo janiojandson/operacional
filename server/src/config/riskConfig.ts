@@ -26,6 +26,14 @@ export const RISK_CONFIG = {
   MIN_TRADES_FOR_HIGH_POWER: 3,   // cold-start: par com <3 trades fechados fica em 1.5x (Base Quant)
   MAX_SAME_SIDE_POSITIONS: 2,     // máx. 2 posições simultâneas no mesmo lado (BUY/SELL)
 
+  // ─── IA Controladora de Postura (reversível; kill-switch = AI_POSTURE_ENABLED:false) ───
+  AI_POSTURE_ENABLED: true,
+  AI_POSTURE_INTERVAL_MS: 10 * 60 * 1000, // 10 min entre consultas autônomas
+  AI_POSTURE_TIMEOUT_MS: 45000,           // timeout por chamada ao omniroute
+  AI_POSTURE_MODEL: 'auto/best-coding',
+  AI_POSTURE_MAX_POWER: 3.0,              // piso/teto de potência que a IA pode ajustar
+  AI_POSTURE_MIN_POWER: 1.5,
+
   // Caminho do log de auditoria
   LOG_FILE_PATH: 'audit_shadow_mode.log'
 };
