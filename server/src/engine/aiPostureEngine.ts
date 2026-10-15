@@ -167,7 +167,7 @@ REGRAS:
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.apiKey}` },
           body: JSON.stringify({
-            model: 'auto/best-reasoning',
+            model: this.model,
             messages: [
               { role: 'system', content: system },
               { role: 'user', content: user },

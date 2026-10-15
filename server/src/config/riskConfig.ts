@@ -30,7 +30,7 @@ export const RISK_CONFIG = {
   // ─── IA Controladora de Postura (reversível; kill-switch = AI_POSTURE_ENABLED:false) ───
   AI_POSTURE_ENABLED: true,
   AI_POSTURE_INTERVAL_MS: 10 * 60 * 1000, // 10 min entre consultas autônomas
-  AI_POSTURE_TIMEOUT_MS: 45000,           // timeout por chamada ao omniroute
+  AI_POSTURE_TIMEOUT_MS: 90000,           // timeout por chamada ao omniroute (rotas free levam ~40s)
   AI_POSTURE_MODEL: 'auto/best-fast',
   AI_POSTURE_MAX_POWER: 5.0,              // piso/teto de potência que a IA pode ajustar
   AI_POSTURE_MIN_POWER: 1.5,
