@@ -31,7 +31,8 @@ export const RISK_CONFIG = {
   AI_POSTURE_ENABLED: true,
   AI_POSTURE_INTERVAL_MS: 10 * 60 * 1000, // 10 min entre consultas autônomas
   AI_POSTURE_TIMEOUT_MS: 90000,           // timeout por chamada ao omniroute (rotas free levam ~40s)
-  AI_POSTURE_MODEL: 'auto/best-fast',
+  AI_POSTURE_MODEL: 'deepseek-web/deepseek-v4-flash',  // primário: DeepSeek free (rápido ~2s)
+  AI_POSTURE_FALLBACK_MODEL: 'auto/best-fast',         // fallback: roteador auto (se a chave DeepSeek falhar)
   AI_POSTURE_MAX_POWER: 5.0,              // piso/teto de potência que a IA pode ajustar
   AI_POSTURE_MIN_POWER: 1.5,
 

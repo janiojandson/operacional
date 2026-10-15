@@ -50,14 +50,16 @@ export class AiPostureEngine {
   private enabled: boolean;
   private apiKey: string;
   private model: string;
+  private fallbackModel: string;
   private baseUrls: string[];
   private timeoutMs: number;
 
   constructor() {
     this.enabled = RISK_CONFIG.AI_POSTURE_ENABLED;
     this.apiKey = process.env.OMNIROUTE_API_KEY || '';
-    this.model = RISK_CONFIG.AI_POSTURE_MODEL || 'auto/best-coding';
-    this.timeoutMs = RISK_CONFIG.AI_POSTURE_TIMEOUT_MS || 45000;
+    this.model = RISK_CONFIG.AI_POSTURE_MODEL || 'deepseek-web/deepseek-v4-flash';
+    this.fallbackModel = RISK_CONFIG.AI_POSTURE_FALLBACK_MODEL || 'auto/best-fast';
+    this.timeoutMs = RISK_CONFIG.AI_POSTURE_TIMEOUT_MS || 90000;
     // Prioridade: URL interna do Railway; fallback para a pública.
     this.baseUrls = [
       process.env.OMNIROUTE_BASE_URL_INTERNAL,
@@ -67,6 +69,29 @@ export class AiPostureEngine {
 
   public isEnabled(): boolean {
     return this.enabled && this.baseUrls.length > 0 && Boolean(this.apiKey);
+  }
+
+  private async callModel(model: string, system: string, user: string): Promise<string | null> {
+    for (const base of this.baseUrls) {
+      try {
+        const response = await fetch(`${base}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.apiKey}` },
+          body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+        if (!response.ok) {
+          console.warn(`[AiPosture] omniroute ${base} model=${model} -> ${response.status}`);
+          continue;
+        }
+        const data = (await response.json()) as any;
+        const raw = data?.choices?.[0]?.message?.content || '';
+        if (raw) return raw;
+      } catch (e: any) {
+        console.warn(`[AiPosture] falha ${base} model=${model}: ${e.message}`);
+      }
+    }
+    return null;
   }
 
   private buildPrompt(snapshot: PostureSnapshot): { system: string; user: string } {
@@ -112,41 +137,25 @@ Analise o momento e retorne as ações de postura em JSON (ou ações vazias).`;
     return { system, user };
   }
 
-  public async consult(snapshot: PostureSnapshot): Promise<{ ok: boolean; raw: string; actions: PostureAction[]; error?: string }> {
+  public async consult(snapshot: PostureSnapshot): Promise<{ ok: boolean; raw: string; actions: PostureAction[]; error?: string; usedFallback?: boolean }> {
     if (!this.isEnabled()) return { ok: false, raw: '', actions: [], error: 'AI_POSTURE_DESABILITADA_OU_SEM_CONFIG' };
     const { system, user } = this.buildPrompt(snapshot);
 
-    for (const base of this.baseUrls) {
-      try {
-        const response = await fetch(`${base}/chat/completions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.apiKey}` },
-          body: JSON.stringify({
-            model: this.model,
-            messages: [
-              { role: 'system', content: system },
-              { role: 'user', content: user },
-            ],
-          }),
-          signal: AbortSignal.timeout(this.timeoutMs),
-        });
-        if (!response.ok) {
-          console.warn(`[AiPosture] omniroute ${base} respondeu ${response.status}`);
-          continue;
-        }
-        const data = (await response.json()) as any;
-        const raw = data?.choices?.[0]?.message?.content || '';
-        const parsed = extractJson(raw);
-        const actions = Array.isArray(parsed?.actions) ? (parsed.actions as PostureAction[]) : [];
-        return { ok: true, raw, actions };
-      } catch (e: any) {
-        console.warn(`[AiPosture] falha em ${base}: ${e.message}`);
-      }
+    let raw = await this.callModel(this.model, system, user);
+    let usedFallback = false;
+    if (raw === null && this.fallbackModel && this.fallbackModel !== this.model) {
+      usedFallback = true;
+      console.warn(`[AiPosture] ⚠️ modelo primário ${this.model} indisponível; usando fallback ${this.fallbackModel}`);
+      raw = await this.callModel(this.fallbackModel, system, user);
     }
-    return { ok: false, raw: '', actions: [], error: 'OMNIROUTE_INDISPONIVEL' };
+    if (raw === null) return { ok: false, raw: '', actions: [], error: 'OMNIROUTE_INDISPONIVEL', usedFallback };
+
+    const parsed = extractJson(raw);
+    const actions = Array.isArray(parsed?.actions) ? (parsed.actions as PostureAction[]) : [];
+    return { ok: true, raw, actions, usedFallback };
   }
 
-  public async consultPairs(market: Array<{ symbol: string; change24h: number; volume24h: number }>): Promise<{ ok: boolean; raw: string; add: string[]; remove: string[]; error?: string }> {
+  public async consultPairs(market: Array<{ symbol: string; change24h: number; volume24h: number }>): Promise<{ ok: boolean; raw: string; add: string[]; remove: string[]; error?: string; usedFallback?: boolean }> {
     if (!this.isEnabled()) return { ok: false, raw: '', add: [], remove: [], error: 'AI_POSTURE_DESABILITADA_OU_SEM_CONFIG' };
     const symbolList = market
       .map((m) => `${m.symbol} (24h ${(m.change24h || 0).toFixed(1)}%, vol $${((m.volume24h || 0) / 1e6).toFixed(1)}M)`)
@@ -161,32 +170,19 @@ REGRAS:
 
     const user = `PARES ATUAIS:\n${symbolList}\n\nSugira add/remove em JSON.`;
 
-    for (const base of this.baseUrls) {
-      try {
-        const response = await fetch(`${base}/chat/completions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.apiKey}` },
-          body: JSON.stringify({
-            model: this.model,
-            messages: [
-              { role: 'system', content: system },
-              { role: 'user', content: user },
-            ],
-          }),
-          signal: AbortSignal.timeout(this.timeoutMs),
-        });
-        if (!response.ok) continue;
-        const data = (await response.json()) as any;
-        const raw = data?.choices?.[0]?.message?.content || '';
-        const parsed = extractJson(raw);
-        const add = Array.isArray(parsed?.add) ? (parsed.add as any[]).filter((s) => typeof s === 'string') : [];
-        const remove = Array.isArray(parsed?.remove) ? (parsed.remove as any[]).filter((s) => typeof s === 'string') : [];
-        return { ok: true, raw, add, remove };
-      } catch (e: any) {
-        console.warn(`[AiPosture] consultPairs falha em ${base}: ${e.message}`);
-      }
+    let raw = await this.callModel(this.model, system, user);
+    let usedFallback = false;
+    if (raw === null && this.fallbackModel && this.fallbackModel !== this.model) {
+      usedFallback = true;
+      console.warn(`[AiPosture] ⚠️ modelo primário ${this.model} indisponível (pares); usando fallback ${this.fallbackModel}`);
+      raw = await this.callModel(this.fallbackModel, system, user);
     }
-    return { ok: false, raw: '', add: [], remove: [], error: 'OMNIROUTE_INDISPONIVEL' };
+    if (raw === null) return { ok: false, raw: '', add: [], remove: [], error: 'OMNIROUTE_INDISPONIVEL', usedFallback };
+
+    const parsed = extractJson(raw);
+    const add = Array.isArray(parsed?.add) ? (parsed.add as any[]).filter((s) => typeof s === 'string') : [];
+    const remove = Array.isArray(parsed?.remove) ? (parsed.remove as any[]).filter((s) => typeof s === 'string') : [];
+    return { ok: true, raw, add, remove, usedFallback };
   }
 
   public applyActions(actions: PostureAction[], deps: PostureDeps): ApplyResult {

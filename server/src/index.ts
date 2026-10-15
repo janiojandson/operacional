@@ -1005,7 +1005,7 @@ function buildPostureSnapshot(): PostureSnapshot {
 }
 
 async function recordAiPostureDecision(source: string, result: {
-  ok: boolean; raw: string; actions: unknown[]; applied: unknown[]; rejected: unknown[]; error?: string;
+  ok: boolean; raw: string; actions: unknown[]; applied: unknown[]; rejected: unknown[]; error?: string; usedFallback?: boolean;
 }) {
   try {
     await query(`CREATE TABLE IF NOT EXISTS ai_posture_decisions (
@@ -1019,11 +1019,15 @@ async function recordAiPostureDecision(source: string, result: {
       rejected TEXT,
       error TEXT
     )`);
+    await query(`ALTER TABLE ai_posture_decisions ADD COLUMN IF NOT EXISTS fallback BOOLEAN`);
     await query(
-      `INSERT INTO ai_posture_decisions (source, ok, raw, actions, applied, rejected, error)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [source, result.ok, result.raw || null, JSON.stringify(result.actions || []), JSON.stringify(result.applied || []), JSON.stringify(result.rejected || []), result.error || null]
+      `INSERT INTO ai_posture_decisions (source, ok, raw, actions, applied, rejected, error, fallback)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [source, result.ok, result.raw || null, JSON.stringify(result.actions || []), JSON.stringify(result.applied || []), JSON.stringify(result.rejected || []), result.error || null, result.usedFallback ? true : false]
     );
+    if (result.usedFallback) {
+      console.error(`[AiPosture] ⚠️ FALLBACK UTILIZADO (source=${source}) — chave/modelo primário pode estar com problema.`);
+    }
   } catch (e: any) {
     console.error('[AiPosture] falha ao gravar auditoria:', e.message);
   }
@@ -1034,11 +1038,11 @@ async function aiPostureRun(source: string) {
   const snapshot = buildPostureSnapshot();
   const result = await aiPosture.consult(snapshot);
   if (!result.ok) {
-    await recordAiPostureDecision(source, { ok: false, raw: '', actions: [], applied: [], rejected: [], error: result.error });
+    await recordAiPostureDecision(source, { ok: false, raw: '', actions: [], applied: [], rejected: [], error: result.error, usedFallback: result.usedFallback });
     return;
   }
   const applied = aiPosture.applyActions(result.actions, postureDeps);
-  await recordAiPostureDecision(source, { ok: true, raw: result.raw, actions: result.actions, applied: applied.applied, rejected: applied.rejected });
+  await recordAiPostureDecision(source, { ok: true, raw: result.raw, actions: result.actions, applied: applied.applied, rejected: applied.rejected, usedFallback: result.usedFallback });
   console.log(`[AiPosture] ${source} -> ${applied.applied.length} aplicadas / ${applied.rejected.length} rejeitadas`);
 }
 
@@ -1549,12 +1553,12 @@ app.post('/api/ai-copilot/consult', requireAdmin, async (req, res) => {
     const snapshot = buildPostureSnapshot();
     const consult = await aiPosture.consult(snapshot);
     if (!consult.ok) {
-      await recordAiPostureDecision('ON_DEMAND', { ok: false, raw: '', actions: [], applied: [], rejected: [], error: consult.error });
-      return res.json({ success: false, error: consult.error, raw: consult.raw });
+      await recordAiPostureDecision('ON_DEMAND', { ok: false, raw: '', actions: [], applied: [], rejected: [], error: consult.error, usedFallback: consult.usedFallback });
+      return res.json({ success: false, error: consult.error, raw: consult.raw, usedFallback: consult.usedFallback });
     }
     const applied = aiPosture.applyActions(consult.actions, postureDeps);
-    await recordAiPostureDecision('ON_DEMAND', { ok: true, raw: consult.raw, actions: consult.actions, applied: applied.applied, rejected: applied.rejected });
-    res.json({ success: true, raw: consult.raw, actions: consult.actions, applied: applied.applied, rejected: applied.rejected });
+    await recordAiPostureDecision('ON_DEMAND', { ok: true, raw: consult.raw, actions: consult.actions, applied: applied.applied, rejected: applied.rejected, usedFallback: consult.usedFallback });
+    res.json({ success: true, raw: consult.raw, actions: consult.actions, applied: applied.applied, rejected: applied.rejected, usedFallback: consult.usedFallback });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -1575,7 +1579,7 @@ app.get('/api/ai-copilot/decisions', requireAdmin, async (req, res) => {
   try {
     const limit = Math.min(Number(req.query?.limit) || 50, 200);
     const rows = await query(
-      `SELECT id, ts, source, ok, raw, actions, applied, rejected, error FROM ai_posture_decisions ORDER BY id DESC LIMIT $1`,
+      `SELECT id, ts, source, ok, raw, actions, applied, rejected, error, fallback FROM ai_posture_decisions ORDER BY id DESC LIMIT $1`,
       [limit]
     );
     res.json({ decisions: rows });

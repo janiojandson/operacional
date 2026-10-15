@@ -29,6 +29,7 @@ interface Decision {
   applied: string | null;
   rejected: string | null;
   error: string | null;
+  fallback: boolean | null;
 }
 
 function safeParse<T>(raw: string | null): T | null {
@@ -164,6 +165,9 @@ export default function AiCopilotPanel() {
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${d.source === 'SCHEDULER' ? 'bg-cyan-500/20 text-cyan-300' : 'bg-violet-500/20 text-violet-300'}`}>{d.source}</span>
                   </div>
                   <span className={`text-[10px] font-bold ${d.ok ? 'text-emerald-400' : 'text-rose-400'}`}>{d.ok ? 'OK' : (d.error || 'ERRO')}</span>
+                  {d.fallback && (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">⚠ FALLBACK</span>
+                  )}
                 </div>
                 {applied.length > 0 && (
                   <div className="text-xs text-emerald-300 font-mono">✓ {applied.map((a: any) => a?.detail || JSON.stringify(a)).join(' · ')}</div>
