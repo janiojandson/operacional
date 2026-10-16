@@ -61,18 +61,33 @@ app.use(helmet({
 }));
 
 // CORS: restringir origem em produção
-const allowedOrigins = process.env.ALLOWED_ORIGINS
+const defaultAllowedOrigins = [
+  'http://localhost:4000',
+  'http://localhost:5173',
+  'https://mercado.uebamix.com.br',
+  'http://mercado.uebamix.com.br'
+];
+
+const envAllowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : ['http://localhost:4000', 'http://localhost:5173'];
+  : [];
+
+const allowedOrigins = Array.from(new Set([...defaultAllowedOrigins, ...envAllowedOrigins]));
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Permitir sem origin (Postman, Railway internal, mobile apps)
+    // Permitir sem origin (Postman, Railway/Oracle internal, mobile apps, curl)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
+    if (
+      process.env.NODE_ENV !== 'production' ||
+      allowedOrigins.includes(origin) ||
+      origin.endsWith('.uebamix.com.br') ||
+      origin === 'https://uebamix.com.br'
+    ) {
       return callback(null, true);
     }
-    callback(new Error(`Origem não autorizada: ${origin}`));
+    // Retorna false em vez de erro para não estourar HTTP 500 no Express
+    callback(null, false);
   },
   credentials: true
 }));
